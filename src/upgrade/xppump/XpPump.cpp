@@ -25,10 +25,12 @@
 #include "game/PlayerScan.h"
 #include "mod/Config.h"
 #include "mod/I18n.h"
+#include "mod/Module.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/tank/MenuBits.h"
+#include "upgrade/magnet/Magnet.h"
 #include "upgrade/tank/Tank.h"
 
 namespace abp::upgrade::xppump {
@@ -216,6 +218,39 @@ void autoCycle(Player& player, UpgradeContext const& ctx) {
     else if (diff < 0 && (s.mode == Mode::Give || s.mode == Mode::Both)) toPlayer(player, ctx, -diff);
 }
 
+/// The first enabled XP pump of `backpack`.
+std::optional<UpgradeContext> activeXpPump(std::shared_ptr<game::Backpack> const& backpack) {
+    std::optional<UpgradeContext> out;
+    forEachInstalled(backpack, true, [&](IUpgrade& u, UpgradeContext const& ctx) {
+        if (!out && u.info().id == kId) out = ctx;
+    });
+    return out;
+}
+
+/// XP orbs collected by a Magnet upgrade of the same backpack: in a storing mode the XP pump keeps
+/// what the carrier doesn't need to reach the target level; the rest goes to the carrier.
+int magnetXp(UpgradeContext const& magnet, Player* carrier, int amount) {
+    if (amount <= 0) return 0;
+    auto pump = activeXpPump(magnet.backpackPtr());
+    if (!pump) return 0;
+    auto s = Settings::of(*pump);
+    if (s.mode != Mode::Store && s.mode != Mode::Both) return 0;
+    long long keep = amount;
+    if (carrier) keep -= std::max(0LL, -core::xp::keepLevel(playerXp(*carrier), s.keep));
+    if (keep <= 0) return 0;
+    return static_cast<int>(store(*pump, keep));
+}
+
+/// Registers the XP pump as an XP consumer of the Magnet upgrade.
+class XpPumpMagnetHook {
+public:
+    void install() { magnet::addXpConsumer(std::string(kOwner), 10, &magnetXp); }
+    void uninstall() { magnet::removeXpConsumers(std::string(kOwner)); }
+
+private:
+    static constexpr std::string_view kOwner = "xppump";
+};
+
 namespace {
 
 // ---- menu ---------------------------------------------------------------------------------------
@@ -358,9 +393,6 @@ public:
 
     void onTick(TickContext const& tick) override { autoCycle(tick.player, tick.ctx.withPlayer(&tick.player)); }
 
-    void openSettings(Player& player, UpgradeContext const& ctx) override {
-        fluidui::openFresh(player, createSettingsMenu(player, ctx));
-    }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         return std::make_shared<XpPumpMenu>(ctx, displayName(*this, &player));
@@ -481,6 +513,24 @@ ABP_REGISTER_SELFTEST("xppump.mending", [](Context& ctx) {
     game::setItemAt(player, where, ItemStack{});
 });
 
+ABP_REGISTER_SELFTEST("xppump.magnet", [](Context& ctx) {
+    auto& player = ctx.player();
+    auto  bp     = ctx.createBackpack(core::Tier::Iron);
+    UpgradeContext magnetCtx(bp, ctx.installUpgrade(bp, std::string(magnet::kBasicId)));
+    auto           pump = setupPump(ctx, bp, Mode::Store, 0);
+    setPlayerXp(player, 0);
+    ctx.check(magnet::offerXp(magnetCtx, &player, 50) == 0, "magnet XP all taken by the XP pump");
+    ctx.check(stored(pump) == 50, "50 points stored");
+    auto s = Settings::of(pump);
+    s.keep = 1; // the carrier needs 7 points to reach level 1: those go to the carrier
+    s.save(pump);
+    ctx.check(magnet::offerXp(magnetCtx, &player, 10) == 7, "7 points left for the carrier");
+    ctx.check(stored(pump) == 53, "3 points stored");
+    s.mode = Mode::Give;
+    s.save(pump);
+    ctx.check(magnet::offerXp(magnetCtx, &player, 10) == 10, "give-only mode stores nothing");
+});
+
 ABP_REGISTER_SELFTEST("xppump.menu", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& mm     = ui::MenuManager::get();
     auto& player = ctx.player();
@@ -521,4 +571,5 @@ ABP_REGISTER_SELFTEST("xppump.menu", [](Context& ctx) -> ll::coro::CoroTask<> {
 } // namespace abp::upgrade::xppump
 
 ABP_REGISTER_CONFIG("xppump", abp::upgrade::xppump::XpPumpConfig);
+ABP_REGISTER_MODULE(abp::upgrade::xppump::XpPumpMagnetHook);
 ABP_REGISTER_UPGRADE(abp::upgrade::xppump::XpPumpUpgrade);

@@ -454,9 +454,6 @@ public:
         pumpCycle(tick.player, tick.ctx.withPlayer(&tick.player));
     }
 
-    void openSettings(Player& player, UpgradeContext const& ctx) override {
-        fluidui::openFresh(player, createSettingsMenu(player, ctx));
-    }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         return std::make_shared<PumpMenu>(ctx, displayName(*this, &player));

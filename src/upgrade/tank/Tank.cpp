@@ -473,9 +473,6 @@ public:
         return kInfo;
     }
 
-    void openSettings(Player& player, UpgradeContext const& ctx) override {
-        fluidui::openFresh(player, createSettingsMenu(player, ctx));
-    }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         return std::make_shared<TankMenu>(ctx, displayName(*this, &player));
