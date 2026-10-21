@@ -608,6 +608,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         for (int i = 0; i < 36; ++i) {
             auto const& pos = mLayout.playerSlots[static_cast<std::size_t>(i)];
             float       x = L + static_cast<float>(pos.x), y = T + static_cast<float>(pos.y);
+            sb::slotFrame(p, x, y); // part of SC's storage background texture
             auto const& s = inv.getItem(i);
             if (!s.isNull()) {
                 p.item(s, x, y);
@@ -1500,6 +1501,7 @@ void BackpackScreenLayer::renderSettings(Painter& p, cs::BackpackScreenModel con
         for (int i = 0; i < 36; ++i) {
             auto const& pos = mLayout.playerSlots[static_cast<std::size_t>(i)];
             auto const& s   = inv.getItem(i);
+            sb::slotFrame(p, mLeft + static_cast<float>(pos.x), mTop + static_cast<float>(pos.y));
             if (!s.isNull()) p.item(s, mLeft + static_cast<float>(pos.x), mTop + static_cast<float>(pos.y));
         }
     }
