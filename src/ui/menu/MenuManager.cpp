@@ -889,20 +889,26 @@ bool MenuManager::handleClosePacket(Player& player, int containerId) {
     auto key = keyOf(player);
     auto it  = mSessions.find(key);
     bool ours = it != mSessions.end() && it->second->id == containerId;
+    // The client waits for the server to confirm its ContainerClose; until then it ignores new
+    // ContainerOpen packets (so a menu opened right after a server-side close would never show).
+    auto confirm = [&] {
+        auto  pkt               = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
+        auto& c                 = static_cast<ContainerClosePacket&>(*pkt);
+        c.mContainerId          = static_cast<ContainerID>(containerId);
+        c.mContainerType        = SharedTypes::Legacy::ContainerType::Container;
+        c.mServerInitiatedClose = false;
+        c.sendTo(player);
+    };
     if (!ours) {
-        // A late close for a menu we already closed server-side: swallow it.
+        // A late close for a menu we already closed server-side: confirm and swallow it.
         if (auto c = mClosedIds.find(key); c != mClosedIds.end() && c->second == containerId) {
             mClosedIds.erase(c);
+            confirm();
             return true;
         }
         return false;
     }
-    auto  pkt               = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
-    auto& c                 = static_cast<ContainerClosePacket&>(*pkt);
-    c.mContainerId          = static_cast<ContainerID>(containerId);
-    c.mContainerType        = SharedTypes::Legacy::ContainerType::Container;
-    c.mServerInitiatedClose = false;
-    c.sendTo(player);
+    confirm();
     finish(&player, key, false);
     mClosedIds.erase(key);
     return true;
