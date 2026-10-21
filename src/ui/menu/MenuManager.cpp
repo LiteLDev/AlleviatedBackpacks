@@ -317,6 +317,11 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose) {
             });
         }
     }
+    try {
+        s->menu->onDestroyed();
+    } catch (std::exception const& e) {
+        log().error("menu onDestroyed failed: {}", e.what());
+    }
 }
 
 void MenuManager::runDeferred() {
@@ -386,15 +391,17 @@ void MenuManager::forceShown(Player& player) {
 }
 
 void MenuManager::tick() {
+    // Collect due tasks first: running them may schedule new ones (push_back into mDelayed).
+    std::vector<std::function<void()>> due;
     for (auto it = mDelayed.begin(); it != mDelayed.end();) {
         if (--it->ticks <= 0) {
-            auto fn = std::move(it->fn);
-            it      = mDelayed.erase(it);
-            fn();
+            due.push_back(std::move(it->fn));
+            it = mDelayed.erase(it);
         } else {
             ++it;
         }
     }
+    for (auto& fn : due) fn();
     std::vector<std::int64_t> keys;
     keys.reserve(mSessions.size());
     for (auto& [k, _] : mSessions) keys.push_back(k);
@@ -435,10 +442,13 @@ void MenuManager::tick() {
         } catch (std::exception const& e) {
             log().error("menu onTick failed: {}", e.what());
         }
-        if (!mSessions.contains(key)) continue; // closed by onTick
-        if (--s.diffIn <= 0 || s.menu->needsBuild()) {
-            s.diffIn = kDiffEvery;
-            sync(*player, s, false);
+        // onTick may have closed the menu or replaced it (then `s` is gone): look it up again.
+        auto again = mSessions.find(key);
+        if (again == mSessions.end() || again->second->menu != menuRef) continue;
+        auto& cur = *again->second;
+        if (--cur.diffIn <= 0 || cur.menu->needsBuild()) {
+            cur.diffIn = kDiffEvery;
+            sync(*player, cur, false);
         }
     }
     runDeferred();

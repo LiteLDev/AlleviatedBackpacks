@@ -183,6 +183,34 @@ ABP_REGISTER_SELFTEST("upgrade.tick_and_pickup", [](Context& ctx) -> ll::coro::C
     ctx.check(countOf(*bp, "minecraft:apple") == 5, "apples in backpack");
 });
 
+class NestingUpgrade : public upgrade::IUpgrade {
+public:
+    upgrade::UpgradeInfo mInfo{
+        .id           = "selftest_nesting",
+        .itemId       = "minecraft:structure_void",
+        .nameKey      = "abp.selftest.upgrade",
+        .nameFallback = "Selftest Upgrade",
+    };
+    [[nodiscard]] upgrade::UpgradeInfo const& info() const override { return mInfo; }
+    void attach(upgrade::UpgradeContext const& ctx, core::BackpackInventory&) override {
+        ctx.backpack().addCapability("allow_nesting");
+    }
+};
+
+ABP_REGISTER_SELFTEST("upgrade.nesting_cycles", [](Context& ctx) {
+    upgrade::ScopedUpgrade scoped(std::make_shared<NestingUpgrade>());
+    auto                   a = ctx.createBackpack(Tier::Leather);
+    auto                   b = ctx.createBackpack(Tier::Leather);
+    ctx.installUpgrade(a, "selftest_nesting");
+    ctx.installUpgrade(b, "selftest_nesting");
+    core::AccessContext player{core::Source::Player};
+    auto                itemA = game::ItemConv::toData(ctx.backpackItem(*a));
+    auto                itemB = game::ItemConv::toData(ctx.backpackItem(*b));
+    ctx.check(a->inventory().insert(itemA, player).inserted == 0, "a backpack never holds itself");
+    ctx.check(a->inventory().insert(itemB, player).inserted == 1, "allow_nesting capability lets B into A");
+    ctx.check(b->inventory().insert(itemA, player).inserted == 0, "A into B would be a cycle");
+});
+
 // ---- menu ------------------------------------------------------------------------------------
 
 ABP_REGISTER_SELFTEST("menu.open_transfer_close", [](Context& ctx) -> ll::coro::CoroTask<> {

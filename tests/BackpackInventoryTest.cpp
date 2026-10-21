@@ -165,6 +165,28 @@ TEST(BackpackInventory, ResizeAndJson) {
     EXPECT_EQ(inv.size(), 2);
 }
 
+TEST(BackpackInventory, ClearHooksExcept) {
+    BackpackInventory inv(1);
+    int               own = 0, other = 0;
+    inv.addChangeListener("keep", [&](int) { ++own; });
+    inv.addChangeListener("upgrade:0", [&](int) { ++other; });
+    inv.addInsertFilter("upgrade:0", 0, [](InsertQuery const&) { return InsertVerdict::Deny; });
+    inv.clearHooksExcept("keep");
+    EXPECT_EQ(inv.insert(stone(1), kPlayer).inserted, 1);
+    EXPECT_EQ(own, 1);
+    EXPECT_EQ(other, 0);
+}
+
+TEST(BackpackInventory, FromJsonWrongTypes) {
+    auto j = nlohmann::json::parse(R"({"size":"x","items":[5,{"slot":"a"},{"slot":0,"id":3}]})");
+    auto inv = BackpackInventory::fromJson(j);
+    EXPECT_EQ(inv.size(), 0);
+    auto j2   = nlohmann::json::parse(R"({"size":2,"items":[{"slot":0,"id":"minecraft:stone","count":"x"}]})");
+    auto inv2 = BackpackInventory::fromJson(j2);
+    EXPECT_EQ(inv2.size(), 2);
+    EXPECT_TRUE(inv2.at(0).empty());
+}
+
 TEST(BackpackInventory, LargeCounts) {
     BackpackInventory inv(1);
     inv.addLimitModifier("big", 0, [](int, ItemStackData const&, int l) { return l * 64; });

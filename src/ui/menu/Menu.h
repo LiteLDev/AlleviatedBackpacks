@@ -56,9 +56,12 @@ public:
     /// Fill the slots. Called on open and after `invalidate()`.
     virtual void build(Player& player) = 0;
     virtual void onOpen(Player& /*player*/) {}
-    /// Always called exactly once when the menu goes away (closed by the player, replaced by
-    /// another menu, player left/died/teleported, mod disabled).
+    /// Called when the menu goes away while the player is still there (closed by the player,
+    /// replaced by another menu, died/teleported, disconnect, mod disable).
     virtual void onClose(Player& /*player*/) {}
+    /// Always called exactly once when the menu goes away (after `onClose` if that ran), even if
+    /// the player object is already gone. Put cleanup that must not be skipped here.
+    virtual void onDestroyed() {}
     /// Every server tick while open.
     virtual void onTick(Player& /*player*/) {}
     /// Shift-click from the player's inventory into the menu. Returns how many items were

@@ -79,7 +79,7 @@ nlohmann::json Filter::toJson() const {
 
 Filter Filter::fromJson(nlohmann::json const& j, int slots) {
     Filter f;
-    if (j.is_object()) {
+    if (j.is_object()) try {
         f.mode            = j.value("mode", 0) == 1 ? FilterMode::Deny : FilterMode::Allow;
         int mb            = j.value("matchBy", 0);
         f.matchBy         = (mb >= 0 && mb <= 2) ? static_cast<MatchBy>(mb) : MatchBy::Item;
@@ -94,6 +94,8 @@ Filter Filter::fromJson(nlohmann::json const& j, int slots) {
                 if (t.is_string()) f.tags.push_back(t.get<std::string>());
             }
         }
+    } catch (nlohmann::json::exception const&) {
+        f = Filter{}; // wrong field types: default filter
     }
     if (slots >= 0) f.ghosts.resize(static_cast<std::size_t>(slots));
     return f;

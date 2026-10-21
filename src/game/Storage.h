@@ -30,14 +30,17 @@ public:
     /// A level (and its DB) is loaded.
     [[nodiscard]] bool available() const;
 
-    /// Loads (or returns the cached) backpack. nullptr if unknown or unreadable.
-    [[nodiscard]] std::shared_ptr<Backpack> find(std::string const& uuid);
+    enum class LoadStatus { Ok, Missing, Unreadable, NoLevel };
+
+    /// Loads (or returns the cached) backpack. nullptr if unknown or unreadable (see `status`).
+    [[nodiscard]] std::shared_ptr<Backpack> find(std::string const& uuid, LoadStatus* status = nullptr);
     /// Creates and persists a new empty backpack of `tier` with a fresh uuid.
     [[nodiscard]] std::shared_ptr<Backpack> create(core::Tier tier);
     /// The backpack bound to a backpack item. If the item has no uuid yet (or its uuid is unknown in
     /// this world), a new backpack is created and its uuid is written into `stack`; then
     /// `*itemChanged` is set to true and the caller must write the stack back to where it came from.
-    /// nullptr if `stack` is not a backpack.
+    /// nullptr if `stack` is not a backpack, or its stored data exists but can't be read (the item
+    /// is left untouched so the data isn't orphaned).
     [[nodiscard]] std::shared_ptr<Backpack> forItem(ItemStack& stack, bool* itemChanged = nullptr);
 
     /// Writes one backpack now (if dirty or `force`).
@@ -52,15 +55,21 @@ public:
 
     [[nodiscard]] std::size_t loadedCount() const { return mCache.size(); }
 
-    /// Drops cached backpacks nobody else references (after saving them).
+    /// Drops cached backpacks nobody else references and nobody looked up for a while (after
+    /// saving them). Carried backpacks are looked up by the ticker, so they stay loaded.
     void evictUnused();
 
 private:
     void clear(bool save);
 
-    std::unordered_map<std::string, std::shared_ptr<Backpack>> mCache;
-    std::vector<ll::event::ListenerPtr>                        mListeners;
-    int                                                        mTicks = 0;
+    struct Entry {
+        std::shared_ptr<Backpack> backpack;
+        std::int64_t              lastAccess = 0;
+    };
+    std::unordered_map<std::string, Entry> mCache;
+    std::vector<ll::event::ListenerPtr>    mListeners;
+    int                                    mTicks = 0;
+    std::int64_t                           mNow   = 0; ///< server ticks since install
 };
 
 } // namespace abp::game

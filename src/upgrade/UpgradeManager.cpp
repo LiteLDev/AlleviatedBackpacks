@@ -12,6 +12,7 @@
 
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
+#include "game/Storage.h"
 #include "mod/Config.h"
 #include "mod/GeneralConfig.h"
 #include "mod/I18n.h"
@@ -59,6 +60,22 @@ core::ItemStackData embedSettings(core::ItemStackData const& item, nlohmann::jso
 
 bool sameGroupOrId(IUpgrade const& u, std::string_view name) { return u.info().id == name || u.info().groupOrId() == name; }
 
+/// True if backpack `from` contains (at any depth) a backpack item bound to `target`.
+bool reaches(std::string const& from, std::string const& target, int depth = 0) {
+    if (depth > 16) return true; // absurdly deep: treat as a cycle
+    auto bp = game::Storage::get().find(from);
+    if (!bp) return false;
+    auto const& inv = bp->inventory();
+    for (int i = 0; i < inv.size(); ++i) {
+        auto const& item = inv.at(i);
+        if (item.empty() || !game::isBackpack(item)) continue;
+        if (auto uuid = game::backpackUuid(item); uuid && (*uuid == target || reaches(*uuid, target, depth + 1))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Rebuilds the runtime hooks of a backpack: foundation rules + enabled upgrades' attach().
 void buildHooks(game::Backpack& bp) {
     auto  self = bp.shared_from_this();
@@ -69,10 +86,11 @@ void buildHooks(game::Backpack& bp) {
         if (!backpack) return core::InsertVerdict::Allow;
         auto const& cfg = config::get<GeneralConfig>();
         if (game::isBackpack(q.stack)) {
-            if (auto uuid = game::backpackUuid(q.stack); uuid && *uuid == backpack->uuid()) {
+            if (!cfg.allowNesting && !backpack->hasCapability("allow_nesting")) return core::InsertVerdict::Deny;
+            // Never itself, never a backpack that (indirectly) contains this one.
+            if (auto uuid = game::backpackUuid(q.stack); uuid && (*uuid == backpack->uuid() || reaches(*uuid, backpack->uuid()))) {
                 return core::InsertVerdict::Deny;
             }
-            if (!cfg.allowNesting && !backpack->hasCapability("allow_nesting")) return core::InsertVerdict::Deny;
         }
         if (game::isShulkerBox(q.stack.id) && !cfg.allowShulkerBoxes
             && !backpack->hasCapability("allow_shulker_boxes")) {

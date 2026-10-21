@@ -108,7 +108,8 @@ xmake build -y abp-tests; xmake run abp-tests
 - `git config --global core.longpaths true` is required (long LeviLamina header paths).
 - `clang-cl` must be on PATH for xmake's package builds (`C:\Program Files\LLVM\bin`).
 - `xmake-requires.lock` is committed; it holds entries for both target types.
-- In game: `/backpack selftest [glob]` (alias `/abp`; op or server console). Output lines are
+- In game: `/backpack selftest ["glob"]` (alias `/abp`; op or server console). Quote globs that
+  contain `*` or `.`, e.g. `backpack selftest "menu.*"`; the parser rejects them unquoted. Output lines are
   exactly `SELFTEST PASS <name>`, `SELFTEST FAIL <name>: <reason>`, `SELFTEST DONE pass=<N> fail=<M>`.
 - Log contract: `AlleviatedBackpacks enabled` on enable; `AlleviatedBackpacks world ready` when a
   world is available (BDS: at enable; client: every local world load).

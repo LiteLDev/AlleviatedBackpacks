@@ -19,7 +19,8 @@
 namespace abp::game {
 
 namespace {
-constexpr int kAutosaveTicks = 20 * 30;
+constexpr int          kAutosaveTicks   = 20 * 30;
+constexpr std::int64_t kEvictAfterTicks = 20 * 60 * 5; ///< unused for 5 minutes
 
 std::string keyOf(std::string const& uuid) { return "abp:backpack:" + uuid; }
 
@@ -37,31 +38,43 @@ Storage& Storage::get() {
 
 bool Storage::available() const { return levelStorage() != nullptr; }
 
-std::shared_ptr<Backpack> Storage::find(std::string const& uuid) {
-    if (uuid.empty()) return nullptr;
-    if (auto it = mCache.find(uuid); it != mCache.end()) return it->second;
+std::shared_ptr<Backpack> Storage::find(std::string const& uuid, LoadStatus* status) {
+    auto result = [&](LoadStatus s, std::shared_ptr<Backpack> bp = nullptr) {
+        if (status) *status = s;
+        return bp;
+    };
+    if (uuid.empty()) return result(LoadStatus::Missing);
+    if (auto it = mCache.find(uuid); it != mCache.end()) {
+        it->second.lastAccess = mNow;
+        return result(LoadStatus::Ok, it->second.backpack);
+    }
     auto* db = levelStorage();
-    if (!db) return nullptr;
+    if (!db) return result(LoadStatus::NoLevel);
     std::string buffer;
-    if (!db->loadData(keyOf(uuid), buffer, DBHelpers::Category::Uncategorized)) return nullptr;
-    auto data = core::BackpackData::deserialize(buffer);
+    if (!db->loadData(keyOf(uuid), buffer, DBHelpers::Category::Uncategorized)) return result(LoadStatus::Missing);
+    std::optional<core::BackpackData> data;
+    try {
+        data = core::BackpackData::deserialize(buffer);
+    } catch (std::exception const& e) {
+        log().error("backpack {}: {}", uuid, e.what());
+    }
     if (!data) {
-        log().error("backpack {}: stored data is unreadable", uuid);
-        return nullptr;
+        log().error("backpack {}: stored data is unreadable (kept untouched in the world DB)", uuid);
+        return result(LoadStatus::Unreadable);
     }
     data->uuid = uuid;
     auto bp    = std::make_shared<Backpack>(std::move(*data));
     bp->rebuildHooks();
     bp->clearDirty();
-    mCache.emplace(uuid, bp);
-    return bp;
+    mCache.emplace(uuid, Entry{bp, mNow});
+    return result(LoadStatus::Ok, bp);
 }
 
 std::shared_ptr<Backpack> Storage::create(core::Tier tier) {
     if (!available()) return nullptr;
     auto bp = std::make_shared<Backpack>(core::BackpackData::create(core::newUuid(), tier));
     bp->rebuildHooks();
-    mCache.emplace(bp->uuid(), bp);
+    mCache.emplace(bp->uuid(), Entry{bp, mNow});
     save(*bp, true);
     log().debug("backpack {} created ({})", bp->uuid(), core::tierInfo(tier).id);
     return bp;
@@ -72,14 +85,18 @@ std::shared_ptr<Backpack> Storage::forItem(ItemStack& stack, bool* itemChanged) 
     auto tier = backpackTierOf(stack);
     if (!tier) return nullptr;
     if (auto uuid = backpackUuid(stack)) {
-        if (auto bp = find(*uuid)) {
-            // The item may have been upgraded to a higher tier (recipes/upgrades swap the item id).
-            if (bp->tier() != *tier && static_cast<int>(*tier) > static_cast<int>(bp->tier())) {
+        LoadStatus status = LoadStatus::Missing;
+        if (auto bp = find(*uuid, &status)) {
+            // The item was upgraded to a higher tier (tier upgrades swap the item id): grow the
+            // storage. The stored tier is the truth otherwise (a lower-tier item id never shrinks it).
+            if (static_cast<int>(*tier) > static_cast<int>(bp->tier())) {
                 bp->data().setTier(*tier);
                 bp->markDirty();
+                bp->rebuildHooks();
             }
             return bp;
         }
+        if (status != LoadStatus::Missing) return nullptr; // unreadable / no level: don't orphan the data
         log().warn("backpack item references unknown uuid {}; creating a new backpack", *uuid);
     }
     auto bp = create(*tier);
@@ -98,7 +115,7 @@ void Storage::save(Backpack& bp, bool force) {
 }
 
 void Storage::saveDirty() {
-    for (auto& [_, bp] : mCache) save(*bp);
+    for (auto& [_, e] : mCache) save(*e.backpack);
 }
 
 void Storage::erase(std::string const& uuid) {
@@ -109,21 +126,21 @@ void Storage::erase(std::string const& uuid) {
 void Storage::unload(std::string const& uuid) {
     auto it = mCache.find(uuid);
     if (it == mCache.end()) return;
-    save(*it->second);
+    save(*it->second.backpack);
     mCache.erase(it);
 }
 
 void Storage::evictUnused() {
     for (auto it = mCache.begin(); it != mCache.end();) {
-        if (it->second.use_count() == 1) {
-            save(*it->second);
+        auto& e = it->second;
+        if (e.backpack.use_count() == 1 && mNow - e.lastAccess > kEvictAfterTicks) {
+            save(*e.backpack);
             it = mCache.erase(it);
         } else {
             ++it;
         }
     }
 }
-
 void Storage::clear(bool doSave) {
     if (doSave) saveDirty();
     mCache.clear();
@@ -143,6 +160,7 @@ void Storage::install() {
         log().debug("backpacks saved (world stopping)");
     }));
     mListeners.push_back(bus.emplaceListener<ll::event::ServerLevelTickEvent>([this](auto&) {
+        ++mNow;
         if (++mTicks < kAutosaveTicks) return;
         mTicks = 0;
         saveDirty();

@@ -222,6 +222,16 @@ void BackpackInventory::removeHooks(std::string const& owner) {
     drop(mListeners);
 }
 
+void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
+    auto drop = [&](auto& v) {
+        std::erase_if(v, [&](auto const& h) { return h.owner != keepOwner; });
+    };
+    drop(mInsertFilters);
+    drop(mExtractFilters);
+    drop(mLimitModifiers);
+    drop(mListeners);
+}
+
 void BackpackInventory::clearFilters() {
     mInsertFilters.clear();
     mExtractFilters.clear();
@@ -244,11 +254,17 @@ nlohmann::json BackpackInventory::toJson() const {
 }
 
 BackpackInventory BackpackInventory::fromJson(nlohmann::json const& j) {
-    BackpackInventory inv(j.is_object() ? std::max(j.value("size", 0), 0) : 0);
+    int size = 0;
+    if (j.is_object()) {
+        if (auto it = j.find("size"); it != j.end() && it->is_number_integer()) size = std::clamp(it->get<int>(), 0, 100000);
+    }
+    BackpackInventory inv(size);
     if (!j.is_object()) return inv;
     if (auto it = j.find("items"); it != j.end() && it->is_array()) {
         for (auto const& e : *it) {
-            int slot = e.value("slot", -1);
+            if (!e.is_object()) continue;
+            auto s    = e.find("slot");
+            int  slot = (s != e.end() && s->is_number_integer()) ? s->get<int>() : -1;
             if (slot < 0 || slot >= inv.size()) continue;
             inv.mSlots[static_cast<std::size_t>(slot)] = ItemStackData::fromJson(e);
         }

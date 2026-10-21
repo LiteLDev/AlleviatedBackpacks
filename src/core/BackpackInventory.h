@@ -123,6 +123,8 @@ public:
     void removeHooks(std::string const& owner);
     /// Removes all filters and limit modifiers (listeners stay).
     void clearFilters();
+    /// Removes every hook (filters, modifiers, listeners) not owned by `keepOwner`.
+    void clearHooksExcept(std::string_view keepOwner);
 
     // ---- persistence -----------------------------------------------------------------------------
     /// {"size":N,"items":[{"slot":i, ...ItemStackData}]}

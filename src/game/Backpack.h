@@ -56,7 +56,8 @@ public:
         if (!slot.has_value() || slot.type() != typeid(T)) slot = T{};
         return *std::any_cast<T>(&slot);
     }
-    void clearTransient(std::string const& key) { mTransient.erase(key); }
+    /// Drops the entry `key` and every entry whose key starts with `key + ":"`.
+    void clearTransient(std::string const& key);
 
     /// The function `rebuildHooks()` runs (installed by the upgrade module).
     using HookBuilder = std::function<void(Backpack&)>;

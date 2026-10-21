@@ -264,7 +264,7 @@ void BackpackMenu::onTick(Player& player) {
     if (!game::isBackpack(item) || !uuid || *uuid != mBackpack->uuid()) MenuManager::get().close(player);
 }
 
-void BackpackMenu::onClose(Player&) { game::Storage::get().save(*mBackpack); }
+void BackpackMenu::onDestroyed() { game::Storage::get().save(*mBackpack); }
 
 int BackpackMenu::quickMoveIn(Player& player, ItemStack const& stack) {
     if (stack.isNull()) return 0;

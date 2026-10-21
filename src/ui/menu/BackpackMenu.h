@@ -83,7 +83,7 @@ public:
 
     void                         build(Player& player) override;
     void                         onTick(Player& player) override;
-    void                         onClose(Player& player) override;
+    void                         onDestroyed() override;
     int                          quickMoveIn(Player& player, ItemStack const& stack) override;
     [[nodiscard]] std::optional<std::uint64_t> contentVersion() const override;
 

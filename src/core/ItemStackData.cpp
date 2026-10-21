@@ -45,7 +45,7 @@ nlohmann::json ItemStackData::toJson() const {
     return j;
 }
 
-ItemStackData ItemStackData::fromJson(nlohmann::json const& j) {
+ItemStackData ItemStackData::fromJson(nlohmann::json const& j) try {
     ItemStackData s;
     if (!j.is_object()) return s;
     s.id        = j.value("id", std::string{});
@@ -60,6 +60,8 @@ ItemStackData ItemStackData::fromJson(nlohmann::json const& j) {
     if (s.maxStack <= 0) s.maxStack = 1;
     if (s.empty()) return {};
     return s;
+} catch (nlohmann::json::exception const&) {
+    return {}; // wrong field types: treat as empty
 }
 
 } // namespace abp::core

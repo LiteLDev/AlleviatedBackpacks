@@ -26,10 +26,16 @@ try {
     if (-not (Get-Command xmake -ErrorAction SilentlyContinue)) { throw 'xmake not found on PATH' }
     git config --global core.longpaths true | Out-Null
 
+    # xmake needs to be told about Visual Studio 18 (2026) explicitly.
+    $vsArgs = @()
+    foreach ($pf in $env:ProgramFiles, ${env:ProgramFiles(x86)}) {
+        if ($pf -and (Test-Path (Join-Path $pf 'Microsoft Visual Studio\18'))) { $vsArgs = @('--vs=2026'); break }
+    }
+
     $targets = if ($Target -eq 'all') { @('server', 'client') } else { @($Target) }
     foreach ($t in $targets) {
         Write-Host "==> configuring $t ($Mode)"
-        xmake f -a x64 -m $Mode -p windows --target_type=$t -o "build/$t" -y
+        xmake f -a x64 -m $Mode -p windows --target_type=$t -o "build/$t" @vsArgs -y
         if ($LASTEXITCODE) { throw "xmake config failed for $t" }
         Write-Host "==> building $t"
         xmake build -y AlleviatedBackpacks

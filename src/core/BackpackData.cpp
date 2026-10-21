@@ -42,7 +42,7 @@ nlohmann::json BackpackData::toJson() const {
     };
 }
 
-std::optional<BackpackData> BackpackData::fromJson(nlohmann::json const& j) {
+std::optional<BackpackData> BackpackData::fromJson(nlohmann::json const& j) try {
     if (!j.is_object()) return std::nullopt;
     int version = j.value("v", 0);
     if (version < 1 || version > kVersion) return std::nullopt;
@@ -70,6 +70,8 @@ std::optional<BackpackData> BackpackData::fromJson(nlohmann::json const& j) {
     if (auto it = j.find("settings"); it != j.end() && it->is_object()) d.settings = *it;
     d.setTier(d.tier); // ensure the minimum slot counts for the tier
     return d;
+} catch (nlohmann::json::exception const&) {
+    return std::nullopt; // wrong field types: unreadable
 }
 
 std::string BackpackData::serialize() const { return toJson().dump(); }

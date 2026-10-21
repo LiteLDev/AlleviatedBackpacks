@@ -132,6 +132,15 @@ TEST(BackpackData, RejectsBadData) {
     EXPECT_FALSE(BackpackData::deserialize("{\"v\":99,\"tier\":\"iron\"}").has_value());
     EXPECT_FALSE(BackpackData::deserialize("{\"v\":1,\"tier\":\"wood\"}").has_value());
     EXPECT_FALSE(BackpackData::deserialize("[]").has_value());
+    // Wrong field types are "unreadable", never an exception.
+    EXPECT_FALSE(BackpackData::deserialize(R"({"v":"1","tier":"iron"})").has_value());
+    EXPECT_FALSE(BackpackData::deserialize(R"({"v":1,"tier":"iron","uuid":5})").has_value());
+    auto ok = BackpackData::deserialize(R"({"v":1,"tier":"iron","inventory":{"size":"9"},"upgrades":[1,{"item":3}]})");
+    ASSERT_TRUE(ok.has_value());
+    EXPECT_EQ(ok->inventory.size(), 54);
+    auto f = Filter::fromJson(nlohmann::json::parse(R"({"mode":"deny","ghosts":[1,2]})"), 3);
+    EXPECT_EQ(f.mode, FilterMode::Allow);
+    EXPECT_EQ(f.ghosts.size(), 3u);
 }
 
 TEST(BackpackData, SetTierGrows) {
