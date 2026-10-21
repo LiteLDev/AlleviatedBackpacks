@@ -36,5 +36,28 @@ $s = DoubleSlot 18; Click $s[0] $s[1] -Relative
 Wait-LogLine 'menu shown: Smelting Upgrade \(27 slots\)' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 1000
 Save-Screenshot 'smelting-menu' | Out-Null
+
+# Single chest (the furnace menu): same columns, rows centred lower.
+function SingleSlot([int]$i) { @((0.365 + ($i % 9) * 0.035), (0.325 + [math]::Floor($i / 9) * 0.0622)) }
+$sHotbar = { param([int]$i) @((0.365 + $i * 0.035), 0.726) }
+function Shift-Click($xy) {
+    [AbpE2E.Native]::Key(0x10, $false)
+    Click $xy[0] $xy[1] -Relative
+    [AbpE2E.Native]::Key(0x10, $true)
+    Start-Sleep -Milliseconds 600
+}
+
+# 4. Shift-click the raw iron and the coal: they go to the input and fuel slots.
+Shift-Click (& $sHotbar 2)
+Shift-Click (& $sHotbar 3)
+Save-Screenshot 'smelting-loaded' | Out-Null
+# 5. One item takes 10 s in a furnace: watch the burn and progress indicators move.
+Start-Sleep -Seconds 5
+Save-Screenshot 'smelting-progress' | Out-Null
+Start-Sleep -Seconds 17
+Save-Screenshot 'smelting-output' | Out-Null
+# 6. Shift-click the results into the inventory (awards experience).
+Shift-Click (SingleSlot 16)
+Save-Screenshot 'smelting-taken' | Out-Null
 Close-Screen
 Assert-NoErrors
