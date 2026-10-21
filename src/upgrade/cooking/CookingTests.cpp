@@ -7,6 +7,7 @@
 
 #include "game/ItemConv.h"
 #include "selftest/SelfTest.h"
+#include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/cooking/Cooking.h"
@@ -368,5 +369,22 @@ ABP_REGISTER_SELFTEST("cooking.auto_no_recook_chain", [](Context& ctx) {
     ctx.check(countOf(*bp, "minecraft:smooth_stone") == 2, "explicit filter: smooth stone made");
 });
 
+ABP_REGISTER_SELFTEST("cooking.settings_button_opens_menu", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto&                           mm     = ui::MenuManager::get();
+    auto&                           player = ctx.player();
+    std::shared_ptr<game::Backpack> bp;
+    auto                            u = withUpgrade(ctx, bp, "smelting");
+    ctx.require(ctx.give(player, ctx.backpackItem(*bp), 0) == 0, "give backpack");
+    ctx.require(ui::BackpackMenu::openBackpack(player, bp, {}, ui::BackpackMenu::View::Upgrades), "open upgrades page");
+    co_await ctx.ticks(5);
+    mm.forceShown(player);
+    (void)mm.simulate(player, {Action::Take, {Where::Menu, 18 + u.slot()}, {Where::Cursor, 0}, 1});
+    co_await ctx.ticks(7); // the simulated player may be falling: check before it leaves the menu range
+    auto menu = mm.current(player);
+    ctx.require(menu != nullptr, "a menu is open after the settings button");
+    ctx.check(menu->title() == upgradeOf(Kind::Smelting, false).info().nameFallback, "cooking menu open: " + menu->title());
+    ctx.check(mm.isShown(player), "cooking menu shown");
+    mm.close(player);
+});
 } // namespace
 } // namespace abp::upgrade::cooking
