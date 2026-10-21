@@ -298,10 +298,7 @@ public:
     }
 
     void openSettings(Player& player, UpgradeContext const& ctx) override {
-        auto target = ctx.withPlayer(nullptr);
-        crafting::switchMenu(player, [target](Player& p) {
-            ui::MenuManager::get().open(p, makeStonecutterMenu(p, target));
-        });
+        crafting::switchMenu(player, makeStonecutterMenu(player, ctx.withPlayer(nullptr)));
     }
 
     [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {

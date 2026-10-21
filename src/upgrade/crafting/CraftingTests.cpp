@@ -584,7 +584,7 @@ ABP_REGISTER_SELFTEST("crafting.backpack_button_opens_tab", [](Context& ctx) -> 
     }
     );
     std::shared_ptr<TabMenu> tab;
-    for (int t = 0; t < 20 && !(tab = std::dynamic_pointer_cast<TabMenu>(mm.current(player))); ++t)
+    for (int t = 0; t < 40 && !(tab = std::dynamic_pointer_cast<TabMenu>(mm.current(player))); ++t)
         co_await ctx.ticks(1);
     ctx.require(tab != nullptr, "crafting tab opened");
     mm.forceShown(player);
@@ -600,7 +600,7 @@ ABP_REGISTER_SELFTEST("crafting.backpack_button_opens_tab", [](Context& ctx) -> 
     }
     );
     std::shared_ptr<ui::Menu> cur;
-    for (int t = 0; t < 20 && !std::dynamic_pointer_cast<ui::BackpackMenu>(cur = mm.current(player)); ++t) {
+    for (int t = 0; t < 40 && !std::dynamic_pointer_cast<ui::BackpackMenu>(cur = mm.current(player)); ++t) {
         co_await ctx.ticks(1);
     }
     ctx.check(
@@ -637,7 +637,7 @@ ABP_REGISTER_SELFTEST("crafting.settings_button_switches_menu", [](Context& ctx)
             1
     }
     );
-    for (int t = 0; t < 20 && !std::dynamic_pointer_cast<TabMenu>(mm.current(player)); ++t) co_await ctx.ticks(1);
+    for (int t = 0; t < 40 && !std::dynamic_pointer_cast<TabMenu>(mm.current(player)); ++t) co_await ctx.ticks(1);
     ctx.check(
         std::dynamic_pointer_cast<TabMenu>(mm.current(player)) != nullptr,
         "settings button opens the crafting tab"

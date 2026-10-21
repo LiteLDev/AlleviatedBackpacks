@@ -13,6 +13,7 @@
 #include "mod/Config.h"
 #include "mod/GeneralConfig.h"
 #include "mod/I18n.h"
+#include "mod/Log.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
@@ -60,16 +61,31 @@ bool openTab(Player& player, std::shared_ptr<game::Backpack> backpack, std::stri
         if (t.upgradeId != upgradeId || !t.make) continue;
         auto menu = t.make(player, UpgradeContext(std::move(backpack), slot));
         if (!menu) return false;
-        switchMenu(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
+        switchMenu(player, std::move(menu));
         return true;
     }
     return false;
 }
 
-void switchMenu(Player& player, std::function<void(Player&)> open) {
-    auto& mm = ui::MenuManager::get();
-    if (mm.current(player)) mm.closeThen(player, std::move(open));
-    else open(player);
+void switchMenu(Player& player, std::shared_ptr<ui::Menu> menu) {
+    ui::MenuManager::get().swap(player, std::move(menu));
+}
+
+std::shared_ptr<ui::Menu> makeBackpackMenu(Player& player, std::shared_ptr<game::Backpack> backpack) {
+    std::optional<game::ItemLocation> source;
+    std::string                       title;
+    for (auto const& c : game::scanBackpacks(player)) {
+        if (c.uuid && *c.uuid == backpack->uuid()) {
+            source = c.where;
+            title  = game::itemAt(player, c.where).getCustomName();
+            break;
+        }
+    }
+    if (title.empty()) {
+        auto const& info = core::tierInfo(backpack->tier());
+        title            = trFor(player, "abp.backpack." + std::string(info.id), "Backpack");
+    }
+    return std::make_shared<ui::BackpackMenu>(std::move(backpack), source, std::move(title));
 }
 
 // ---- moving items -------------------------------------------------------------------------------
@@ -235,9 +251,7 @@ void TabMenu::buildShared(Player& player) {
         kBackSlot,
         std::make_shared<ui::ButtonSlot>(
             ui::icon("minecraft:chest", trFor(player, "abp.crafting.back", "Back to backpack")),
-            [bp](ui::ClickContext const& c) {
-                switchMenu(c.player, [bp](Player& p) { ui::BackpackMenu::openBackpack(p, bp); });
-            }
+            [bp](ui::ClickContext const& c) { switchMenu(c.player, makeBackpackMenu(c.player, bp)); }
         )
     );
     bool intoBackpack = shiftIntoBackpack();
@@ -312,7 +326,9 @@ void TabMenu::onTick(Player& player) {
     if (!mSource) return;
     auto const& item = game::itemAt(player, *mSource);
     auto        uuid = game::backpackUuid(item);
-    if (!game::isBackpack(item) || !uuid || *uuid != mCtx.backpack().uuid()) ui::MenuManager::get().close(player);
+    if (!game::isBackpack(item) || !uuid || *uuid != mCtx.backpack().uuid()) {
+        ui::MenuManager::get().close(player);
+    }
 }
 
 void TabMenu::onDestroyed() { game::Storage::get().save(mCtx.backpack()); }

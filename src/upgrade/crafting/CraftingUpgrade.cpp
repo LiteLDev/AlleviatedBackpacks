@@ -284,8 +284,7 @@ public:
     }
 
     void openSettings(Player& player, UpgradeContext const& ctx) override {
-        auto target = ctx.withPlayer(nullptr);
-        switchMenu(player, [target](Player& p) { ui::MenuManager::get().open(p, makeCraftingMenu(p, target)); });
+        switchMenu(player, makeCraftingMenu(player, ctx.withPlayer(nullptr)));
     }
 
     [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
