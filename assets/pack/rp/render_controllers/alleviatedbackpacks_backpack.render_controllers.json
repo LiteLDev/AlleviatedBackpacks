@@ -1,0 +1,24 @@
+{
+  "format_version": "1.8.0",
+  "render_controllers": {
+    "controller.render.alleviatedbackpacks.backpack": {
+      "geometry": "Geometry.default",
+      "materials": [
+        {
+          "*": "Material.default"
+        }
+      ],
+      "textures": [
+        "Texture.default"
+      ],
+      "part_visibility": [
+        {
+          "body": "c.item_slot == 'chest'"
+        },
+        {
+          "held": "c.item_slot != 'chest'"
+        }
+      ]
+    }
+  }
+}

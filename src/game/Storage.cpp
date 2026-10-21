@@ -101,9 +101,29 @@ std::shared_ptr<Backpack> Storage::forItem(ItemStack& stack, bool* itemChanged) 
     }
     auto bp = create(*tier);
     if (!bp) return nullptr;
+    auto listeners = mCreateListeners; // a listener may (un)register listeners
+    for (auto& [id, fn] : listeners) {
+        try {
+            fn(stack, bp);
+        } catch (std::exception const& e) {
+            log().error("backpack {}: create listener failed: {}", bp->uuid(), e.what());
+        } catch (...) {
+            log().error("backpack {}: create listener failed", bp->uuid());
+        }
+    }
     setBackpackUuid(stack, bp->uuid());
     if (itemChanged) *itemChanged = true;
     return bp;
+}
+
+int Storage::addCreateListener(CreateListener fn) {
+    int id = ++mNextCreateListener;
+    mCreateListeners.emplace_back(id, std::move(fn));
+    return id;
+}
+
+void Storage::removeCreateListener(int id) {
+    std::erase_if(mCreateListeners, [id](auto const& e) { return e.first == id; });
 }
 
 void Storage::save(Backpack& bp, bool force) {

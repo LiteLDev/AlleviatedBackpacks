@@ -1,0 +1,20 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:attachable": {
+    "description": {
+      "identifier": "alleviatedbackpacks:diamond_backpack",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/alleviatedbackpacks/diamond_backpack"
+      },
+      "geometry": {
+        "default": "geometry.alleviatedbackpacks.backpack"
+      },
+      "render_controllers": [
+        "controller.render.alleviatedbackpacks.backpack"
+      ]
+    }
+  }
+}

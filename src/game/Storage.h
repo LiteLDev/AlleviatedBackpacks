@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -55,6 +56,14 @@ public:
 
     [[nodiscard]] std::size_t loadedCount() const { return mCache.size(); }
 
+    /// Runs when `forItem` creates a new backpack for an item (no uuid yet, or an unknown one),
+    /// before the uuid is written into `stack`. Listeners may fill the new backpack and edit the
+    /// stack's user data (the caller writes the stack back). Used for lazily generated contents,
+    /// e.g. backpacks worn by spawned mobs. Returns an id for `removeCreateListener`.
+    using CreateListener = std::function<void(ItemStack& stack, std::shared_ptr<Backpack> const& backpack)>;
+    int  addCreateListener(CreateListener fn);
+    void removeCreateListener(int id);
+
     /// Drops cached backpacks nobody else references and nobody looked up for a while (after
     /// saving them). Carried backpacks are looked up by the ticker, so they stay loaded.
     void evictUnused();
@@ -68,6 +77,8 @@ private:
     };
     std::unordered_map<std::string, Entry> mCache;
     std::vector<ll::event::ListenerPtr>    mListeners;
+    std::vector<std::pair<int, CreateListener>> mCreateListeners;
+    int                                    mNextCreateListener = 0;
     int                                    mTicks = 0;
     std::int64_t                           mNow   = 0; ///< server ticks since install
 };

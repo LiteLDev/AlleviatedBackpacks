@@ -8,6 +8,7 @@
     "components": {
       "minecraft:icon": "abp_iron_backpack",
       "minecraft:max_stack_size": 1,
+      "minecraft:wearable": { "slot": "slot.armor.chest", "protection": 0 },
       "minecraft:display_name": { "value": "item.alleviatedbackpacks:iron_backpack.name" }
     }
   }
