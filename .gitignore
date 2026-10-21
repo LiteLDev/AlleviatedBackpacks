@@ -30,3 +30,4 @@ tools/e2e/**/*.log
 # Agent-local files
 .claude/worktrees/
 .claude/settings.local.json
+tools/textures/preview/

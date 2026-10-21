@@ -1,0 +1,20 @@
+{
+  "abp_leather_backpack": {
+    "textures": "textures/items/leather_backpack"
+  },
+  "abp_copper_backpack": {
+    "textures": "textures/items/copper_backpack"
+  },
+  "abp_iron_backpack": {
+    "textures": "textures/items/iron_backpack"
+  },
+  "abp_gold_backpack": {
+    "textures": "textures/items/gold_backpack"
+  },
+  "abp_diamond_backpack": {
+    "textures": "textures/items/diamond_backpack"
+  },
+  "abp_netherite_backpack": {
+    "textures": "textures/items/netherite_backpack"
+  }
+}
