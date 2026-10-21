@@ -1,0 +1,11 @@
+{
+  "abp.api.fluid.water": "水",
+  "abp.api.fluid.lava": "熔岩",
+  "abp.api.fluid.milk": "牛奶",
+  "abp.api.fluid.powder_snow": "细雪",
+  "abp.api.fluid.honey": "蜂蜜",
+  "abp.api.fluid.potion": "药水",
+  "abp.api.fluid.splash_potion": "喷溅药水",
+  "abp.api.fluid.lingering_potion": "滞留药水",
+  "abp.api.fluid.experience": "液态经验"
+}
