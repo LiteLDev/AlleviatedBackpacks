@@ -16,7 +16,7 @@
   "abp.cooking.progress.no_recipe": "§c此物品无法在这里烹炼",
   "abp.cooking.filter.input": "输入过滤",
   "abp.cooking.filter.fuel": "燃料过滤",
-  "abp.cooking.filter.label": "↑ 输入过滤 · ↓ 燃料过滤",
+  "abp.cooking.filter.label": "第一行：输入过滤 · 第二行：燃料过滤",
   "abp.cooking.filter.help": "§7放入物品以匹配；留空 = 任意物品",
   "abp.cooking.filter.help_fuel": "§7只有燃料白名单中列出的可烹炼物品才会被当作燃料",
   "abp.cooking.filter.help_products": "§7自己产出的物品不会再次烹炼，除非输入白名单中列出它们",

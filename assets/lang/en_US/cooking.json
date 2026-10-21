@@ -16,7 +16,7 @@
   "abp.cooking.progress.no_recipe": "§cThis can't be cooked here",
   "abp.cooking.filter.input": "Input filter",
   "abp.cooking.filter.fuel": "Fuel filter",
-  "abp.cooking.filter.label": "↑ Input filter · ↓ Fuel filter",
+  "abp.cooking.filter.label": "Top row: input filter · second row: fuel filter",
   "abp.cooking.filter.help": "§7Place items to match; empty = anything",
   "abp.cooking.filter.help_fuel": "§7Cookable inputs are burnt only if the fuel allow list names them",
   "abp.cooking.filter.help_products": "§7Its own results are not cooked again unless the input allow list names them",

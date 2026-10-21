@@ -260,7 +260,7 @@ ABP_REGISTER_SELFTEST("cooking.auto_menu_filters", [](Context& ctx) {
     auto&                           up = upgradeOf(Kind::Smoking, true);
     auto const&                     L  = layout(true);
     auto                            menu = up.createSettingsMenu(player, u);
-    ctx.require(menu != nullptr && menu->size() == 54 && mm.open(player, menu), "open auto menu");
+    ctx.require(menu != nullptr && menu->size() == 27 && mm.open(player, menu), "open auto menu");
     mm.forceShown(player);
     ctx.require(ctx.give(player, game::ItemConv::make("minecraft:chicken", 5), 4) == 4, "give chicken");
     ctx.check(mm.simulate(player, {Action::Take, {Where::Inventory, 4}, {Where::Cursor, 0}, 5}), "to cursor");

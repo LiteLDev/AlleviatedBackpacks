@@ -1,17 +1,12 @@
-// The chest menu of the cooking upgrades.
+// The chest menu of the cooking upgrades: a single chest, like other upgrade settings menus
+// (switching from the backpack's double chest to another double chest in place does not show the
+// new screen on the client).
 //
-// Both use a double chest, like the backpack GUI they are opened from (switching between a
-// double and a single chest in place does not reliably show the new screen on the client).
-//
-// Plain variants:                     Auto variants:
-//   . . . . . . . . K                   F F F F F F F F F   <- input filter
-//   . . I . . . . . .                   . . . . L . . . .
-//   . . f . P - - O .                   G G G G G G G G G   <- fuel filter
-//   . . U . . . . . .                   . . . . . . . . .
-//   . . . . . . . . .                   K I f U P . O . .
-//   . . . . . . . . B                   m . n . . . . . B   (m/n: filter allow/deny)
-// I input, U fuel, f flame (burn), P progress, O output, K info, B back, F/G ghost filter slots.
-
+// Plain variants:          Auto variants:
+//   . . I . . . . . K        F F F F F F F F F   <- input filter
+//   . . f . P - - O .        G G G G G G G G G   <- fuel filter
+//   . . U . . . . . B        K I f U P O m n B   (m/n: input/fuel filter allow/deny)
+// I input, U fuel, f flame (burn), P progress, O output, K info (+ filter help), B back.
 #include <algorithm>
 #include <array>
 
@@ -29,18 +24,18 @@
 namespace abp::upgrade::cooking {
 
 MenuLayout const& layout(bool automatic) {
-    static MenuLayout const plain{.input = 11, .fuel = 29, .output = 25, .flame = 20, .progress = 22, .back = 53};
+    static MenuLayout const plain{.input = 2, .fuel = 20, .output = 16, .flame = 11, .progress = 13, .back = 26};
     static MenuLayout const autoLayout{
-        .input            = 37,
-        .fuel             = 39,
-        .output           = 42,
-        .flame            = 38,
-        .progress         = 40,
-        .back             = 53,
+        .input            = 19,
+        .fuel             = 21,
+        .output           = 23,
+        .flame            = 20,
+        .progress         = 22,
+        .back             = 26,
         .inputFilterStart = 0,
-        .fuelFilterStart  = 18,
-        .inputModeToggle  = 45,
-        .fuelModeToggle   = 47,
+        .fuelFilterStart  = 9,
+        .inputModeToggle  = 24,
+        .fuelModeToggle   = 25,
     };
     return automatic ? autoLayout : plain;
 }
@@ -50,7 +45,7 @@ namespace {
 class CookingMenu : public ui::Menu {
 public:
     CookingMenu(std::string title, CookingUpgrade& upgrade, UpgradeContext ctx)
-    : Menu(std::move(title), Rows::Six),
+    : Menu(std::move(title), Rows::Three),
       mUpgrade(upgrade),
       mCtx(std::move(ctx)) {}
 
@@ -261,12 +256,16 @@ void CookingMenu::build(Player& player) {
     for (int i = 0; i < size(); ++i) setSlot(i, std::make_shared<ui::StaticSlot>(filler()));
 
     // Info icon: the vanilla block this upgrade works like.
-    int  infoSlot = mUpgrade.automatic() ? 36 : 8;
+    int  infoSlot = mUpgrade.automatic() ? 18 : 8;
     auto speed    = burnInterval(mUpgrade.kind()) < 200 ? trFor(player, "abp.cooking.info.fast", "§7Twice as fast as a furnace")
                                                         : trFor(player, "abp.cooking.info.normal", "§7Works like a furnace");
     std::vector<std::string> lore{speed};
     if (mUpgrade.automatic()) {
         lore.push_back(trFor(player, "abp.cooking.info.auto", "§7Takes inputs and fuel from the backpack and stores the results"));
+        lore.push_back(trFor(player, "abp.cooking.filter.label", "Top row: input filter · second row: fuel filter"));
+        lore.push_back(trFor(player, "abp.cooking.filter.help", "§7Place items to match; empty = anything"));
+        lore.push_back(trFor(player, "abp.cooking.filter.help_fuel", "§7Cookable inputs are burnt only if the fuel allow list names them"));
+        lore.push_back(trFor(player, "abp.cooking.filter.help_products", "§7Its own results are not cooked again unless the input allow list names them"));
     } else {
         lore.push_back(trFor(player, "abp.cooking.info.manual", "§7Runs while you carry the backpack"));
     }
@@ -292,17 +291,6 @@ void CookingMenu::build(Player& player) {
             if (i < fuelSlots) setSlot(L.fuelFilterStart + i, filterGhost(true, i));
             else setSlot(L.fuelFilterStart + i, std::make_shared<ui::StaticSlot>(filler("minecraft:black_stained_glass_pane")));
         }
-        setSlot(
-            13,
-            std::make_shared<ui::StaticSlot>(ui::icon(
-                "minecraft:paper",
-                trFor(player, "abp.cooking.filter.label", "↑ Input filter · ↓ Fuel filter"),
-                {trFor(player, "abp.cooking.filter.help", "§7Place items to match; empty = anything"),
-                 trFor(player, "abp.cooking.filter.help_fuel", "§7Cookable inputs are burnt only if the fuel allow list names them"),
-                 trFor(player, "abp.cooking.filter.help_products", "§7Its own results are not cooked again unless the input allow list names them")}
-            ))
-        );
-        for (int i = 45; i < 54; ++i) setSlot(i, std::make_shared<ui::StaticSlot>(filler("minecraft:black_stained_glass_pane")));
         setSlot(L.inputModeToggle, modeToggle(false));
         setSlot(L.fuelModeToggle, modeToggle(true));
     }
