@@ -22,8 +22,8 @@ struct BackpackMenuContext {
 };
 
 /// A button that feature units add to the bottom row of the backpack storage page
-/// (e.g. Sort, Transfer to/from chest, Craft). Up to 4 are shown directly, in `order`; the rest
-/// go to a "More" form.
+/// (e.g. Sort, Transfer to/from chest, Craft). Up to 4 are shown directly, in `order`; with more,
+/// 3 are shown at a time and the 4th spot becomes a "More buttons" button that pages through them.
 ///
 ///     ABP_REGISTER_BACKPACK_BUTTON(abp::ui::BackpackButton{
 ///         .id = "sort", .order = 10,
@@ -52,6 +52,26 @@ struct BackpackSetting {
 };
 using BackpackSettingRegistry = StaticRegistry<BackpackSetting>;
 
+/// Changes how a storage slot of the backpack menu looks (e.g. a memory slot shows its remembered
+/// item as a ghost when empty). `shown` is the default display (possibly empty); `index` is the
+/// backpack inventory index. Only the display changes: clicks still go to the storage slot.
+struct BackpackSlotDecorator {
+    std::string                                                                  id;
+    int                                                                          order = 0;
+    std::function<void(BackpackMenuContext const&, int index, ItemStack& shown)> decorate;
+};
+using BackpackSlotDecoratorRegistry = StaticRegistry<BackpackSlotDecorator>;
+
+/// Overrides shift-clicking an item from the player inventory into the backpack menu. The first
+/// handler (by `order`) returning a value decides how many items were accepted; nullopt = no
+/// opinion (default behaviour).
+struct BackpackQuickMoveHandler {
+    std::string                                                                              id;
+    int                                                                                      order = 0;
+    std::function<std::optional<int>(BackpackMenuContext const&, ItemStack const& stack)> handle;
+};
+using BackpackQuickMoveRegistry = StaticRegistry<BackpackQuickMoveHandler>;
+
 /// The main backpack GUI: 45 storage slots per page + a control row; an upgrades page with the
 /// upgrade slots, on/off toggles and settings buttons.
 class BackpackMenu : public Menu {
@@ -73,6 +93,19 @@ public:
         std::string                     title = {},
         View                            view  = View::Storage
     );
+    /// Opens the first backpack the player carries: worn in the chest slot, then the offhand, then
+    /// the main inventory (selected hotbar slot first). Returns false if none could be opened.
+    static bool openCarried(Player& player);
+
+    /// Default shift-click-in behaviour of the current view (what `quickMoveIn` does when no
+    /// `BackpackQuickMoveHandler` decides): storage view -> storage; upgrades view -> upgrade slots.
+    int quickMoveDefault(Player& player, ItemStack const& stack);
+    /// Shift-click-in into the upgrade slots only (installs one upgrade). Returns 0 or 1.
+    int quickMoveToUpgrades(Player& player, ItemStack const& stack);
+    /// Shift-click-in into storage only (respects filters).
+    int quickMoveToStorage(Player& player, ItemStack const& stack);
+    /// Where the open backpack item sits on the player (nullopt when not bound to an item).
+    [[nodiscard]] std::optional<game::ItemLocation> const& source() const { return mSource; }
 
     [[nodiscard]] std::shared_ptr<game::Backpack> const& backpack() const { return mBackpack; }
     [[nodiscard]] View                                   view() const { return mView; }
@@ -100,6 +133,7 @@ private:
     View                              mView = View::Storage;
     int                               mPage = 0;
     std::uint64_t                     mLayout = 0; ///< bumps on page/view changes
+    int                               mButtonPage = 0; ///< page of feature buttons when more than 4 exist
 };
 
 namespace detail {
@@ -108,6 +142,12 @@ struct BackpackButtonRegistrar {
 };
 struct BackpackSettingRegistrar {
     explicit BackpackSettingRegistrar(BackpackSetting s) { BackpackSettingRegistry::add(std::move(s)); }
+};
+struct BackpackSlotDecoratorRegistrar {
+    explicit BackpackSlotDecoratorRegistrar(BackpackSlotDecorator d) { BackpackSlotDecoratorRegistry::add(std::move(d)); }
+};
+struct BackpackQuickMoveRegistrar {
+    explicit BackpackQuickMoveRegistrar(BackpackQuickMoveHandler h) { BackpackQuickMoveRegistry::add(std::move(h)); }
 };
 } // namespace detail
 
@@ -119,3 +159,9 @@ struct BackpackSettingRegistrar {
 /// Adds an entry to the backpack settings form (see `abp::ui::BackpackSetting`).
 #define ABP_REGISTER_BACKPACK_SETTING(...)                                                                             \
     static ::abp::ui::detail::BackpackSettingRegistrar ABP_UNIQUE(abp_backpack_setting_)(__VA_ARGS__)
+/// Adds a storage-slot display decorator (see `abp::ui::BackpackSlotDecorator`).
+#define ABP_REGISTER_BACKPACK_SLOT_DECORATOR(...)                                                                      \
+    static ::abp::ui::detail::BackpackSlotDecoratorRegistrar ABP_UNIQUE(abp_backpack_slot_decorator_)(__VA_ARGS__)
+/// Adds a shift-click-in handler (see `abp::ui::BackpackQuickMoveHandler`).
+#define ABP_REGISTER_BACKPACK_QUICK_MOVE(...)                                                                          \
+    static ::abp::ui::detail::BackpackQuickMoveRegistrar ABP_UNIQUE(abp_backpack_quick_move_)(__VA_ARGS__)

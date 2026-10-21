@@ -52,6 +52,9 @@ using ExtractFilterFn = std::function<bool(ExtractQuery const&)>; ///< false = d
 /// Returns the new per-slot limit given the current one (start: `item.maxStack`).
 using LimitModifierFn = std::function<int(int slot, ItemStackData const& item, int currentLimit)>;
 using ChangeListenerFn = std::function<void(int slot)>; ///< slot -1 = many / resized
+/// Slots that `insert()` should try first for `stack` (e.g. memory slots), in order. Filters still
+/// apply; slots out of range are ignored.
+using SlotPreferenceFn = std::function<std::vector<int>(ItemStackData const& stack)>;
 
 struct InsertResult {
     ItemStackData remainder; ///< what could not be inserted (empty when all went in or was voided)
@@ -119,9 +122,11 @@ public:
     void addExtractFilter(std::string owner, int priority, ExtractFilterFn fn);
     void addLimitModifier(std::string owner, int priority, LimitModifierFn fn);
     void addChangeListener(std::string owner, ChangeListenerFn fn);
+    /// Preferred slots for automatic placement: `insert()` fills them before any other slot.
+    void addSlotPreference(std::string owner, int priority, SlotPreferenceFn fn);
     /// Removes every hook registered with `owner`.
     void removeHooks(std::string const& owner);
-    /// Removes all filters and limit modifiers (listeners stay).
+    /// Removes all filters, limit modifiers and slot preferences (listeners stay).
     void clearFilters();
     /// Removes every hook (filters, modifiers, listeners) not owned by `keepOwner`.
     void clearHooksExcept(std::string_view keepOwner);
@@ -150,6 +155,7 @@ private:
     std::vector<Hook<ExtractFilterFn>>  mExtractFilters;
     std::vector<Hook<LimitModifierFn>>  mLimitModifiers;
     std::vector<Hook<ChangeListenerFn>> mListeners;
+    std::vector<Hook<SlotPreferenceFn>> mPreferences;
 };
 
 } // namespace abp::core

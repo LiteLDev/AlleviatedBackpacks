@@ -86,9 +86,22 @@ InsertResult BackpackInventory::insert(ItemStackData const& stack, AccessContext
         return r;
     }
     int remaining = stack.count;
+    // Pass 0: preferred slots (e.g. memory slots), in the order given. Each slot is filled once
+    // (as far as it goes); later passes skip it, which also keeps `simulate` from counting it twice.
+    std::vector<int> done;
+    for (auto const& p : mPreferences) {
+        for (int i : p.fn(stack)) {
+            if (remaining <= 0) break;
+            if (i < 0 || i >= size() || std::find(done.begin(), done.end(), i) != done.end()) continue;
+            if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
+            remaining -= fillSlot(i, stack, remaining, simulate);
+            done.push_back(i);
+        }
+    }
     // Pass 1: merge into existing stacks. Pass 2: empty slots.
     for (int pass = 0; pass < 2 && remaining > 0; ++pass) {
         for (int i = 0; i < size() && remaining > 0; ++i) {
+            if (!done.empty() && std::find(done.begin(), done.end(), i) != done.end()) continue;
             auto const& cur = mSlots[static_cast<std::size_t>(i)];
             if (pass == 0 ? (cur.empty() || !cur.sameItem(stack)) : !cur.empty()) continue;
             if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
@@ -212,6 +225,10 @@ void BackpackInventory::addChangeListener(std::string owner, ChangeListenerFn fn
     mListeners.push_back(Hook<ChangeListenerFn>{std::move(owner), 0, std::move(fn)});
 }
 
+void BackpackInventory::addSlotPreference(std::string owner, int priority, SlotPreferenceFn fn) {
+    insertSorted(mPreferences, std::move(owner), priority, std::move(fn));
+}
+
 void BackpackInventory::removeHooks(std::string const& owner) {
     auto drop = [&](auto& v) {
         std::erase_if(v, [&](auto const& h) { return h.owner == owner; });
@@ -220,6 +237,7 @@ void BackpackInventory::removeHooks(std::string const& owner) {
     drop(mExtractFilters);
     drop(mLimitModifiers);
     drop(mListeners);
+    drop(mPreferences);
 }
 
 void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
@@ -230,12 +248,14 @@ void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
     drop(mExtractFilters);
     drop(mLimitModifiers);
     drop(mListeners);
+    drop(mPreferences);
 }
 
 void BackpackInventory::clearFilters() {
     mInsertFilters.clear();
     mExtractFilters.clear();
     mLimitModifiers.clear();
+    mPreferences.clear();
 }
 
 nlohmann::json BackpackInventory::toJson() const {
