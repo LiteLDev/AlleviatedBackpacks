@@ -31,12 +31,22 @@ inline std::shared_ptr<ui::Slot> live(std::function<ItemStack(Player&)> display)
     return s;
 }
 
+/// Opens `menu` after closing the current one. Switching straight between a double-chest menu
+/// (the backpack) and a single-chest one leaves the client without a screen, so these menus
+/// always go through a full close first.
+inline void openFresh(Player& player, std::shared_ptr<ui::Menu> menu) {
+    if (!menu) return;
+    ui::MenuManager::get().closeThen(player, [menu = std::move(menu)](Player& p) { ui::MenuManager::get().open(p, menu); });
+}
+
 /// "Back" button returning to the backpack's upgrades page.
 inline std::shared_ptr<ui::Slot> backButton(Player& player, std::shared_ptr<game::Backpack> backpack) {
     return std::make_shared<ui::ButtonSlot>(
         ui::icon("minecraft:arrow", trFor(player, "abp.menu.back_generic", "Back")),
         [bp = std::move(backpack)](ui::ClickContext const& c) {
-            ui::BackpackMenu::openBackpack(c.player, bp, {}, ui::BackpackMenu::View::Upgrades);
+            ui::MenuManager::get().closeThen(c.player, [bp](Player& p) {
+                ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
+            });
         }
     );
 }

@@ -34,6 +34,10 @@ ClickAt (DoubleSlot 0)     # put it into upgrade slot 0
 ClickAt (DoubleHotbar 3)   # pick up the XP pump upgrade
 ClickAt (DoubleSlot 1)     # upgrade slot 1
 Start-Sleep -Milliseconds 500
+# The upgrades page draws the toggle / settings buttons when it is (re)built: leave and come back.
+ClickAt (DoubleSlot 52)
+ClickAt (DoubleSlot 52)
+Start-Sleep -Milliseconds 500
 Save-Screenshot 'upgrades-installed' | Out-Null
 
 # 2. The tank's settings button opens the tank menu.

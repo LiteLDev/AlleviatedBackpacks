@@ -358,6 +358,10 @@ public:
 
     void onTick(TickContext const& tick) override { autoCycle(tick.player, tick.ctx.withPlayer(&tick.player)); }
 
+    void openSettings(Player& player, UpgradeContext const& ctx) override {
+        fluidui::openFresh(player, createSettingsMenu(player, ctx));
+    }
+
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         return std::make_shared<XpPumpMenu>(ctx, displayName(*this, &player));
     }
