@@ -336,7 +336,7 @@ namespace {
 
 class PumpMenu : public ui::Menu {
 public:
-    PumpMenu(UpgradeContext ctx, std::string title) : Menu(std::move(title), Rows::Three), mCtx(std::move(ctx)) {}
+    PumpMenu(UpgradeContext ctx, std::string title) : Menu(std::move(title), Rows::Six), mCtx(std::move(ctx)) {}
 
     void build(Player& player) override {
         for (int i = 0; i < size(); ++i) setSlot(i, fluidui::filler());

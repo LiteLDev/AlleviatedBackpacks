@@ -377,7 +377,7 @@ public:
     static constexpr int kOutputSlot = 15;
     static constexpr int kInfoSlot   = 13;
 
-    TankMenu(UpgradeContext ctx, std::string title) : Menu(std::move(title), Rows::Three), mCtx(std::move(ctx)) {}
+    TankMenu(UpgradeContext ctx, std::string title) : Menu(std::move(title), Rows::Six), mCtx(std::move(ctx)) {}
 
     void build(Player& player) override {
         for (int i = 0; i < size(); ++i) setSlot(i, fluidui::filler());

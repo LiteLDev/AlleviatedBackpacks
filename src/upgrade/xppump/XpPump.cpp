@@ -241,7 +241,7 @@ std::string storedLine(Player& p, long long points) {
 
 class XpPumpMenu : public ui::Menu {
 public:
-    XpPumpMenu(UpgradeContext ctx, std::string title) : Menu(std::move(title), Rows::Three), mCtx(std::move(ctx)) {}
+    XpPumpMenu(UpgradeContext ctx, std::string title) : Menu(std::move(title), Rows::Six), mCtx(std::move(ctx)) {}
 
     void build(Player& player) override {
         for (int i = 0; i < size(); ++i) setSlot(i, fluidui::filler());
