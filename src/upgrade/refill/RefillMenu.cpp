@@ -12,14 +12,7 @@
 #include <memory>
 #include <string>
 
-#include "ll/api/chrono/GameChrono.h"
-#include "ll/api/coro/CoroTask.h"
-#include "ll/api/service/Bedrock.h"
-#include "ll/api/thread/ServerThreadExecutor.h"
-
-#include "mc/legacy/ActorUniqueID.h"
 #include "mc/world/actor/player/Player.h"
-#include "mc/world/level/Level.h"
 
 #include "mod/I18n.h"
 #include "mod/Log.h"
@@ -32,8 +25,6 @@
 namespace abp::upgrade::refill {
 
 namespace {
-
-constexpr int kReopenDelayTicks = 15;
 
 ItemStack targetIcon(Player& player, Target t) {
     std::vector<std::string> lore{trFor(player, "abp.refill.target.click", "§7Click to change the target slot")};
@@ -163,9 +154,7 @@ public:
             std::make_shared<ui::ButtonSlot>(
                 ui::icon("minecraft:arrow", trFor(player, "abp.menu.back_generic", "Back")),
                 [bp = mCtx.backpackPtr()](ui::ClickContext const& c) {
-                    switchMenu(c.player, [bp](Player& p) {
-                        ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
-                    });
+                    ui::BackpackMenu::openBackpack(c.player, bp, {}, ui::BackpackMenu::View::Upgrades);
                 }
             )
         );
@@ -195,29 +184,6 @@ private:
 };
 
 } // namespace
-
-void switchMenu(Player& player, std::function<void(Player&)> open) {
-    auto& mm = ui::MenuManager::get();
-    if (!mm.current(player)) {
-        open(player);
-        return;
-    }
-    // Swapping one chest menu for another right away doesn't show the new one on a real client:
-    // close the current one, give the client time to finish closing the screen, then open.
-    mm.closeThen(player, [open = std::move(open)](Player& p) {
-        auto id = p.getOrCreateUniqueID();
-        ll::coro::keepThis([id, open]() -> ll::coro::CoroTask<> {
-            co_await ll::chrono::ticks(kReopenDelayTicks);
-            auto level = ll::service::getLevel();
-            if (!level) co_return;
-            if (auto* pl = level->getPlayer(id); pl && !ui::MenuManager::get().current(*pl)) open(*pl);
-        }).launch(ll::thread::ServerThreadExecutor::getDefault());
-    });
-}
-
-void openMenu(Player& player, std::shared_ptr<ui::Menu> menu) {
-    switchMenu(player, [menu = std::move(menu)](Player& p) { ui::MenuManager::get().open(p, menu); });
-}
 
 std::shared_ptr<ui::Menu> makeMenu(Player& player, UpgradeContext const& ctx, bool advanced) {
     auto* type  = upgradeFor(ctx.state().item);

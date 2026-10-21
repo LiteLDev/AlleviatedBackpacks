@@ -395,10 +395,6 @@ public:
         return makeMenu(player, ctx, mAdvanced);
     }
 
-    void openSettings(Player& player, UpgradeContext const& ctx) override {
-        openMenu(player, makeMenu(player, ctx, mAdvanced));
-    }
-
     [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
         auto s     = load(ctx, slotsFor(mAdvanced));
         int  count = 0;

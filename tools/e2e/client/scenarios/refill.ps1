@@ -62,13 +62,8 @@ function Click-Slot([int]$slot) {
 
 Click-Slot 52                 # upgrades page
 Save-Screenshot 'upgrades' | Out-Null
-Close-Screen
-# Opening the settings chest from inside the backpack chest is server-side identical to the
-# command path below, but a chest opened right after another one is not shown by the client
-# (foundation MenuManager limitation, see the PR). Open it as a fresh menu instead.
 $mark = Get-LogMark
-$open = Invoke-SelfTest 'refill.e2e_open_settings'
-if ($open.Fail -gt 0 -or $open.Pass -lt 1) { throw 'could not open the refill settings' }
+Click-Slot 18                 # settings of upgrade slot 1
 Wait-LogLine 'menu shown: Advanced Refill Upgrade \(54 slots\)' 15 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 1000
 Save-Screenshot 'refill-settings' | Out-Null
@@ -79,5 +74,11 @@ Wait-LogLine 'refill: filter slot 1 target set to 6' 10 -Since $mark | Out-Null
 Move-Mouse 0.365 0.294 -Relative   # hover for the tooltip
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'target-cycled' | Out-Null
+
+$mark = Get-LogMark
+Click-Slot 53                 # back to the backpack's upgrades page
+Wait-LogLine 'menu shown: Gold Backpack \(54 slots\)' 15 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 1000
+Save-Screenshot 'back-to-upgrades' | Out-Null
 Close-Screen
 Assert-NoErrors

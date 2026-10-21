@@ -69,10 +69,5 @@ bool pickBlockAt(Player& player, BlockPos const& pos, bool withData);
 
 /// The settings menu (ghost slots, target buttons for the advanced tier, NBT toggle).
 [[nodiscard]] std::shared_ptr<ui::Menu> makeMenu(Player& player, UpgradeContext const& ctx, bool advanced);
-/// Runs `open` (which opens a chest menu) now, or, if a chest menu is open, after closing it and
-/// letting the client finish closing the screen (see RefillMenu.cpp).
-void switchMenu(Player& player, std::function<void(Player&)> open);
-/// `switchMenu` for a ready menu.
-void openMenu(Player& player, std::shared_ptr<ui::Menu> menu);
 
 } // namespace abp::upgrade::refill
