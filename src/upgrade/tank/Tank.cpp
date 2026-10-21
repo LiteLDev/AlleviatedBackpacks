@@ -15,6 +15,9 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
+#include "api/BackpackCapabilities.h"
+#include "api/Service.h"
+#include "core/FluidRegistry.h"
 #include "core/Format.h"
 #include "selftest/SelfTest.h"
 #include "game/ItemConv.h"
@@ -161,21 +164,23 @@ core::ItemStackData itemData(std::string_view id, int aux) {
 
 std::optional<core::ItemStackData> emptyContainer(core::ItemStackData const& filled, FillFn const& fill, bool simulate) {
     if (filled.empty() || !fill) return std::nullopt;
-    auto contents = fl::contentsOf(filled.id, filled.aux);
+    // Containers come from the capability API's registry (vanilla + registered by mods).
+    auto contents = api::fluidRegistry().contentsOf(filled.id, filled.aux);
     if (!contents) return std::nullopt;
-    auto empty = itemData(contents->emptyId, 0);
+    auto empty = itemData(contents->emptyItem, 0);
     if (empty.empty()) return std::nullopt;
-    if (fill(contents->fluid, true) < contents->fluid.amount) return std::nullopt;
-    if (!simulate && fill(contents->fluid, false) < contents->fluid.amount) return std::nullopt;
+    auto fluid = core::fromApi(contents->fluid);
+    if (fill(fluid, true) < fluid.amount) return std::nullopt;
+    if (!simulate && fill(fluid, false) < fluid.amount) return std::nullopt;
     return empty;
 }
 
 std::optional<core::ItemStackData>
 fillContainer(core::ItemStackData const& empty, std::string_view fluid, DrainFn const& drain, bool simulate) {
     if (empty.empty() || fluid.empty() || !drain) return std::nullopt;
-    auto filled = fl::fill(empty.id, fluid);
+    auto filled = api::fluidRegistry().fill(empty.id, core::toApi({std::string(fluid), 1}));
     if (!filled) return std::nullopt;
-    auto item = itemData(filled->item.id, filled->item.aux);
+    auto item = itemData(filled->item, filled->aux);
     if (item.empty()) return std::nullopt;
     if (drain(fluid, filled->amount, true).amount < filled->amount) return std::nullopt;
     if (!simulate && drain(fluid, filled->amount, false).amount < filled->amount) return std::nullopt;
@@ -434,8 +439,8 @@ public:
     int quickMoveIn(Player&, ItemStack const& stack) override {
         if (stack.isNull()) return 0;
         auto d = game::ItemConv::toData(stack);
-        if (fl::contentsOf(d.id, d.aux)) return static_cast<ContainerSlot*>(slot(kInputSlot))->offer(d);
-        if (fl::isEmptyContainer(d.id)) return static_cast<ContainerSlot*>(slot(kOutputSlot))->offer(d);
+        if (api::fluidRegistry().contentsOf(d.id, d.aux)) return static_cast<ContainerSlot*>(slot(kInputSlot))->offer(d);
+        if (api::fluidRegistry().isEmptyContainer(d.id)) return static_cast<ContainerSlot*>(slot(kOutputSlot))->offer(d);
         return 0;
     }
 
@@ -454,6 +459,51 @@ private:
     std::optional<fl::Tank> mCached;
     std::uint64_t           mCachedRevision = 0;
 };
+
+// ---- capability API ------------------------------------------------------------------------------
+
+/// One tank upgrade as an API fluid handler: what other mods (and the backpack's combined handler,
+/// placed-backpack block capability, backpack item capability) see. Contents stay in the phase-1
+/// format (`core::toApi` / `core::fromApi` convert the ids).
+class TankHandler final : public api::IFluidHandler {
+public:
+    explicit TankHandler(UpgradeContext ctx) : mCtx(std::move(ctx)) {}
+
+    [[nodiscard]] int tanks() const override { return 1; }
+    [[nodiscard]] api::FluidStack fluidInTank(int t) const override {
+        return t == 0 && isTank(mCtx) ? core::toApi(read(mCtx).contents()) : api::FluidStack{};
+    }
+    [[nodiscard]] int  tankCapacity(int t) const override { return t == 0 && isTank(mCtx) ? capacity(mCtx.backpack()) : 0; }
+    [[nodiscard]] bool isFluidValid(int t, api::FluidStack const& s) const override { return t == 0 && !s.empty(); }
+
+    int fill(api::FluidStack const& resource, bool simulate) override {
+        if (resource.empty() || !isTank(mCtx)) return 0;
+        auto t = read(mCtx);
+        int  n = t.fill(core::fromApi(resource), simulate);
+        if (n > 0 && !simulate) write(mCtx, t);
+        return n;
+    }
+    api::FluidStack drain(api::FluidStack const& resource, bool simulate) override {
+        if (resource.empty()) return {};
+        return take(core::legacyIdOf(resource), resource.amount, simulate);
+    }
+    api::FluidStack drainAny(int maxDrain, bool simulate) override { return take({}, maxDrain, simulate); }
+
+private:
+    api::FluidStack take(std::string const& legacyId, int max, bool simulate) {
+        if (!isTank(mCtx)) return {};
+        auto t   = read(mCtx);
+        auto got = t.drain(legacyId, max, simulate);
+        if (!got.empty() && !simulate) write(mCtx, t);
+        return core::toApi(got);
+    }
+
+    UpgradeContext mCtx;
+};
+
+ABP_REGISTER_BACKPACK_TANK(std::string(kId), [](UpgradeContext const& ctx) -> std::shared_ptr<api::IFluidHandler> {
+    return std::make_shared<TankHandler>(ctx);
+});
 
 // ---- the upgrade --------------------------------------------------------------------------------
 
