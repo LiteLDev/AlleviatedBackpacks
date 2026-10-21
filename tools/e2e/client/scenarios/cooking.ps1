@@ -30,6 +30,13 @@ $s = DoubleSlot 0; Click $s[0] $s[1] -Relative
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'upgrade-installed' | Out-Null
 
+# The upgrades page is not rebuilt after an install (foundation): switch views to refresh it.
+$s = DoubleSlot 45; Click $s[0] $s[1] -Relative
+Start-Sleep -Milliseconds 600
+$s = DoubleSlot 52; Click $s[0] $s[1] -Relative
+Start-Sleep -Milliseconds 800
+Save-Screenshot 'upgrade-buttons' | Out-Null
+
 # 3. Open its settings: the furnace menu.
 $mark = Get-LogMark
 $s = DoubleSlot 18; Click $s[0] $s[1] -Relative
