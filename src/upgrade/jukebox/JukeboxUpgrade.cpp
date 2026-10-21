@@ -124,7 +124,9 @@ public:
         setSlot(45, std::make_shared<ui::ButtonSlot>(
             ui::icon("minecraft:smithing_table", trFor(player, "abp.jukebox.back", "Back to upgrades")),
             [bp = mCtx.backpackPtr()](ui::ClickContext const& c) {
-                ui::BackpackMenu::openBackpack(c.player, bp, {}, ui::BackpackMenu::View::Upgrades);
+                ui::MenuManager::get().closeThen(c.player, [bp](Player& p) {
+                    ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
+                });
             }
         ));
         setSlot(48, button(
@@ -267,6 +269,13 @@ private:
 class JukeboxUpgradeBase : public IUpgrade {
 public:
     void onRemove(UpgradeContext const& ctx) override { Service::get().stop(ctx.backpack().uuid(), ctx.slot()); }
+
+    // Swapping one open chest screen for another in place left the real client without a screen;
+    // close the backpack first, then open the jukebox menu.
+    void openSettings(Player& player, UpgradeContext const& ctx) override {
+        auto menu = createSettingsMenu(player, ctx);
+        ui::MenuManager::get().closeThen(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
+    }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         return std::make_shared<JukeboxMenu>(ctx.withPlayer(nullptr), displayName(*this, &player));

@@ -16,6 +16,7 @@
 #include "game/PlayerScan.h"
 #include "mod/Config.h"
 #include "selftest/SelfTest.h"
+#include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/jukebox/Jukebox.h"
@@ -90,8 +91,9 @@ bool press(Player& player, int menuSlot) {
 bool openMenu(Context& ctx, Player& player, Setup const& s) {
     auto* type = upgradeFor(s.ctx().state().item);
     ctx.require(type != nullptr, "jukebox type");
-    type->openSettings(player, s.ctx().withPlayer(&player));
     auto& mm = ui::MenuManager::get();
+    // (openSettings() closes first and opens a few ticks later; open directly here.)
+    mm.open(player, type->createSettingsMenu(player, s.ctx().withPlayer(&player)));
     if (!mm.current(player)) return false;
     mm.forceShown(player);
     return true;
@@ -182,7 +184,7 @@ ABP_REGISTER_SELFTEST("jukebox.menu_discs", [](Context& ctx) {
     ctx.check(cats == 1, "cat returned to the inventory (" + std::to_string(cats) + ")");
 });
 
-ABP_REGISTER_SELFTEST("jukebox.buttons", [](Context& ctx) {
+ABP_REGISTER_SELFTEST("jukebox.buttons", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
     auto  s      = carriedJukebox(ctx, kAdvancedId, {kCat});
     ctx.require(openMenu(ctx, player, s), "open");
@@ -197,7 +199,11 @@ ABP_REGISTER_SELFTEST("jukebox.buttons", [](Context& ctx) {
     press(player, 53);
     ctx.check(repeatMode(s.ctx()) == core::RepeatMode::All, "repeat all");
     press(player, 45);
-    ctx.check(ui::MenuManager::get().current(player) != nullptr, "back opens the backpack");
+    co_await ctx.ticks(15);
+    ctx.check(
+        std::dynamic_pointer_cast<ui::BackpackMenu>(ui::MenuManager::get().current(player)) != nullptr,
+        "back reopens the backpack"
+    );
     ui::MenuManager::get().close(player);
 });
 
