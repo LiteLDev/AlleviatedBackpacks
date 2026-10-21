@@ -392,8 +392,7 @@ ABP_REGISTER_SELFTEST("cooking.settings_button_opens_menu", [](Context& ctx) -> 
 /// Places `bp` as a block on a test site next to `player` (moved to the U2 test area first).
 BlockPos placeForTest(Context& ctx, placed::test::Site& site, game::Backpack const& bp) {
     auto pos = site.at(0, 1);
-    site.set(pos, "minecraft:air");
-    site.touch(pos);
+    site.set(pos, "minecraft:air"); // also marks it for cleanup
     auto item = ctx.backpackItem(bp);
     auto r    = placed::PlacedBackpacks::get().place(site.region(), pos, item, 2);
     ctx.require(r == placed::PlacedBackpacks::PlaceResult::Ok, "place() failed: " + std::to_string(static_cast<int>(r)));

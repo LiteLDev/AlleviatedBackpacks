@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -106,6 +107,7 @@ void setProductIds(UpgradeContext const& ctx, std::unordered_set<std::string> co
 }
 
 constexpr std::size_t kMaxProducts = 512;
+constexpr int         kPlacedBatchTicks = 10; ///< placed: game ticks simulated per advance()
 
 } // namespace
 
@@ -268,14 +270,12 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
     if (!mAuto) {
         for (int i = 0; i < ticks; ++i) changed |= step(st, env);
     } else {
-        // Experience per result kind (stored results give their XP to the carrier right away).
-        std::unordered_map<std::string, std::pair<core::ItemStackData, int>> produced;
+        // Items made per result kind ("id#aux"): their experience is stored and claimed below.
+        std::unordered_map<std::string, int> produced;
         auto products = productIds(ctx);
         bool newProduct = false;
         env.onProduce   = [&](core::ItemStackData const& r) {
-            auto& e = produced[r.id];
-            e.first = r;
-            e.second += r.count;
+            produced[r.id + "#" + std::to_string(r.aux)] += r.count;
             if (products.size() < kMaxProducts && products.insert(r.id).second) newProduct = true;
         };
         auto    inFilter   = inputFilter(ctx);
@@ -307,17 +307,18 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
             changed |= step(st, env);
         }
         if (!outFailed) changed |= pushOutput(st, a);
-        if (carrier) {
-            int xp = 0;
-            for (auto const& [id, e] : produced) xp += xpFor(e.first, e.second);
-            if (xp > 0) carrier->addExperience(xp);
-            claimPendingXp(ctx, *carrier);
-        } else if (!produced.empty()) {
-            // Placed: keep the experience until someone claims it (menu or carrying it again).
+        // Stored results keep their experience until a player claims it: the carrier right away,
+        // otherwise (placed) whoever opens the menu or carries the backpack next.
+        if (!produced.empty()) {
             auto& pending = ctx.settings()[kPendingXpKey];
             if (!pending.is_object()) pending = nlohmann::json::object();
-            for (auto const& [id, e] : produced) pending[id] = pending.value(id, 0) + e.second;
+            for (auto const& [key, n] : produced) {
+                auto it   = pending.find(key);
+                int  have = it != pending.end() && it->is_number_integer() ? std::max(0, it->get<int>()) : 0;
+                pending[key] = have + n;
+            }
         }
+        if (carrier) claimPendingXp(ctx, *carrier);
         if (newProduct) setProductIds(ctx, products);
     }
     if (changed) setState(ctx, st);
@@ -326,7 +327,22 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
 
 void CookingUpgrade::onTick(TickContext const& tick) { advance(tick.ctx, &tick.player, std::max(1, tick.interval)); }
 
-void CookingUpgrade::onPlacedTick(PlacedTickContext const& tick) { advance(tick.ctx, nullptr, std::max(1, tick.interval)); }
+void CookingUpgrade::onPlacedTick(PlacedTickContext const& tick) {
+    // Placed ticks come often: run the furnace in batches like the carried tick does.
+    struct Batch {
+        int ticks = 0;
+    };
+    auto& b  = tick.ctx.transient<Batch>();
+    b.ticks += std::max(1, tick.interval);
+    if (b.ticks < kPlacedBatchTicks) return;
+    int n   = b.ticks;
+    b.ticks = 0;
+    advance(tick.ctx, nullptr, n);
+}
+
+void CookingUpgrade::onRemove(UpgradeContext const& ctx) {
+    if (auto* p = ctx.player()) claimPendingXp(ctx, *p);
+}
 
 int CookingUpgrade::claimPendingXp(UpgradeContext const& ctx, Player& player) {
     auto& s  = ctx.settings();
@@ -334,8 +350,13 @@ int CookingUpgrade::claimPendingXp(UpgradeContext const& ctx, Player& player) {
     if (it == s.end()) return 0;
     int xp = 0;
     if (it->is_object()) {
-        for (auto const& [id, n] : it->items()) {
-            if (n.is_number_integer()) xp += xpFor(game::ItemConv::toData(game::ItemConv::make(id, 1)), n.get<int>());
+        for (auto const& [key, n] : it->items()) {
+            if (!n.is_number_integer()) continue;
+            auto hash = key.rfind('#');
+            int  aux  = 0;
+            if (hash != std::string::npos) aux = std::atoi(key.c_str() + hash + 1);
+            auto item = game::ItemConv::toData(game::ItemConv::make(key.substr(0, hash), 1, aux));
+            xp += xpFor(item, n.get<int>());
         }
     }
     s.erase(it);

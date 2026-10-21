@@ -63,6 +63,8 @@ public:
     /// Keeps cooking while the backpack is placed as a block (no carrier: the Auto variants keep the
     /// experience of stored results until a player claims it, see claimPendingXp).
     void onPlacedTick(PlacedTickContext const& tick) override;
+    /// Pays experience still stored (Auto variants) to the player removing the upgrade.
+    void onRemove(UpgradeContext const& ctx) override;
 
     [[nodiscard]] std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override;
     [[nodiscard]] std::vector<std::string>  describe(Player& player, UpgradeContext const& ctx) const override;
