@@ -1,0 +1,17 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "AlleviatedBackpacks RP",
+    "description": "Textures and names of AlleviatedBackpacks",
+    "uuid": "14aa0498-f992-4074-a549-d484a838a48f",
+    "version": "${version}",
+    "min_engine_version": [1, 21, 40]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "6902bb1b-3451-40b5-b7b5-6c71b69d0a7d",
+      "version": "${version}"
+    }
+  ]
+}

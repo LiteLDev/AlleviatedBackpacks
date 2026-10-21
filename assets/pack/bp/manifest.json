@@ -1,0 +1,17 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "AlleviatedBackpacks BP",
+    "description": "Items and recipes of AlleviatedBackpacks",
+    "uuid": "2618e5e3-2f8d-4f68-99c9-e6afc4efe519",
+    "version": "${version}",
+    "min_engine_version": [1, 21, 40]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "cd843cc3-691f-49a9-ad37-8fe5642799ea",
+      "version": "${version}"
+    }
+  ]
+}
