@@ -1,6 +1,7 @@
 #include "core/BackpackInventory.h"
 
 #include <algorithm>
+#include <climits>
 
 namespace abp::core {
 
@@ -86,9 +87,22 @@ InsertResult BackpackInventory::insert(ItemStackData const& stack, AccessContext
         return r;
     }
     int remaining = stack.count;
+    // Pass 0: preferred slots (e.g. memory slots), in the order given. Each slot is filled once
+    // (as far as it goes); later passes skip it, which also keeps `simulate` from counting it twice.
+    std::vector<int> done;
+    for (auto const& p : mPreferences) {
+        for (int i : p.fn(stack)) {
+            if (remaining <= 0) break;
+            if (i < 0 || i >= size() || std::find(done.begin(), done.end(), i) != done.end()) continue;
+            if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
+            remaining -= fillSlot(i, stack, remaining, simulate);
+            done.push_back(i);
+        }
+    }
     // Pass 1: merge into existing stacks. Pass 2: empty slots.
     for (int pass = 0; pass < 2 && remaining > 0; ++pass) {
         for (int i = 0; i < size() && remaining > 0; ++i) {
+            if (!done.empty() && std::find(done.begin(), done.end(), i) != done.end()) continue;
             auto const& cur = mSlots[static_cast<std::size_t>(i)];
             if (pass == 0 ? (cur.empty() || !cur.sameItem(stack)) : !cur.empty()) continue;
             if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
@@ -175,23 +189,30 @@ long long BackpackInventory::count(std::function<bool(ItemStackData const&)> con
 }
 
 void BackpackInventory::sort(std::function<bool(ItemStackData const&, ItemStackData const&)> const& less) {
-    // Merge identical items into totals (first-seen order), then order the kinds.
-    std::vector<ItemStackData> kinds;
+    // Merge identical items into totals (first-seen order), then order the kinds. Totals are
+    // 64-bit: with large stack multipliers several slots together can exceed INT_MAX (the
+    // kind's own count, seen by `less`, saturates at INT_MAX).
+    struct Kind {
+        ItemStackData item;
+        long long     total;
+    };
+    std::vector<Kind> kinds;
     for (auto const& s : mSlots) {
         if (s.empty()) continue;
-        auto it = std::find_if(kinds.begin(), kinds.end(), [&](ItemStackData const& k) { return k.sameItem(s); });
-        if (it == kinds.end()) kinds.push_back(s);
-        else it->count += s.count;
+        auto it = std::find_if(kinds.begin(), kinds.end(), [&](Kind const& k) { return k.item.sameItem(s); });
+        if (it == kinds.end()) kinds.push_back({s, s.count});
+        else it->total += s.count;
     }
-    std::stable_sort(kinds.begin(), kinds.end(), less);
+    for (auto& k : kinds) k.item.count = static_cast<int>(std::min<long long>(k.total, INT_MAX));
+    std::stable_sort(kinds.begin(), kinds.end(), [&](Kind const& a, Kind const& b) { return less(a.item, b.item); });
     std::vector<ItemStackData> laid(mSlots.size());
     std::size_t                next = 0;
     for (auto const& k : kinds) {
-        int left = k.count;
+        long long left = k.total;
         while (left > 0) {
             if (next >= laid.size()) return; // would not fit (slot-dependent limits): keep the old layout
-            int n        = std::min(left, slotLimit(static_cast<int>(next), k));
-            laid[next++] = k.withCount(n);
+            int n        = static_cast<int>(std::min<long long>(left, slotLimit(static_cast<int>(next), k.item)));
+            laid[next++] = k.item.withCount(n);
             left        -= n;
         }
     }
@@ -212,6 +233,10 @@ void BackpackInventory::addChangeListener(std::string owner, ChangeListenerFn fn
     mListeners.push_back(Hook<ChangeListenerFn>{std::move(owner), 0, std::move(fn)});
 }
 
+void BackpackInventory::addSlotPreference(std::string owner, int priority, SlotPreferenceFn fn) {
+    insertSorted(mPreferences, std::move(owner), priority, std::move(fn));
+}
+
 void BackpackInventory::removeHooks(std::string const& owner) {
     auto drop = [&](auto& v) {
         std::erase_if(v, [&](auto const& h) { return h.owner == owner; });
@@ -220,6 +245,7 @@ void BackpackInventory::removeHooks(std::string const& owner) {
     drop(mExtractFilters);
     drop(mLimitModifiers);
     drop(mListeners);
+    drop(mPreferences);
 }
 
 void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
@@ -230,12 +256,14 @@ void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
     drop(mExtractFilters);
     drop(mLimitModifiers);
     drop(mListeners);
+    drop(mPreferences);
 }
 
 void BackpackInventory::clearFilters() {
     mInsertFilters.clear();
     mExtractFilters.clear();
     mLimitModifiers.clear();
+    mPreferences.clear();
 }
 
 nlohmann::json BackpackInventory::toJson() const {

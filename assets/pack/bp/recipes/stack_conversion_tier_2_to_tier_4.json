@@ -1,0 +1,20 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:stack_conversion_tier_2_to_tier_4"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "XXX",
+      "XSX",
+      "XXX"
+    ],
+    "key": {
+      "X": { "item": "minecraft:netherite_block" },
+      "S": { "item": "alleviatedbackpacks:stack_conversion_tier_2_to_tier_3" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:stack_conversion_tier_2_to_tier_3" }],
+    "result": { "item": "alleviatedbackpacks:stack_conversion_tier_2_to_tier_4", "count": 1 }
+  }
+}
