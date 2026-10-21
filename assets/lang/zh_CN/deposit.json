@@ -1,0 +1,12 @@
+{
+  "abp.upgrade.deposit.name": "存放升级",
+  "abp.upgrade.advanced_deposit.name": "高级存放升级",
+  "abp.deposit.contents": "仅存放容器中已有的物品：{}",
+  "abp.deposit.contents.help": "§7开启后忽略过滤列表",
+  "abp.deposit.describe.contents": "§7仅存放容器中已有的物品",
+  "abp.deposit.describe.filter_all": "§7过滤：全部物品",
+  "abp.deposit.describe.filter_allow": "§7白名单：{} 种物品",
+  "abp.deposit.describe.filter_deny": "§7黑名单：{} 种物品",
+  "abp.deposit.done": "已存放 {} 组物品",
+  "abp.deposit.nothing": "没有可存放的物品"
+}

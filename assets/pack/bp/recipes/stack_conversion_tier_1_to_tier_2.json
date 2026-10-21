@@ -1,0 +1,20 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:stack_conversion_tier_1_to_tier_2"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "XXX",
+      "XSX",
+      "XXX"
+    ],
+    "key": {
+      "X": { "item": "minecraft:gold_block" },
+      "S": { "item": "minecraft:leather" }
+    },
+    "unlock": [{ "item": "minecraft:gold_block" }],
+    "result": { "item": "alleviatedbackpacks:stack_conversion_tier_1_to_tier_2", "count": 1 }
+  }
+}

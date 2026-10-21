@@ -1,0 +1,20 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:stack_conversion_starter_to_tier_1"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      " X ",
+      "XSX",
+      " X "
+    ],
+    "key": {
+      "X": { "item": "minecraft:iron_block" },
+      "S": { "item": "minecraft:leather" }
+    },
+    "unlock": [{ "item": "minecraft:iron_block" }],
+    "result": { "item": "alleviatedbackpacks:stack_conversion_starter_to_tier_1", "count": 1 }
+  }
+}
