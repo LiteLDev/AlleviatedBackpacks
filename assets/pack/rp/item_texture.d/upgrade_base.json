@@ -1,0 +1,5 @@
+{
+  "abp_upgrade_base": {
+    "textures": "textures/items/upgrade_base"
+  }
+}

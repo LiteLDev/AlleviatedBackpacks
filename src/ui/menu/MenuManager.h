@@ -38,6 +38,8 @@ public:
     bool open(Player& player, std::shared_ptr<Menu> menu);
     /// Closes the player's menu, if any.
     void close(Player& player);
+    /// Closes every open menu (world stopping, mod disable).
+    void closeAll();
     /// Closes and opens the same menu again (applies a changed title).
     void reopen(Player& player);
     /// Closes the menu, then runs `fn` a few ticks later (once the client screen is gone). Use it

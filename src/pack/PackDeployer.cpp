@@ -29,6 +29,7 @@ namespace abp::pack {
 
 namespace fs = std::filesystem;
 
+#ifdef ABP_SERVER
 namespace {
 std::optional<nlohmann::json> readJson(fs::path const& p) {
     std::ifstream in(p);
@@ -51,6 +52,7 @@ std::string levelName() {
     return "Bedrock level";
 }
 } // namespace
+#endif
 
 class PackDeployer {
 public:

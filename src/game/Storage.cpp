@@ -132,7 +132,12 @@ void Storage::clear(bool doSave) {
 void Storage::install() {
     auto& bus = ll::event::EventBus::getInstance();
     // A new world (client: every local world load) starts with an empty cache.
-    mListeners.push_back(bus.emplaceListener<ll::event::ServerStartedEvent>([this](auto&) { clear(false); }));
+    mListeners.push_back(bus.emplaceListener<ll::event::ServerStartedEvent>([this](auto&) {
+        clear(false);
+        log().info("AlleviatedBackpacks world ready");
+    }));
+    // BDS enables mods after the server started: the world is already there.
+    if (available()) log().info("AlleviatedBackpacks world ready");
     mListeners.push_back(bus.emplaceListener<ll::event::ServerStoppingEvent>([this](auto&) {
         clear(true);
         log().debug("backpacks saved (world stopping)");

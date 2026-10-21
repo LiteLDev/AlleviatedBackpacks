@@ -1,0 +1,156 @@
+# AGENTS.md
+
+AlleviatedBackpacks is a Bedrock port of the *behaviour* of the Java mod Sophisticated Backpacks,
+written as a LeviLamina native mod. It targets MC **1.26.51** / LeviLamina **26.51.7**, builds
+with xmake + clang-cl on Windows x64, and runs on **both** the dedicated server (BDS) and the
+client (local worlds through LeviLauncher). One code base, two builds (`--target_type=server|client`).
+
+Policy: never copy code or assets from the Java Sophisticated Backpacks repository (behaviour
+reference only). Textures are original pixel art drawn by `tools/textures/*.ps1`.
+
+## Layout
+
+| Path | What it is |
+| ---- | ---------- |
+| `src/core/` | Pure C++ (no `mc/`/`ll/` includes): `Tier`, `ItemStackData`, `BackpackInventory`, `Filter`, `BackpackData`, `Codec`, `Format`. Static lib `abp-core`, unit-tested in `tests/`. |
+| `src/game/` | Game adapters: `ItemConv` (ItemStack <-> core), `BackpackItem` (item ids, uuid NBT), `Backpack` + `Storage` (per-world persistence), `PlayerScan`, `PlayerTicker`. |
+| `src/upgrade/` | `IUpgrade.h` (upgrade contract + registry), `UpgradeManager.h` (install/remove/toggle/pickup dispatch). |
+| `src/ui/menu/` | Fake-chest GUI framework: `Slot.h`, `Menu.h`, `MenuManager.h`, `BackpackMenu.h` (main GUI + button/setting registries), `FilterMenu.h`. |
+| `src/selftest/` | `SelfTest.h` (in-game test framework) + `FoundationTests.cpp`. |
+| `src/pack/` | `PackDeployer` (BDS: puts the resource pack on the world). |
+| `src/mod/` | Entry (`Main.cpp`), `Log.h`, `Module.h`, `Config.h`, `GeneralConfig.h`, `I18n.h`, `Commands.h`, `Registry.h`. |
+| `assets/lang/<locale>/<unit>.json` | Mod (server-side) translations, merged into `lang/<locale>.json`. |
+| `assets/pack/bp/` | Behavior pack: `items/*.json`, `recipes/*.json`, `manifest.json`. |
+| `assets/pack/rp/` | Resource pack: `textures/items/*.png`, fragments `item_texture.d/*.json`, `terrain_texture.d/*.json`, `texts.d/<locale>/*.lang`. |
+| `tools/build.ps1` | Builds server and/or client into `bin/<target>/AlleviatedBackpacks/`. |
+| `tools/xmake/assemble.lua` | Post-build: copies binaries, merges lang + pack fragments. |
+| `tools/textures/` | `lib.ps1` (pixel-art helpers), `backpacks.ps1`, `upgrade_base.ps1`. |
+| `tools/e2e/` | Real-game harnesses (server + client); see `tools/e2e/README.md`. |
+
+## Work as a feature unit (no shared-file edits)
+
+Each feature unit owns its own files and registers itself. **Do not edit** `src/mod/Main.cpp`,
+existing contracts or other units' files. Extend contracts compatibly (add, never change/remove)
+and only when your unit really needs it.
+
+Files a unit typically adds (`<unit>` = e.g. `pickup`):
+- `src/upgrade/<unit>/*.cpp|h` (or `src/feature/<unit>/`), namespace `abp::upgrade::<unit>` / `abp::<dir>`.
+- `assets/lang/en_US/<unit>.json` + `assets/lang/zh_CN/<unit>.json` (both required).
+- `assets/pack/bp/items/<unit>_upgrade.json`, `assets/pack/bp/recipes/<unit>_upgrade.json`.
+- `assets/pack/rp/textures/items/<unit>_upgrade.png` (drawn by `tools/textures/<unit>.ps1`, use `lib.ps1`).
+- `assets/pack/rp/item_texture.d/<unit>.json`, `assets/pack/rp/texts.d/{en_US,zh_CN}/<unit>.lang`.
+- Selftests in the unit's .cpp (`ABP_REGISTER_SELFTEST("<unit>.<case>", ...)`), e2e scenarios in
+  `tools/e2e/{server,client}/scenarios/<unit>.ps1`.
+
+Duplicate keys in any merged fragment (lang JSON, item_texture, terrain_texture, texts) fail the build.
+
+### Registration macros
+
+| Macro | Header | Purpose |
+| ----- | ------ | ------- |
+| `ABP_REGISTER_MODULE(T)` / `ABP_REGISTER_MODULE_ORDERED(T, order)` | `mod/Module.h` | `T` has `install()`/`uninstall()` (+ optional `load()` at mod load, + optional `static T& get()`). Installed on enable in `order`, uninstalled in reverse. |
+| `ABP_REGISTER_UPGRADE(T)` | `upgrade/IUpgrade.h` | `T : IUpgrade`, default-constructible, stateless singleton. |
+| `ABP_REGISTER_CONFIG("section", T)` | `mod/Config.h` | Reflectable struct with `int version`; file `config/<section>.json`; read with `abp::config::get<T>()`; `/backpack reload` reloads. |
+| `ABP_REGISTER_SELFTEST("unit.case", fn)` | `selftest/SelfTest.h` | `fn(Context&)` or `ll::coro::CoroTask<>(Context&)`. |
+| `ABP_REGISTER_BACKPACK_BUTTON(BackpackButton{...})` | `ui/menu/BackpackMenu.h` | Button in the storage page control row (max 4 shown). |
+| `ABP_REGISTER_BACKPACK_SETTING(BackpackSetting{...})` | `ui/menu/BackpackMenu.h` | Entry in the backpack settings form. |
+| `ABP_REGISTER_SUBCOMMAND(fn)` | `mod/Commands.h` | Adds overloads to `/backpack` (alias `/abp`). |
+
+Registrations live in .cpp files linked directly into the DLL, so they are never stripped.
+
+## Contracts in short
+
+- **Items**: backpacks are `alleviatedbackpacks:<tier>_backpack` (tiers in `core/Tier.h`:
+  leather 27/1, copper 45/1, iron 54/2, gold 81/3, diamond 108/5, netherite 120/7 storage/upgrade
+  slots). The uuid lives in the item's user data (`abp_uuid`), assigned on first open
+  (`Storage::forItem`). Upgrade items are `alleviatedbackpacks:<id>_upgrade` (by convention), crafted
+  from `alleviatedbackpacks:upgrade_base`.
+- **Storage** (`game/Storage.h`): `find(uuid)`, `create(tier)`, `forItem(stack, &changed)`,
+  `save`, `erase`. Returns `std::shared_ptr<game::Backpack>`; keep shared_ptrs, never raw pointers.
+  Data is JSON (`core::BackpackData`, versioned via `kVersion`) in the world's LevelDB.
+- **Backpack** (`game/Backpack.h`): `inventory()` (core `BackpackInventory`), `data()`
+  (settings JSON, upgrade slots), `markDirty()`, `revision()`, `rebuildHooks()`, capabilities
+  (`addCapability("allow_nesting")`), `transient<T>(key)`.
+- **Inventory hooks** (`core/BackpackInventory.h`): insert filters return Allow/Deny/Void/VoidOverflow
+  (first non-Allow in priority order wins; `slot == -1` is the whole-stack check before automatic
+  placement), extract filters, limit modifiers (stack upgrades), change listeners. Every insert
+  carries an `AccessContext{Source::Player|Pickup|Automation|Upgrade|Internal, user}`.
+  Register hooks **only** in `IUpgrade::attach()` with `ctx.hookOwner()`.
+- **Upgrades** (`upgrade/IUpgrade.h`): `info()` (id, itemId, nameKey, tier, group, maxPerBackpack,
+  conflicts, hasSettings, toggleable), `canInstall/onInstall/canRemove/onRemove`, `attach`,
+  `onTick(TickContext)` (every `general.upgradeTickInterval` ticks while carried), `onPickup(ctx,
+  item)` (reduce `item.count` by what you took), `openSettings`/`createSettingsMenu`, `describe`.
+  Per-instance settings: `ctx.settings()` + `ctx.saveSettings(rebuildHooks)`. Settings travel with
+  the upgrade item when it is removed.
+- **Menus** (`ui/menu/*.h`): subclass `Menu`, fill slots in `build()`; slot types `StorageSlot`,
+  `GhostSlot`, `ButtonSlot`, `StaticSlot`, `CallbackSlot`; `ui::icon(id, name, lore)`.
+  `MenuManager::get().open/close/closeThen/reopen`. Use `closeThen` before showing a form.
+  `FilterMenu::forUpgrade(player, ctx, "filter", 9)` + `core::Filter::fromJson(ctx.settings()["filter"], 9)`.
+- **Strings**: `abp::tr("abp.key", "English fallback", args...)` / `abp::trFor(player, ...)` with
+  `{}`/`{0}` placeholders. Keys start with `abp.<unit>.`. Item names come from RP `texts.d`.
+- **Logging**: `abp::log()` (`mod/Log.h`). No per-tick logging.
+- **Selftests** (`selftest/SelfTest.h`): `ctx.player()` (SimulatedPlayer), `ctx.createBackpack(tier)`,
+  `ctx.backpackItem(bp)`, `ctx.give(player, item, slot)`, `ctx.installUpgrade(bp, "id")`,
+  `co_await ctx.ticks(n)`, `ctx.check/require/fail/info`. Menus can be driven without a client with
+  `MenuManager::simulate(player, {ActionType, src, dst, amount})` + `forceShown` + `shownItem`.
+
+## Build, test, run
+
+In a fresh pwsh refresh PATH first (the build script does this and adds LLVM if needed):
+`$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User')`
+
+```powershell
+pwsh tools/build.ps1 -Target all            # bin/server/AlleviatedBackpacks + bin/client/AlleviatedBackpacks
+pwsh tools/build.ps1 -Target server -Tests  # one platform + unit tests
+xmake build -y abp-tests; xmake run abp-tests
+```
+
+- `git config --global core.longpaths true` is required (long LeviLamina header paths).
+- `clang-cl` must be on PATH for xmake's package builds (`C:\Program Files\LLVM\bin`).
+- `xmake-requires.lock` is committed; it holds entries for both target types.
+- In game: `/backpack selftest [glob]` (alias `/abp`; op or server console). Output lines are
+  exactly `SELFTEST PASS <name>`, `SELFTEST FAIL <name>: <reason>`, `SELFTEST DONE pass=<N> fail=<M>`.
+- Log contract: `AlleviatedBackpacks enabled` on enable; `AlleviatedBackpacks world ready` when a
+  world is available (BDS: at enable; client: every local world load).
+- E2E harnesses for BDS and the client: see `tools/e2e/README.md`. Scenarios per unit live in
+  `tools/e2e/{server,client}/scenarios/<unit>.ps1`. There is one game client per machine: respect the
+  e2e lock files in `%APPDATA%\levilauncher.exe\` (the harness handles them).
+
+Deploying by hand: copy `bin/server/AlleviatedBackpacks` to `<BDS>/plugins/` (LeviLamina's BDS mod
+folder is `plugins`), or `bin/client/AlleviatedBackpacks` to
+`%APPDATA%\levilauncher.exe\versions\1.26.51.01\mods\`.
+
+## Bedrock / LeviLamina rules (learned the hard way)
+
+- Headers: `%LOCALAPPDATA%\.xmake\packages\l\levilamina\26.51.7\<hash>\include\{ll,mc}` (one hash per
+  target type); LL sources in `%LOCALAPPDATA%\lip\cache\git%2Bhttps%3A%2F%2Fgithub.com%2FLiteLDev%2FLeviLamina.git%23v26.51.7`.
+  Check them before guessing a name or signature.
+- Callable: `MCAPI`, `MCFOLD`, `MCTAPI`, unmarked `virtual`. **Never** `MCNAPI`. `ll::TypedStorage`
+  members are fields (`.get()`, `*`, `->`). Packets without an MCAPI constructor are created with
+  `MinecraftPackets::createPacket(MinecraftPacketIds::X)` + `static_cast`; send with `pkt.sendTo(player)`.
+- Hook virtuals via `&Cls::$fn` with `LL_TYPE_INSTANCE_HOOK`; `hook()` in `install()`, `unhook()` in `uninstall()`.
+- **No `dynamic_cast` on game types** (they have no usable RTTI: it throws `__non_rtti_object`).
+  A Player that is not `isClientSide()` is a `ServerPlayer`.
+- Types used as command parameters must have external linkage (not in an anonymous namespace).
+- `ItemStack` has no `(name, count, aux)` constructor: use `game::ItemConv::make(id, count, aux)`.
+  Counts are `uchar` (max 255); core uses `int` counts and the GUI shows bigger counts in the lore.
+- Copying an `ItemStackRequestId` needs vtable stubs; `MenuManager.cpp` already provides them.
+- BDS enables mods **after** "Server started" (the world already exists at `install()`); the client
+  enables mods at game start (no world yet) and fires `ServerStartedEvent` for every local world.
+  Write modules that work in both orders.
+- `ll::service::getLevel()` on the client is the integrated server's level (null outside a world).
+- Behavior packs in `mods/<name>/behavior_packs/` are added to every world by LeviLamina (both
+  platforms); resource packs in `resource_packs/` are added to the client's global stack. On BDS
+  `PackDeployer` adds the RP to `worlds/<level>/world_resource_packs.json` and marks it required.
+- Menus are server-authoritative fake chests; never call `MenuManager::open` re-entrantly from inside
+  a slot callback expecting immediate effect (it is deferred until the request finishes).
+- Game threads: everything here runs on the server thread. Don't keep `Player*` across ticks;
+  store `getOrCreateUniqueID()` and look the player up again.
+
+## Conventions
+
+- C++20, `.clang-format` (LLVM-based, 4 spaces, 120 columns). Namespaces follow directories
+  (`abp::core`, `abp::game`, `abp::upgrade`, `abp::ui`, `abp::selftest`, ...).
+- English in code and comments; user-facing text through `tr`/`trFor` + lang fragments (en_US and zh_CN).
+- Every `src/core` change comes with gtest coverage in `tests/`; every feature comes with selftests.
+- Commit in small, buildable steps. Both platforms must build (`pwsh tools/build.ps1 -Target all`).

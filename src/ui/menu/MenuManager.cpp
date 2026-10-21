@@ -6,6 +6,7 @@
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/player/PlayerDieEvent.h"
 #include "ll/api/event/player/PlayerDisconnectEvent.h"
+#include "ll/api/event/server/ServerStoppingEvent.h"
 #include "ll/api/event/world/ServerLevelTickEvent.h"
 #include "ll/api/memory/Hook.h"
 #include "ll/api/service/Bedrock.h"
@@ -946,14 +947,21 @@ void MenuManager::install() {
     mListeners.push_back(bus.emplaceListener<ll::event::PlayerDieEvent>([this](ll::event::PlayerDieEvent& ev) {
         close(ev.self());
     }));
+    // Client: local worlds come and go (and reuse player ids); never carry sessions over.
+    mListeners.push_back(bus.emplaceListener<ll::event::ServerStoppingEvent>([this](auto&) { closeAll(); }));
 }
 
-void MenuManager::uninstall() {
+void MenuManager::closeAll() {
     std::vector<std::int64_t> keys;
     for (auto& [k, _] : mSessions) keys.push_back(k);
     for (auto k : keys) finish(findPlayer(k), k, true);
+    mClosedIds.clear();
     mDelayed.clear();
     mDeferred.clear();
+}
+
+void MenuManager::uninstall() {
+    closeAll();
     auto& bus = ll::event::EventBus::getInstance();
     for (auto& l : mListeners) bus.removeListener(l);
     mListeners.clear();
