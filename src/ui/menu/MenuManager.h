@@ -8,6 +8,8 @@
 
 #include "ll/api/event/ListenerBase.h"
 
+#include "mc/world/level/BlockPos.h"
+
 #include "ui/menu/Menu.h"
 
 class Player;
@@ -16,9 +18,13 @@ namespace abp::ui {
 
 /// Shows `Menu`s as fake chest GUIs and keeps them server-authoritative.
 ///
-/// How it works: a chest block (two for 54 slots) is sent to the player only, at a spot above
-/// their head, with a block-actor update carrying the title (and the double-chest pairing).
-/// A `ContainerOpenPacket` opens it and the slot displays are sent as inventory content.
+/// How it works: a chest block (two for 54 slots) is sent to the player only, 3-4 blocks above
+/// their feet at a spot no fake chest used in the last seconds, followed by a block-actor update
+/// carrying the title (and the double-chest pairing). A few ticks later a `ContainerOpenPacket`
+/// opens it and the slot displays are sent as inventory content. Replacing a shown menu closes it
+/// with a server-initiated `ContainerClose`; the next chest is only placed once the client has
+/// answered that close (which is confirmed, as every close of ours is), because the client drops
+/// a `ContainerOpen` while it is still closing a screen. See AGENTS.md "Fake chest GUI rules".
 /// While a menu is open every `ItemStackRequestPacket` of that player is handled here (never by
 /// vanilla): items move through `Slot::take/accept`, the player's inventory and cursor are
 /// edited on the server, a response is sent and all touched containers are re-synced. Closing
@@ -36,12 +42,9 @@ public:
     /// Opens `menu`, replacing any open menu (which gets `onClose`). Returns false if the player
     /// can't open a menu (not a server player, dead).
     bool open(Player& player, std::shared_ptr<Menu> menu);
-    /// Replaces the open menu with `menu` inside the same chest screen: no close/reopen on the
-    /// client (the title stays the old one), the slots are rebuilt and re-sent at once. The old
-    /// menu gets `onClose` + `onDestroyed`; the cursor stays. Use it to switch between menus of
-    /// the same size: on a real client, opening a new chest right after a server-side close is
-    /// unreliable. Falls back to `open` when no menu is shown or the sizes differ.
-    bool swap(Player& player, std::shared_ptr<Menu> menu);
+    /// Same as `open` (kept for callers that switch between menus from inside a menu): switching
+    /// is reliable on a real client and shows the new menu's title.
+    bool swap(Player& player, std::shared_ptr<Menu> menu) { return open(player, std::move(menu)); }
     /// Closes the player's menu, if any.
     void close(Player& player);
     /// Closes every open menu (world stopping, mod disable).
@@ -51,6 +54,9 @@ public:
     /// Closes the menu, then runs `fn` a few ticks later (once the client screen is gone). Use it
     /// to show a form from a menu button.
     void closeThen(Player& player, std::function<void(Player&)> fn);
+
+    /// Runs `fn` on the server thread `ticks` ticks from now (dropped when the world stops).
+    void runLater(int ticks, std::function<void()> fn) { after(ticks, std::move(fn)); }
 
     [[nodiscard]] std::shared_ptr<Menu> current(Player const& player) const;
     /// True once the chest screen has been opened on the client (after the open delay).
@@ -82,22 +88,39 @@ public:
 
     // Internal (packet hooks).
     bool handleRequestPacket(Player& player, void const* packet);
-    bool handleClosePacket(Player& player, int containerId);
+    /// `containerType`: the type the client sent (echoed in the confirmation), -1 = chest.
+    bool handleClosePacket(Player& player, int containerId, int containerType = -1);
 
 private:
     void tick();
+    void tickPendingCloses();
     void finish(Player* player, std::int64_t key, bool sendClose);
     void runDeferred();
     void sync(Player& player, Session& s, bool full);
     void after(int ticks, std::function<void()> fn);
+    void place(Player& player, Session& s);
+    [[nodiscard]] bool awaitingClose(std::int64_t key) const;
+    std::vector<BlockPos> pickFakePositions(Player& player, bool twoBlocks);
 
     struct Delayed {
         int                   ticks;
         std::function<void()> fn;
     };
+    /// A screen the server closed; the client's answering ContainerClose is still due.
+    struct PendingClose {
+        int                                       id;
+        int                                       age = 0;
+        std::vector<std::function<void(Player&)>> then; ///< `closeThen` callbacks
+    };
+    struct RecentFake {
+        BlockPos     pos;
+        std::int64_t until;
+    };
 
-    std::unordered_map<std::int64_t, std::unique_ptr<Session>> mSessions;
-    std::unordered_map<std::int64_t, int>                      mClosedIds;
+    std::unordered_map<std::int64_t, std::unique_ptr<Session>>    mSessions;
+    std::unordered_map<std::int64_t, std::vector<PendingClose>> mPendingCloses;
+    std::unordered_map<std::int64_t, std::vector<RecentFake>>   mRecentFake;
+    std::int64_t                                                mTick = 0;
     std::vector<ll::event::ListenerPtr>                        mListeners;
     std::vector<std::function<void()>>                         mDeferred;
     std::vector<Delayed>                                       mDelayed;

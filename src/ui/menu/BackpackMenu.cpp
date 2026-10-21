@@ -47,7 +47,12 @@ std::string tierName(Player& player, core::Tier tier) {
 /// One upgrade slot on the upgrades page.
 class UpgradeSlotView : public Slot {
 public:
-    UpgradeSlotView(std::shared_ptr<game::Backpack> bp, int index) : mBackpack(std::move(bp)), mIndex(index) {}
+    /// `menu` owns this slot; it is rebuilt after an install/removal so the page's toggle and
+    /// settings buttons follow at once.
+    UpgradeSlotView(std::shared_ptr<game::Backpack> bp, int index, Menu* menu)
+    : mBackpack(std::move(bp)),
+      mIndex(index),
+      mMenu(menu) {}
 
     [[nodiscard]] ItemStack display(Player& player) const override {
         auto const& s = mBackpack->data().upgrades[static_cast<std::size_t>(mIndex)];
@@ -93,6 +98,7 @@ public:
                     else cursor.set(left);
                     setCursor(cursor);
                 }
+                mMenu->invalidate();
                 return true;
             }
         }
@@ -103,6 +109,7 @@ public:
             if (!reason.empty()) c.player.sendMessage(reason);
             return true;
         }
+        mMenu->invalidate();
         auto oldStack = game::ItemConv::toStack(*old, 1);
         if (cursor.mCount <= 1) {
             setCursor(oldStack);
@@ -121,6 +128,7 @@ public:
             if (!reason.empty()) player.sendMessage(reason);
             return {};
         }
+        mMenu->invalidate();
         return game::ItemConv::toStack(*item, 1);
     }
 
@@ -131,12 +139,14 @@ public:
             if (!reason.empty()) player.sendMessage(reason);
             return 0;
         }
+        mMenu->invalidate();
         return 1;
     }
 
 private:
     std::shared_ptr<game::Backpack> mBackpack;
     int                             mIndex;
+    Menu*                           mMenu; ///< owns this slot
 };
 /// A storage slot whose display runs through the registered `BackpackSlotDecorator`s.
 class DecoratedStorageSlot : public StorageSlot {
@@ -217,12 +227,22 @@ void BackpackMenu::buildStorage(Player&) {
     }
 }
 
+std::string BackpackMenu::upgradeSignature() const {
+    std::string sig;
+    for (auto const& s : mBackpack->data().upgrades) {
+        sig += s.item.id;
+        sig += s.enabled ? "+;" : "-;";
+    }
+    return sig;
+}
+
 void BackpackMenu::buildUpgrades(Player& player) {
+    mUpgradeSig       = upgradeSignature();
     auto const& slots = mBackpack->data().upgrades;
     for (int i = 0; i < kPageSlots; ++i) setSlot(i, filler());
     for (int i = 0; i < 9; ++i) {
         if (i >= static_cast<int>(slots.size())) continue;
-        setSlot(i, std::make_shared<UpgradeSlotView>(mBackpack, i));
+        setSlot(i, std::make_shared<UpgradeSlotView>(mBackpack, i, this));
         auto const& s    = slots[static_cast<std::size_t>(i)];
         auto*       type = upgrade::upgradeFor(s.item);
         if (!type) {
@@ -372,6 +392,9 @@ void BackpackMenu::openSettingsForm(Player& player) {
 }
 
 void BackpackMenu::onTick(Player& player) {
+    // Upgrades installed/removed/toggled elsewhere (another viewer, a command, a feature) bring
+    // the page's toggle and settings buttons up to date.
+    if (mView == View::Upgrades && !needsBuild() && upgradeSignature() != mUpgradeSig) invalidate();
     if (!mSource) return;
     auto const& item = game::itemAt(player, *mSource);
     auto        uuid = game::backpackUuid(item);

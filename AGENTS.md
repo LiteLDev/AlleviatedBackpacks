@@ -155,6 +155,37 @@ folder is `plugins`), or `bin/client/AlleviatedBackpacks` to
 - Game threads: everything here runs on the server thread. Don't keep `Player*` across ticks;
   store `getOrCreateUniqueID()` and look the player up again.
 
+## Fake chest GUI rules
+
+`MenuManager` implements these; keep them if you touch it, and use `open/close/closeThen` instead
+of sending container packets yourself.
+
+- **Answer every ContainerClose.** When the client closes one of our screens it sends a
+  ContainerClose and waits for one back (`serverInitiated=false`, same id and type). It does the same
+  after a *server-initiated* close (menu replaced or closed by the server). Until that answer comes,
+  the client opens **no** other screen: no chest, and no chat either ("chat broken until rejoin").
+- **Switching menus = close, wait, then place.** Send the server-initiated close, restore the fake
+  blocks, wait for the client's answering close (at most 20 ticks), and only then send the new fake
+  chest. The client sends its answering close only after its close transition, about 8-9 ticks
+  (~430 ms) later. A ContainerOpen that arrives before that is dropped: the server thinks the menu
+  is open, and the client shows nothing. This applies to *any* open after a server close (replace,
+  `close` + `open`, `closeThen`, tabs), not only to a direct replace. `MenuManager::swap` is just
+  `open`.
+- **Another screen up = rejected open.** If the chat screen (or another screen) is still up, for
+  example right after a chat command that opens a menu, the client rejects the ContainerOpen at once
+  with a ContainerClose for id -1. Vanilla answers that close; we send the open again 10 ticks later.
+- **Place, then open.** Send UpdateBlock for all chest halves first, then their BlockActorData
+  (`CustomName`, and for 54 slots the `pairx/pairz/pairlead` pairing), wait about 3 ticks, then
+  send ContainerOpen and the slot contents.
+- **Fake chest position.** Put it 3-4 blocks above the feet (or below for the world top). That is
+  well inside the client's container reach and out of the head's way when jumping. Prefer real air,
+  and never reuse a position that held a fake chest in the last ~5 s: the client may still have the
+  old chest's state there (a double chest's pairing).
+- `config/menu.json` `"debugPackets": true` logs every fake-chest packet sent and received
+  (`[menu-dbg]`). On the client build it also logs what the game client receives and its top
+  screen. With it on, `/backpack menudebug closeopen` opens the carried backpack, closes it from the
+  server and reopens it 4 ticks later. The client e2e scenario `menus` uses both.
+
 ## Conventions
 
 - C++20, `.clang-format` (LLVM-based, 4 spaces, 120 columns). Namespaces follow directories
