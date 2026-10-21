@@ -478,7 +478,7 @@ public:
         mListener = ll::event::EventBus::getInstance().emplaceListener<ll::event::PlayerUseItemEvent>(
             [](ll::event::PlayerUseItemEvent& ev) {
                 auto& player = ev.self();
-                if (player.isClientSide() || !game::isBackpack(ev.item())) return;
+                if (player.isClientSide() || ev.isCancelled() || !game::isBackpack(ev.item())) return;
                 ev.cancel();
                 if (MenuManager::get().current(player)) return;
                 BackpackMenu::openFor(player, game::selectedSlot(player));
