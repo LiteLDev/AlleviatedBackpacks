@@ -351,7 +351,7 @@ void NestedBackpackMenu::build(Player& player) {
     setSlot(
         46,
         std::make_shared<ui::ButtonSlot>(
-            ui::icon("minecraft:oak_door", trFor(player, "abp.inception.back", "Back to the outer backpack"), lore),
+            ui::icon("minecraft:wooden_door", trFor(player, "abp.inception.back", "Back to the outer backpack"), lore),
             [this](ui::ClickContext const& c) { goBack(c.player); }
         )
     );

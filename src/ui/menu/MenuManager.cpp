@@ -893,6 +893,14 @@ bool MenuManager::handleClosePacket(Player& player, int containerId) {
         // A late close for a menu we already closed server-side: swallow it.
         if (auto c = mClosedIds.find(key); c != mClosedIds.end() && c->second == containerId) {
             mClosedIds.erase(c);
+            // Still confirm it: after a server-initiated close the client waits for this answer and
+            // ignores the next ContainerOpen until it gets one (menu -> menu switches stayed blank).
+            auto  pkt               = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
+            auto& reply             = static_cast<ContainerClosePacket&>(*pkt);
+            reply.mContainerId      = static_cast<ContainerID>(containerId);
+            reply.mContainerType    = SharedTypes::Legacy::ContainerType::Container;
+            reply.mServerInitiatedClose = false;
+            reply.sendTo(player);
             return true;
         }
         return false;

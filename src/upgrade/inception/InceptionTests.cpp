@@ -266,6 +266,9 @@ ABP_REGISTER_SELFTEST("inception.open_nested_gui", [](Context& ctx) -> ll::coro:
     ctx.check(nested->rootSource() == game::ItemLocation{game::ItemLocation::Kind::Inventory, 0}, "root = slot 0");
     ctx.check(nested->lockedInventorySlot == 0, "root item locked");
     ctx.check(backpackSlots(*a).size() == 1, "b was not dropped");
+    mm.forceShown(player);
+    co_await ctx.ticks(3);
+    ctx.check(!mm.shownItem(player, 46).isNull(), "Back button has a visible icon");
 
     // One level deeper through the button.
     mm.forceShown(player);
