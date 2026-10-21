@@ -1,0 +1,11 @@
+{
+  "abp.compacting.name": "压缩升级",
+  "abp.compacting.advanced_name": "高级压缩升级",
+  "abp.compacting.only_uncraftable": "仅压缩可还原物品：{}",
+  "abp.compacting.only_uncraftable.help1": "§7只压缩能够合成回",
+  "abp.compacting.only_uncraftable.help2": "§7原物品的物品",
+  "abp.compacting.grid.basic": "压缩 2x2 配方",
+  "abp.compacting.grid.advanced": "压缩 3x3 和 2x2 配方",
+  "abp.compacting.filter.allow": "§7白名单：{} 种物品",
+  "abp.compacting.filter.deny": "§7黑名单：{} 种物品"
+}
