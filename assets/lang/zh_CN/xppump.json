@@ -1,0 +1,23 @@
+{
+  "abp.xppump.name": "经验泵升级",
+  "abp.xppump.stored": "§a已储存：§f{} 经验 §7（{} 级）",
+  "abp.xppump.you": "§7你：{} 级（{} 经验）",
+  "abp.xppump.store_all": "储存全部等级",
+  "abp.xppump.store_n": "储存 {} 级",
+  "abp.xppump.store_one": "储存 1 级",
+  "abp.xppump.take_all": "全部取出",
+  "abp.xppump.take_n": "取出 {} 级",
+  "abp.xppump.take_one": "取出 1 级",
+  "abp.xppump.keep": "目标等级：{}",
+  "abp.xppump.keep.help": "§7点击：±1，Shift+点击：±10",
+  "abp.xppump.keep.info": "§7用于自动模式。",
+  "abp.xppump.keep.minus": "降低目标等级",
+  "abp.xppump.keep.plus": "提高目标等级",
+  "abp.xppump.mode.off": "自动：关闭",
+  "abp.xppump.mode.store": "自动：储存超出目标的等级",
+  "abp.xppump.mode.give": "自动：补充到目标等级",
+  "abp.xppump.mode.both": "自动：保持目标等级",
+  "abp.xppump.mode.help": "§7点击切换",
+  "abp.xppump.mending": "经验修补：{}",
+  "abp.xppump.mending.help": "§7用储存的经验修复手持 / 穿戴的经验修补物品。"
+}

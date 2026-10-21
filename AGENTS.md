@@ -21,7 +21,7 @@ reference only). Textures are original pixel art drawn by `tools/textures/*.ps1`
 | `src/mod/` | Entry (`Main.cpp`), `Log.h`, `Module.h`, `Config.h`, `GeneralConfig.h`, `I18n.h`, `Commands.h`, `Registry.h`. |
 | `assets/lang/<locale>/<unit>.json` | Mod (server-side) translations, merged into `lang/<locale>.json`. |
 | `assets/pack/bp/` | Behavior pack: `items/*.json`, `recipes/*.json`, `manifest.json`. |
-| `assets/pack/rp/` | Resource pack: `textures/items/*.png`, fragments `item_texture.d/*.json`, `terrain_texture.d/*.json`, `texts.d/<locale>/*.lang`. |
+| `assets/pack/rp/` | Resource pack: `textures/items/*.png`, fragments `item_texture.d/*.json`, `terrain_texture.d/*.json`, `texts.d/<locale>/*.lang`, `sounds.d/*.json` (`sound_definitions` entries). |
 | `tools/build.ps1` | Builds server and/or client into `bin/<target>/AlleviatedBackpacks/`. |
 | `tools/xmake/assemble.lua` | Post-build: copies binaries, merges lang + pack fragments. |
 | `tools/textures/` | `lib.ps1` (pixel-art helpers), `backpacks.ps1`, `upgrade_base.ps1`. |
@@ -42,7 +42,7 @@ Files a unit typically adds (`<unit>` = e.g. `pickup`):
 - Selftests in the unit's .cpp (`ABP_REGISTER_SELFTEST("<unit>.<case>", ...)`), e2e scenarios in
   `tools/e2e/{server,client}/scenarios/<unit>.ps1`.
 
-Duplicate keys in any merged fragment (lang JSON, item_texture, terrain_texture, texts) fail the build.
+Duplicate keys in any merged fragment (lang JSON, item_texture, terrain_texture, texts, sounds) fail the build.
 
 ### Registration macros
 
