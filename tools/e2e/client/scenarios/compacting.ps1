@@ -52,13 +52,23 @@ Start-Sleep -Milliseconds 800
 Save-Screenshot 'upgrades-page-installed' | Out-Null
 $mark = Get-LogMark
 $p = Menu-Slot 18; Click $p[0] $p[1] -Relative
-Wait-LogLine 'menu shown: Advanced Compacting Upgrade \(27 slots\)' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
+Wait-LogLine 'menu shown: Advanced Compacting Upgrade \(54 slots\)' 15 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 1200
 Save-Screenshot 'settings' | Out-Null
+# Toggle "only uncraftable" (control row, 6th button), then go back to the backpack.
+$p = Menu-Slot 50; Click $p[0] $p[1] -Relative
+Start-Sleep -Milliseconds 800
+Save-Screenshot 'settings-toggled' | Out-Null
+$mark = Get-LogMark
+$p = Menu-Slot 53; Click $p[0] $p[1] -Relative
+Wait-LogLine 'menu shown: Diamond Backpack \(54 slots\)' 15 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 1000
+Save-Screenshot 'back-to-upgrades' | Out-Null
 Close-Screen
 
 $info = Get-BackpackInfo
 if ($info -notmatch 'upgrades=\[advanced_compacting\]') { throw "upgrade not installed: $info" }
+# Only uncraftable is off now: iron ingots still compact (3x3 wins over the 2x2 trapdoor).
 
 # 4. Shift-click 64 iron ingots into the backpack: they become 7 blocks + 1 ingot.
 Open-Backpack 'storage-before'
