@@ -127,8 +127,10 @@ private:
     void buildUpgrades(Player& player);
     void buildControls(Player& player);
     void openSettingsForm(Player& player);
+    [[nodiscard]] std::string upgradeSignature() const;
 
     std::shared_ptr<game::Backpack>   mBackpack;
+    std::string                       mUpgradeSig; ///< upgrades as last built on the upgrades page
     std::optional<game::ItemLocation> mSource;
     View                              mView = View::Storage;
     int                               mPage = 0;

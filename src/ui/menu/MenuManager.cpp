@@ -59,6 +59,9 @@
 
 #include "mod/Log.h"
 #include "mod/Module.h"
+#include "ui/menu/MenuDebug.h"
+
+ABP_REGISTER_CONFIG("menu", abp::ui::MenuConfig);
 
 // `ItemStackRequestId` has two virtual `clientInit` members the game doesn't export. Copying a
 // request id (into our responses) emits its vtable here, so give them (never called) bodies.
@@ -70,13 +73,18 @@ void TypedClientNetId<ItemStackRequestIdTag, int, 0>::clientInit() {}
 namespace abp::ui {
 
 namespace {
-constexpr int kOpenDelay   = 3; ///< ticks between the fake block packets and ContainerOpen
-constexpr int kSwitchDelay = 5; ///< same, when replacing an open menu
-/// When replacing a shown menu: max ticks to wait for the client to acknowledge the old screen's
-/// close before opening the new one (a ContainerOpen that arrives while the client is still
+constexpr int kOpenDelay = 3; ///< ticks between the fake block packets and ContainerOpen
+/// After a server-initiated close: max ticks to wait for the client's answering ContainerClose
+/// before the next menu is placed anyway (a ContainerOpen that arrives while the client is still
 /// closing the previous screen is dropped by the client).
 constexpr int kAwaitCloseMax = 20;
-constexpr int kAfterClose  = 5; ///< ticks before `closeThen` callbacks run
+/// A server-closed id is still acknowledged if the client's close comes this late (short: ids
+/// are shared with vanilla containers).
+constexpr int kForgetClose = 200;
+/// Ticks a fake-chest position stays unused after its menu went away.
+constexpr int kFakeReuseCooldown = 100;
+constexpr int kAfterClose = 5; ///< ticks before `closeThen` callbacks run (no close to wait for)
+constexpr int kAfterAck   = 2; ///< ticks after the client's close before `closeThen` callbacks run
 constexpr int kDiffEvery   = 2; ///< ticks between display diffs
 constexpr float kMaxDistance = 8.0f;
 
@@ -102,6 +110,7 @@ void sendBlock(Player& p, BlockPos const& pos, Block const& block) {
     u.mUpdateFlags     = static_cast<uchar>(3);
     u.mRuntimeId       = runtimeIdOf(p.getLevel(), block);
     u.sendTo(p);
+    menuDebugLog("-> UpdateBlock ({},{},{}) {}", pos.x, pos.y, pos.z, block.getTypeName());
 }
 
 void sendBlockActor(Player& p, BlockPos const& pos, CompoundTag tag) {
@@ -109,6 +118,7 @@ void sendBlockActor(Player& p, BlockPos const& pos, CompoundTag tag) {
     pkt.mPos  = pos;
     pkt.mData = std::move(tag);
     pkt.sendTo(p);
+    menuDebugLog("-> BlockActorData ({},{},{})", pos.x, pos.y, pos.z);
 }
 
 FullContainerName containerName(ContainerEnumName name) { return FullContainerName{name, std::optional<uint>{}}; }
@@ -145,20 +155,25 @@ Block const* chestBlock() {
 } // namespace
 
 struct MenuManager::Session {
+    /// AwaitClose: the client is still closing an earlier screen (no fake block sent yet).
+    /// Placed: the fake chest was sent; ContainerOpen follows after `wait` ticks. Shown: open.
+    enum class Phase { AwaitClose, Placed, Shown };
+
     std::int64_t                               key;
     std::shared_ptr<Menu>                      menu;
     int                                        id = 1;
     std::vector<BlockPos>                      fake;
     int                                        dim = 0;
-    int                                        openIn = kOpenDelay;
-    bool                                       shown = false;
-    int                                        awaitClose = -1; ///< id of the replaced, still-closing screen
-    int                                        awaitTicks = 0;
+    Phase                                      phase = Phase::AwaitClose;
+    int                                        wait  = 0;
+    bool                                       clientOpened = false; ///< ContainerOpen sent (not just forceShown)
     bool                                       needFull = true;
     std::optional<std::uint64_t>               lastVersion;
     int                                        diffIn = 0;
     std::vector<ItemStack>                     sent;
     std::vector<std::function<void(Player&)>> afterClose;
+
+    [[nodiscard]] bool shown() const { return phase == Phase::Shown; }
 };
 
 MenuManager& MenuManager::get() {
@@ -188,17 +203,10 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
         return false;
     }
 
-    auto key      = keyOf(player);
-    bool replaced = mSessions.contains(key);
-    // Fake positions of the menu being replaced: the new chest avoids them so the client never
-    // mixes in the old chest's state (e.g. a double chest's pairing).
-    std::vector<BlockPos> previous;
-    int                   closingId = -1;
-    if (replaced) {
-        previous = mSessions[key]->fake;
-        if (mSessions[key]->shown) closingId = mSessions[key]->id;
-        finish(&player, key, true);
-    }
+    auto key = keyOf(player);
+    // Replacing a menu: close it first (a shown one gets a server-initiated ContainerClose that
+    // the client answers; see `handleClosePacket`).
+    if (mSessions.contains(key)) finish(&player, key, true);
 
     auto s  = std::make_unique<Session>();
     s->key  = key;
@@ -211,43 +219,17 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
     }
     sp->mContainerCounter = static_cast<ContainerID>(next);
     s->id                 = next;
-    s->openIn             = replaced ? kSwitchDelay : kOpenDelay;
-    s->awaitClose         = closingId;
-    s->awaitTicks         = closingId >= 0 ? kAwaitCloseMax : 0;
-
-    // Fake chest(s) two blocks above the head (below the feet if that's out of the world).
-    auto& region = player.getDimensionBlockSource();
-    auto  base   = player.getFeetBlockPos();
-    base.y += 3;
-    if (base.y >= region.getMaxHeight()) base.y = std::max<int>(player.getFeetBlockPos().y - 3, region.getMinHeight());
-    if (std::find(previous.begin(), previous.end(), base) != previous.end()) {
-        base.y += base.y + 1 < region.getMaxHeight() ? 1 : -1;
-    }
-    s->fake.push_back(base);
-    if (s->menu->rows() == Menu::Rows::Six) s->fake.push_back(BlockPos{base.x + 1, base.y, base.z});
-
-    for (std::size_t i = 0; i < s->fake.size(); ++i) {
-        auto const& pos = s->fake[i];
-        sendBlock(player, pos, *chest);
-        CompoundTag tag;
-        tag["id"]         = std::string("Chest");
-        tag["x"]          = pos.x;
-        tag["y"]          = pos.y;
-        tag["z"]          = pos.z;
-        tag["isMovable"]  = static_cast<uchar>(0);
-        tag["Findable"]   = static_cast<uchar>(0);
-        tag["CustomName"] = s->menu->title();
-        if (s->fake.size() == 2) {
-            auto const& other = s->fake[1 - i];
-            tag["pairx"]      = other.x;
-            tag["pairz"]      = other.z;
-            tag["pairlead"]   = static_cast<uchar>(i == 0 ? 1 : 0);
-        }
-        sendBlockActor(player, pos, std::move(tag));
-    }
 
     auto& session = *s;
     mSessions[key] = std::move(s);
+    // While the client is still closing an earlier screen it drops a ContainerOpen, so the fake
+    // chest is only placed once that close is acknowledged (or timed out), see tick().
+    if (awaitingClose(key)) {
+        session.phase = Session::Phase::AwaitClose;
+        menuDebugLog("open id={} waits for the client to close the previous screen", session.id);
+    } else {
+        place(player, session);
+    }
     session.menu->invalidate();
     try {
         session.menu->onOpen(player);
@@ -255,6 +237,99 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
         log().error("menu onOpen failed: {}", e.what());
     }
     return true;
+}
+
+bool MenuManager::awaitingClose(std::int64_t key) const {
+    auto it = mPendingCloses.find(key);
+    if (it == mPendingCloses.end()) return false;
+    return std::any_of(it->second.begin(), it->second.end(), [](PendingClose const& c) { return c.age < kAwaitCloseMax; });
+}
+
+std::vector<BlockPos> MenuManager::pickFakePositions(Player& player, bool twoBlocks) {
+    auto& region = player.getDimensionBlockSource();
+    auto  feet   = player.getFeetBlockPos();
+    auto& recent = mRecentFake[keyOf(player)];
+    std::erase_if(recent, [this](RecentFake const& r) { return r.until <= mTick; });
+    auto inWorld = [&](BlockPos const& p) { return p.y >= region.getMinHeight() && p.y < region.getMaxHeight(); };
+    // Tick until which a position stays blocked (0 = free).
+    auto blockedUntil = [&](BlockPos const& p) {
+        std::int64_t until = 0;
+        for (auto const& r : recent) {
+            if (r.pos == p) until = std::max(until, r.until);
+        }
+        return until;
+    };
+    auto isRecent = [&](BlockPos const& p) { return blockedUntil(p) != 0; };
+    // Candidates: 3-4 blocks above the feet (clear of the player's head even when jumping, well
+    // inside the client's container reach), then the same below the feet for the world top.
+    static constexpr int kOffsets[][3] = {
+        {0,  3, 0 },
+        {0,  4, 0 },
+        {0,  3, 1 },
+        {0,  4, 1 },
+        {-1, 3, 0 },
+        {-1, 4, 0 },
+        {0,  3, -1},
+        {0,  4, -1},
+        {0,  -2, 0},
+        {0,  -3, 0},
+        {0,  -2, 1},
+        {0,  -3, 1},
+    };
+    // If every candidate was used a moment ago: the one that was freed first.
+    std::vector<BlockPos> fallback;
+    std::int64_t          fallbackUntil = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        for (auto const& o : kOffsets) {
+            std::vector<BlockPos> ps{BlockPos{feet.x + o[0], feet.y + o[1], feet.z + o[2]}};
+            if (twoBlocks) ps.push_back(BlockPos{ps[0].x + 1, ps[0].y, ps[0].z});
+            if (!std::all_of(ps.begin(), ps.end(), inWorld)) continue;
+            std::int64_t until = 0;
+            for (auto const& p : ps) until = std::max(until, blockedUntil(p));
+            if (fallback.empty() || until < fallbackUntil) {
+                fallback      = ps;
+                fallbackUntil = until;
+            }
+            // Never reuse a position a fake chest had a moment ago: the client may still hold
+            // that chest's state (a double chest's pairing) and then fails to show the new one.
+            if (std::any_of(ps.begin(), ps.end(), isRecent)) continue;
+            // First pass: only air, so nothing real (a chest, a block entity) is masked.
+            if (pass == 0 && !std::all_of(ps.begin(), ps.end(), [&](BlockPos const& p) { return region.getBlock(p).isAir(); })) {
+                continue;
+            }
+            return ps;
+        }
+    }
+    if (fallback.empty()) fallback.push_back(feet); // no room in the world at all (can't happen)
+    return fallback;
+}
+
+void MenuManager::place(Player& player, Session& s) {
+    auto* chest = chestBlock();
+    s.fake      = pickFakePositions(player, s.menu->rows() == Menu::Rows::Six);
+    // Both blocks first, then their block entities: a double chest's pairing refers to the other
+    // half, which must already be a chest on the client.
+    for (auto const& pos : s.fake) sendBlock(player, pos, *chest);
+    for (std::size_t i = 0; i < s.fake.size(); ++i) {
+        auto const& pos = s.fake[i];
+        CompoundTag tag;
+        tag["id"]         = std::string("Chest");
+        tag["x"]          = pos.x;
+        tag["y"]          = pos.y;
+        tag["z"]          = pos.z;
+        tag["isMovable"]  = static_cast<uchar>(0);
+        tag["Findable"]   = static_cast<uchar>(0);
+        tag["CustomName"] = s.menu->title();
+        if (s.fake.size() == 2) {
+            auto const& other = s.fake[1 - i];
+            tag["pairx"]      = other.x;
+            tag["pairz"]      = other.z;
+            tag["pairlead"]   = static_cast<uchar>(i == 0 ? 1 : 0);
+        }
+        sendBlockActor(player, pos, std::move(tag));
+    }
+    s.phase = Session::Phase::Placed;
+    s.wait  = kOpenDelay;
 }
 
 void MenuManager::close(Player& player) {
@@ -291,7 +366,7 @@ std::shared_ptr<Menu> MenuManager::current(Player const& player) const {
 
 bool MenuManager::isShown(Player const& player) const {
     auto it = mSessions.find(keyOf(player));
-    return it != mSessions.end() && it->second->shown;
+    return it != mSessions.end() && it->second->shown();
 }
 
 void MenuManager::after(int ticks, std::function<void()> fn) { mDelayed.push_back({ticks, std::move(fn)}); }
@@ -301,15 +376,23 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose) {
     if (it == mSessions.end()) return;
     auto s = std::move(it->second);
     mSessions.erase(it);
-    mClosedIds[key] = s->id;
     if (player) {
-        if (sendClose && s->shown) {
+        bool awaitAnswer = false;
+        if (sendClose && s->shown()) {
             auto  pkt                = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
             auto& c                  = static_cast<ContainerClosePacket&>(*pkt);
             c.mContainerId           = static_cast<ContainerID>(s->id);
             c.mContainerType         = SharedTypes::Legacy::ContainerType::Container;
             c.mServerInitiatedClose  = true;
             c.sendTo(*player);
+            menuDebugLog("-> ContainerClose id={} serverInitiated", s->id);
+            // The client answers with its own ContainerClose and expects ours back; until then
+            // it ignores ContainerOpen (and can't open chat). Track it, see handleClosePacket.
+            // (Only for a screen the client really opened: not forceShown / simulated players.)
+            if (s->clientOpened && !player->isSimulatedPlayer()) {
+                mPendingCloses[key].push_back(PendingClose{s->id, 0, {}});
+                awaitAnswer = true;
+            }
         }
         // Restore what the client should see at the fake positions.
         auto& region = player->getDimensionBlockSource();
@@ -318,6 +401,7 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose) {
             if (auto* be = region.getBlockEntity(pos)) {
                 if (auto pkt = be->_getUpdatePacket(region)) pkt->sendTo(*player);
             }
+            mRecentFake[key].push_back(RecentFake{pos, mTick + kFakeReuseCooldown});
         }
         // Give back whatever is still on the cursor.
         ItemStack cursor = player->mPlayerUIContainer->getItem(0);
@@ -331,10 +415,18 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose) {
         } catch (std::exception const& e) {
             log().error("menu onClose failed: {}", e.what());
         }
-        for (auto& fn : s->afterClose) {
-            after(kAfterClose, [key, fn = std::move(fn)] {
-                if (auto* p = findPlayer(key)) fn(*p);
-            });
+        // `closeThen` callbacks (usually a form) run once the client has finished closing.
+        if (!s->afterClose.empty()) {
+            if (awaitAnswer) {
+                auto& then = mPendingCloses[key].back().then;
+                for (auto& fn : s->afterClose) then.push_back(std::move(fn));
+            } else {
+                for (auto& fn : s->afterClose) {
+                    after(kAfterClose, [key, fn = std::move(fn)] {
+                        if (auto* p = findPlayer(key)) fn(*p);
+                    });
+                }
+            }
         }
     }
     try {
@@ -378,6 +470,14 @@ void MenuManager::sync(Player& player, Session& s, bool full) {
         changed.push_back(i);
     }
     s.needFull = false;
+    if (menuDebug() && !changed.empty()) {
+        std::string list;
+        for (int i : changed) {
+            auto const& it = s.sent[static_cast<std::size_t>(i)];
+            list += std::format(" {}:{}", i, it.isNull() ? std::string("-") : it.getRawNameId());
+        }
+        menuDebugLog("sync id={}{}", s.id, list);
+    }
     if (sendAll || changed.size() > 8) {
         InventoryContentPacket pkt{InventoryContentPacketPayload{
             static_cast<ContainerID>(s.id),
@@ -404,13 +504,39 @@ ItemStack MenuManager::shownItem(Player const& player, int slot) const {
 
 void MenuManager::forceShown(Player& player) {
     auto it = mSessions.find(keyOf(player));
-    if (it == mSessions.end() || it->second->shown) return;
-    it->second->openIn = 0;
-    it->second->shown  = true;
+    if (it == mSessions.end() || it->second->shown()) return;
+    if (it->second->phase == Session::Phase::AwaitClose) place(player, *it->second);
+    it->second->phase = Session::Phase::Shown;
     sync(player, *it->second, true);
 }
 
+void MenuManager::tickPendingCloses() {
+    for (auto it = mPendingCloses.begin(); it != mPendingCloses.end();) {
+        auto key = it->first;
+        std::vector<std::function<void(Player&)>> due;
+        for (auto& c : it->second) {
+            // The client never answered in time: go on with what waited for it.
+            if (++c.age == kAwaitCloseMax) {
+                menuDebugLog("close id={} not answered by the client in time", c.id);
+                for (auto& fn : c.then) due.push_back(std::move(fn));
+                c.then.clear();
+            }
+        }
+        std::erase_if(it->second, [](PendingClose const& c) { return c.age >= kForgetClose; });
+        it = it->second.empty() ? mPendingCloses.erase(it) : std::next(it);
+        if (!due.empty()) {
+            after(1, [key, due = std::move(due)] {
+                if (auto* p = findPlayer(key)) {
+                    for (auto const& fn : due) fn(*p);
+                }
+            });
+        }
+    }
+}
+
 void MenuManager::tick() {
+    ++mTick;
+    tickPendingCloses();
     // Collect due tasks first: running them may schedule new ones (push_back into mDelayed).
     std::vector<std::function<void()>> due;
     for (auto it = mDelayed.begin(); it != mDelayed.end();) {
@@ -435,18 +561,24 @@ void MenuManager::tick() {
             continue;
         }
         // Validity: alive, same dimension, still near the fake chest.
-        auto const& pos  = player->getPosition();
-        auto const& fake = s.fake.front();
-        float dx = pos.x - (fake.x + 0.5f), dy = pos.y - (fake.y + 0.5f), dz = pos.z - (fake.z + 0.5f);
-        if (!player->isAlive() || static_cast<int>(player->getDimensionId()) != s.dim
-            || std::sqrt(dx * dx + dy * dy + dz * dz) > kMaxDistance) {
+        bool tooFar = false;
+        if (!s.fake.empty()) {
+            auto const& pos  = player->getPosition();
+            auto const& fake = s.fake.front();
+            float dx = pos.x - (fake.x + 0.5f), dy = pos.y - (fake.y + 0.5f), dz = pos.z - (fake.z + 0.5f);
+            tooFar   = std::sqrt(dx * dx + dy * dy + dz * dz) > kMaxDistance;
+        }
+        if (!player->isAlive() || static_cast<int>(player->getDimensionId()) != s.dim || tooFar) {
             finish(player, key, true);
             continue;
         }
-        if (!s.shown) {
-            if (s.awaitClose >= 0 && --s.awaitTicks > 0) continue;
-            s.awaitClose = -1;
-            if (--s.openIn > 0) continue;
+        if (s.phase == Session::Phase::AwaitClose) {
+            if (!awaitingClose(key)) place(*player, s);
+            continue;
+        }
+        if (s.phase == Session::Phase::Placed) {
+            if (--s.wait > 0) continue;
+            s.phase = Session::Phase::Shown;
             auto  pkt         = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerOpen);
             auto& o           = static_cast<ContainerOpenPacket&>(*pkt);
             o.mContainerId    = static_cast<ContainerID>(s.id);
@@ -454,7 +586,8 @@ void MenuManager::tick() {
             o.mPos            = s.fake.front();
             o.mEntityUniqueID = ActorUniqueID::INVALID_ID();
             o.sendTo(*player);
-            s.shown = true;
+            menuDebugLog("-> ContainerOpen id={} pos=({},{},{})", s.id, s.fake.front().x, s.fake.front().y, s.fake.front().z);
+            s.clientOpened = true;
             log().info("menu shown: {} ({} slots)", s.menu->title(), s.menu->size());
             sync(*player, s, true);
             continue;
@@ -830,7 +963,7 @@ bool MenuManager::simulate(Player& player, SimAction const& action) {
 
 bool MenuManager::handleRequestPacket(Player& player, void const* raw) {
     auto it = mSessions.find(keyOf(player));
-    if (it == mSessions.end() || !it->second->shown) return false;
+    if (it == mSessions.end() || !it->second->shown()) return false;
     auto& packet  = *static_cast<ItemStackRequestPacket const*>(raw);
     auto& session = *it->second;
     auto  menu    = session.menu; // keep alive even if a callback replaces it
@@ -906,38 +1039,49 @@ bool MenuManager::handleRequestPacket(Player& player, void const* raw) {
     return true;
 }
 
-bool MenuManager::handleClosePacket(Player& player, int containerId) {
-    auto key = keyOf(player);
-    auto it  = mSessions.find(key);
-    bool ours = it != mSessions.end() && it->second->id == containerId;
-    // Confirms a client's close request. The client waits for this before it accepts another
-    // ContainerOpen, so it is also needed for the close the client sends back after a
-    // server-initiated close (menu replaced by another one).
+bool MenuManager::handleClosePacket(Player& player, int containerId, int containerType) {
+    auto key  = keyOf(player);
+    auto it   = mSessions.find(key);
+    bool ours = it != mSessions.end() && it->second->id == containerId && it->second->shown();
+    // Confirms a client's close. The client waits for this before it opens any other screen
+    // (another chest, but also chat), so every close of one of our screens is answered: the
+    // player's own close, and the close the client sends back after a server-initiated one.
     auto confirm = [&] {
         auto  pkt               = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
         auto& c                 = static_cast<ContainerClosePacket&>(*pkt);
         c.mContainerId          = static_cast<ContainerID>(containerId);
-        c.mContainerType        = SharedTypes::Legacy::ContainerType::Container;
+        c.mContainerType        = containerType >= 0 ? static_cast<SharedTypes::Legacy::ContainerType>(containerType)
+                                                     : SharedTypes::Legacy::ContainerType::Container;
         c.mServerInitiatedClose = false;
         c.sendTo(player);
+        menuDebugLog("-> ContainerClose id={} (ack)", containerId);
     };
-    if (!ours) {
-        // A late close for a menu we already closed server-side: confirm and swallow it.
-        if (auto c = mClosedIds.find(key); c != mClosedIds.end() && c->second == containerId) {
-            mClosedIds.erase(c);
-            confirm();
-            // The client finished closing the replaced screen: the new one may open now.
-            if (it != mSessions.end() && it->second->awaitClose == containerId) {
-                it->second->awaitClose = -1;
-                it->second->openIn     = std::max(it->second->openIn, kOpenDelay);
-            }
-            return true;
+    menuDebugLog("<- ContainerClose id={} ours={}", containerId, ours);
+
+    // A close for a screen we closed server-side (menu replaced / closed by the server).
+    bool                                       pending = false;
+    std::vector<std::function<void(Player&)>> then;
+    if (auto p = mPendingCloses.find(key); p != mPendingCloses.end()) {
+        auto& list = p->second;
+        auto  c    = std::find_if(list.begin(), list.end(), [&](PendingClose const& x) { return x.id == containerId; });
+        if (c != list.end()) {
+            pending = true;
+            then    = std::move(c->then);
+            list.erase(c);
+            if (list.empty()) mPendingCloses.erase(p);
         }
-        return false;
     }
+    if (!ours && !pending) return false; // not ours: vanilla handles it
     confirm();
-    finish(&player, key, false);
-    mClosedIds.erase(key);
+    if (ours) finish(&player, key, false);
+    // A menu waiting in AwaitClose is placed on the next tick (see tick()).
+    if (!then.empty()) {
+        after(kAfterAck, [key, then = std::move(then)] {
+            if (auto* p = findPlayer(key)) {
+                for (auto const& fn : then) fn(*p);
+            }
+        });
+    }
     return true;
 }
 
@@ -973,7 +1117,11 @@ LL_TYPE_INSTANCE_HOOK(
     ContainerClosePacket const& packet
 ) {
     if (auto* player = thisFor<NetEventCallback>()->_getServerPlayer(source, packet.mSenderSubId)) {
-        if (MenuManager::get().handleClosePacket(*player, static_cast<int>(static_cast<schar>(packet.mContainerId)))) {
+        if (MenuManager::get().handleClosePacket(
+                *player,
+                static_cast<int>(static_cast<schar>(packet.mContainerId)),
+                static_cast<int>(packet.mContainerType)
+            )) {
             return;
         }
     }
@@ -989,7 +1137,8 @@ void MenuManager::install() {
     mListeners.push_back(bus.emplaceListener<ll::event::PlayerDisconnectEvent>([this](ll::event::PlayerDisconnectEvent& ev) {
         auto key = keyOf(ev.self());
         if (mSessions.contains(key)) finish(&ev.self(), key, false);
-        mClosedIds.erase(key);
+        mPendingCloses.erase(key);
+        mRecentFake.erase(key);
     }));
     mListeners.push_back(bus.emplaceListener<ll::event::PlayerDieEvent>([this](ll::event::PlayerDieEvent& ev) {
         close(ev.self());
@@ -1002,7 +1151,8 @@ void MenuManager::closeAll() {
     std::vector<std::int64_t> keys;
     for (auto& [k, _] : mSessions) keys.push_back(k);
     for (auto k : keys) finish(findPlayer(k), k, true);
-    mClosedIds.clear();
+    mPendingCloses.clear();
+    mRecentFake.clear();
     mDelayed.clear();
     mDeferred.clear();
 }
