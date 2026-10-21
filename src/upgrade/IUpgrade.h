@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <memory>
+#include <optional>
 #include <string>
 #include <typeinfo>
 #include <vector>
@@ -109,6 +110,19 @@ public:
     /// E.g. a Stack upgrade refuses removal while slots hold more than the base limit.
     virtual bool canRemove(UpgradeContext const& /*ctx*/, std::string& /*reason*/) const { return true; }
     virtual void onRemove(UpgradeContext const& /*ctx*/) {}
+    /// Like `canRemove`, when the upgrade is being swapped for `replacement` in the GUI (the
+    /// replacement still has to pass `canInstall` afterwards). E.g. a Stack upgrade allows a swap
+    /// for a higher tier even while slots hold more than the base limit. Default: `canRemove`.
+    virtual bool canReplaceWith(UpgradeContext const& ctx, core::ItemStackData const& /*replacement*/, std::string& reason) const {
+        return canRemove(ctx, reason);
+    }
+    /// The player clicks this installed upgrade's slot in the GUI while holding `item` on the
+    /// cursor (e.g. a Stack upgrade conversion item). Return nullopt to let the normal swap happen,
+    /// or how many of `item` were used up (the cursor loses that many; 0 = refused) — then
+    /// nothing is swapped.
+    virtual std::optional<int> useItemOn(Player& /*player*/, UpgradeContext const& /*ctx*/, core::ItemStackData const& /*item*/) {
+        return std::nullopt;
+    }
 
     // ---- runtime ----------------------------------------------------------------------------
     /// Register inventory hooks (insert/extract filters, limit modifiers) with

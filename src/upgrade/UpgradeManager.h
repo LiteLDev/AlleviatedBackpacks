@@ -40,6 +40,17 @@ bool install(
 std::optional<core::ItemStackData>
 remove(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player, std::string* reason = nullptr);
 
+/// Swaps the upgrade in `slot` for `item` (count 1) in one step: the old one must allow it
+/// (`IUpgrade::canReplaceWith`) and the new one must pass `canInstall` as if the slot were free.
+/// Returns the old item (settings embedded, like `remove`), or nullopt with nothing changed.
+std::optional<core::ItemStackData> replace(
+    std::shared_ptr<game::Backpack> const& backpack,
+    int                                    slot,
+    core::ItemStackData const&             item,
+    Player*                                player,
+    std::string*                           reason = nullptr
+);
+
 /// Turns an installed upgrade on or off. Rebuilds hooks.
 void setEnabled(std::shared_ptr<game::Backpack> const& backpack, int slot, bool enabled);
 
