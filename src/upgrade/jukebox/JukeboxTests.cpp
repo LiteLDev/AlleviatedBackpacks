@@ -304,6 +304,7 @@ ABP_REGISTER_SELFTEST("jukebox.same_disc_two_backpacks", [](Context& ctx) -> ll:
     auto     b      = carriedJukebox(ctx, kBasicId, {kCat}, 1);
     ctx.require(svc.play(a.ctx(), &player) && svc.play(b.ctx(), &player), "play both");
     ctx.check(rec.count(SoundEvent::Kind::Play, idOf(player)) == 2, "two sounds");
+    co_await ctx.ticks(20);
     svc.stop(a.bp->uuid(), a.slot);
     co_await ctx.ticks(12);
     ctx.check(rec.count(SoundEvent::Kind::Play, idOf(player)) == 3, "the other backpack's sound is sent again");
