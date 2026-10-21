@@ -1,0 +1,10 @@
+{
+  "abp.magnet.magnet.name": "磁铁升级",
+  "abp.magnet.advanced_magnet.name": "高级磁铁升级",
+  "abp.magnet.items": "吸取物品：{}",
+  "abp.magnet.xp": "吸取经验：{}",
+  "abp.magnet.lore.range": "§7范围：§f{} 格",
+  "abp.magnet.lore.items": "§7吸取物品：{}",
+  "abp.magnet.lore.xp": "§7吸取经验：{}",
+  "abp.magnet.lore.filter": "§7过滤：§f{} 种物品"
+}

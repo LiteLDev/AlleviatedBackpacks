@@ -1,0 +1,24 @@
+{
+  "abp.upgrade.anvil.name": "Anvil Upgrade",
+  "abp.anvil.title": "Anvil",
+  "abp.anvil.open": "Anvil",
+  "abp.anvil.cost_ok": "§aCost: {} levels",
+  "abp.anvil.cost_missing": "§cCost: {} levels",
+  "abp.anvil.your_level": "§7Your level: {}",
+  "abp.anvil.too_expensive": "§cToo Expensive!",
+  "abp.anvil.not_enough_levels": "§cYou need {} levels.",
+  "abp.anvil.no_result": "§7Anvil",
+  "abp.anvil.rename": "Rename",
+  "abp.anvil.rename_hint": "§7Click to type a new name",
+  "abp.anvil.rename_current": "§7New name: §f{}",
+  "abp.anvil.rename_empty": "§cPut an item into the left slot first.",
+  "abp.anvil.rename_title": "Rename item",
+  "abp.anvil.rename_label": "New name (leave empty to remove a custom name)",
+  "abp.anvil.help_title": "Anvil",
+  "abp.anvil.help1": "§7Left: item to repair, enchant or rename",
+  "abp.anvil.help2": "§7Right: material, same item or enchanted book",
+  "abp.anvil.help3": "§7This anvil never breaks",
+
+  "abp.station.back": "Back to backpack",
+  "abp.station.contains": "§7Holds: §f{} x{}"
+}

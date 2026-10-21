@@ -1,0 +1,23 @@
+{
+  "abp.tank.name": "储罐升级",
+  "abp.tank.contents": "§b{}：§f{} §7/ {} mB",
+  "abp.tank.empty": "§7空 §8（{} mB）",
+  "abp.tank.on": "§a开",
+  "abp.tank.off": "§c关",
+  "abp.tank.input": "注入储罐 ▶",
+  "abp.tank.input.help1": "§7放入装满的桶或瓶子：",
+  "abp.tank.input.help2": "§7液体会倒入储罐，",
+  "abp.tank.input.help3": "§7空容器留在槽位中。",
+  "abp.tank.output": "从储罐取出 ▶",
+  "abp.tank.output.help1": "§7放入空桶或空瓶：",
+  "abp.tank.output.help2": "§7会用储罐中的液体装满。",
+  "abp.tank.fluid.water": "水",
+  "abp.tank.fluid.lava": "熔岩",
+  "abp.tank.fluid.milk": "牛奶",
+  "abp.tank.fluid.powder_snow": "细雪",
+  "abp.tank.fluid.honey": "蜂蜜",
+  "abp.tank.fluid.experience": "经验",
+  "abp.tank.fluid.potion": "药水 #{}",
+  "abp.tank.fluid.splash_potion": "喷溅药水 #{}",
+  "abp.tank.fluid.lingering_potion": "滞留药水 #{}"
+}

@@ -1,0 +1,173 @@
+// Filter upgrade (basic / advanced): restricts what automation (hoppers, placed-backpack I/O,
+// other containers: `core::Source::Automation`) may insert into or extract from the backpack.
+// Players, pickups and other upgrades are never affected (as in Sophisticated Backpacks).
+//
+// Settings: {"filter": core::Filter, "direction": 0 both | 1 input | 2 output}.
+
+#include "upgrade/filter/FilterUpgrade.h"
+
+#include "mc/world/actor/player/Player.h"
+
+#include "game/ItemConv.h"
+#include "mod/I18n.h"
+#include "ui/menu/MenuManager.h"
+#include "upgrade/UpgradeManager.h"
+#include "upgrade/filter/FilterCommon.h"
+
+namespace abp::upgrade::filter {
+
+namespace {
+/// Runs before other upgrades' insert filters (e.g. Void) so a refused item is never voided.
+constexpr int kPriority = -100;
+} // namespace
+
+Direction directionOf(UpgradeContext const& ctx) {
+    auto const& s = ctx.settings();
+    if (!s.is_object()) return Direction::Both;
+    auto it = s.find(std::string(kDirectionKey));
+    if (it == s.end() || !it->is_number_integer()) return Direction::Both;
+    int v = it->get<int>();
+    return (v >= 0 && v <= 2) ? static_cast<Direction>(v) : Direction::Both;
+}
+
+void setDirection(UpgradeContext const& ctx, Direction d) {
+    auto& s = ctx.settings();
+    if (!s.is_object()) s = nlohmann::json::object();
+    s[std::string(kDirectionKey)] = static_cast<int>(d);
+    ctx.saveSettings(true);
+}
+
+std::string directionName(Player& player, Direction d) {
+    switch (d) {
+    case Direction::Input:
+        return trFor(player, "abp.filter_upgrade.direction.input", "Input only");
+    case Direction::Output:
+        return trFor(player, "abp.filter_upgrade.direction.output", "Output only");
+    case Direction::Both:
+    default:
+        return trFor(player, "abp.filter_upgrade.direction.both", "Input and output");
+    }
+}
+
+// ---- menu ----------------------------------------------------------------------------------------
+
+namespace {
+class FilterUpgradeMenu : public filtering::UpgradeFilterMenu {
+public:
+    using UpgradeFilterMenu::UpgradeFilterMenu;
+
+protected:
+    void addButtons(Player& player) override {
+        auto const& ctx = context();
+        auto        dir = directionOf(ctx);
+        std::string_view iconId;
+        switch (dir) {
+        case Direction::Input:
+            iconId = "minecraft:hopper";
+            break;
+        case Direction::Output:
+            iconId = "minecraft:dropper";
+            break;
+        case Direction::Both:
+        default:
+            iconId = "minecraft:piston";
+            break;
+        }
+        auto itemId = ctx.state().item.id;
+        setSlot(
+            controlSlot(kDirectionButton),
+            std::make_shared<ui::ButtonSlot>(
+                ui::icon(
+                    iconId,
+                    trFor(player, "abp.filter_upgrade.direction", "Direction: {}", directionName(player, dir)),
+                    {trFor(player, "abp.filter_upgrade.direction.help", "§7Which automated transfers the filter checks"),
+                     trFor(player, "abp.filter.click_to_cycle", "§7Click to cycle")}
+                ),
+                [this, itemId](ui::ClickContext const&) {
+                    auto const& c = context();
+                    if (!filtering::stillInstalled(c, itemId)) return;
+                    setDirection(c, static_cast<Direction>((static_cast<int>(directionOf(c)) + 1) % 3));
+                    invalidate();
+                }
+            )
+        );
+    }
+};
+
+class FilterUpgradeBase : public IUpgrade {
+public:
+    explicit FilterUpgradeBase(UpgradeInfo info) : mInfo(std::move(info)) {}
+
+    [[nodiscard]] UpgradeInfo const& info() const override { return mInfo; }
+
+    void attach(UpgradeContext const& ctx, core::BackpackInventory& inv) override {
+        auto filter = filtering::load(ctx, mInfo.tier);
+        auto dir    = directionOf(ctx);
+        if (dir != Direction::Output) {
+            inv.addInsertFilter(ctx.hookOwner(), kPriority, [filter](core::InsertQuery const& q) {
+                if (q.ctx.source != core::Source::Automation) return core::InsertVerdict::Allow;
+                return filter.passes(q.stack, &game::ItemConv::tags()) ? core::InsertVerdict::Allow
+                                                                       : core::InsertVerdict::Deny;
+            });
+        }
+        if (dir != Direction::Input) {
+            inv.addExtractFilter(ctx.hookOwner(), kPriority, [filter](core::ExtractQuery const& q) {
+                if (q.ctx.source != core::Source::Automation) return true;
+                return filter.passes(q.stack, &game::ItemConv::tags());
+            });
+        }
+    }
+
+    [[nodiscard]] std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
+        return std::make_shared<FilterUpgradeMenu>(player, ctx, mInfo.tier);
+    }
+
+    [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
+        auto lines = filtering::describe(player, filtering::load(ctx, mInfo.tier), mInfo.tier);
+        lines.push_back(
+            trFor(player, "abp.filter_upgrade.lore.direction", "§7Direction: §f{}", directionName(player, directionOf(ctx)))
+        );
+        return lines;
+    }
+
+private:
+    UpgradeInfo mInfo;
+};
+
+class FilterUpgrade final : public FilterUpgradeBase {
+public:
+    FilterUpgrade()
+    : FilterUpgradeBase(UpgradeInfo{
+          .id           = std::string(kBasicId),
+          .itemId       = "alleviatedbackpacks:filter_upgrade",
+          .nameKey      = "abp.upgrade.filter.name",
+          .nameFallback = "Filter Upgrade",
+          .tier         = UpgradeTier::Basic,
+          .group        = "filter",
+          .maxPerBackpack = kMaxPerBackpack,
+          .hasSettings  = true,
+          .toggleable   = true,
+      }) {}
+};
+
+class AdvancedFilterUpgrade final : public FilterUpgradeBase {
+public:
+    AdvancedFilterUpgrade()
+    : FilterUpgradeBase(UpgradeInfo{
+          .id           = std::string(kAdvancedId),
+          .itemId       = "alleviatedbackpacks:advanced_filter_upgrade",
+          .nameKey      = "abp.upgrade.advanced_filter.name",
+          .nameFallback = "Advanced Filter Upgrade",
+          .tier         = UpgradeTier::Advanced,
+          .group        = "filter",
+          .maxPerBackpack = kMaxPerBackpack,
+          .hasSettings  = true,
+          .toggleable   = true,
+      }) {}
+};
+} // namespace
+
+} // namespace abp::upgrade::filter
+
+ABP_REGISTER_UPGRADE(abp::upgrade::filter::FilterUpgrade);
+ABP_REGISTER_UPGRADE(abp::upgrade::filter::AdvancedFilterUpgrade);

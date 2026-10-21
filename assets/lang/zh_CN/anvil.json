@@ -1,0 +1,24 @@
+{
+  "abp.upgrade.anvil.name": "铁砧升级",
+  "abp.anvil.title": "铁砧",
+  "abp.anvil.open": "铁砧",
+  "abp.anvil.cost_ok": "§a花费：{} 级",
+  "abp.anvil.cost_missing": "§c花费：{} 级",
+  "abp.anvil.your_level": "§7你的等级：{}",
+  "abp.anvil.too_expensive": "§c过于昂贵！",
+  "abp.anvil.not_enough_levels": "§c需要 {} 级经验。",
+  "abp.anvil.no_result": "§7铁砧",
+  "abp.anvil.rename": "重命名",
+  "abp.anvil.rename_hint": "§7点击输入新名称",
+  "abp.anvil.rename_current": "§7新名称：§f{}",
+  "abp.anvil.rename_empty": "§c请先在左侧槽位放入物品。",
+  "abp.anvil.rename_title": "重命名物品",
+  "abp.anvil.rename_label": "新名称（留空则移除自定义名称）",
+  "abp.anvil.help_title": "铁砧",
+  "abp.anvil.help1": "§7左侧：要修复、附魔或重命名的物品",
+  "abp.anvil.help2": "§7右侧：修复材料、同种物品或附魔书",
+  "abp.anvil.help3": "§7这个铁砧永远不会损坏",
+
+  "abp.station.back": "返回背包",
+  "abp.station.contains": "§7存放：§f{} x{}"
+}

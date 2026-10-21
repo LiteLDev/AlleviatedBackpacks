@@ -1,0 +1,12 @@
+{
+  "abp.feeding.name": "Feeding Upgrade",
+  "abp.feeding.advanced.name": "Advanced Feeding Upgrade",
+  "abp.feeding.mode.always": "Whenever hungry",
+  "abp.feeding.mode.half": "Half of the food is used",
+  "abp.feeding.mode.full": "No nutrition is wasted",
+  "abp.feeding.hunger": "Eat when: {}",
+  "abp.feeding.hurt": "Eat when health is below half: {}",
+  "abp.feeding.describe.allow": "§7Only eats: {} item(s)",
+  "abp.feeding.describe.deny": "§7Never eats: {} item(s)",
+  "abp.feeding.describe.basic": "§7Eats when no nutrition is wasted"
+}

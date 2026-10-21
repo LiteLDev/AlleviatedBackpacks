@@ -15,6 +15,7 @@
 #include "mod/Registry.h"
 
 class Player;
+class BlockSource;
 
 namespace abp::ui {
 class Menu;
@@ -91,6 +92,17 @@ struct TickContext {
     int                interval; ///< game ticks since this backpack's previous tick
 };
 
+/// Context for periodic ticks of a backpack placed as a block (see `feature/placed`). There is
+/// no carrier: `ctx.player()` is null.
+struct PlacedTickContext {
+    UpgradeContext ctx;
+    BlockSource&   region;    ///< block source of the backpack's dimension
+    int            dimension; ///< DimensionType id
+    int            x, y, z;   ///< position of the backpack block
+    int            facing;    ///< direction the backpack's front faces: 0 south, 1 west, 2 north, 3 east
+    int            interval;  ///< game ticks since this backpack's previous placed tick
+};
+
 /// Behaviour of one upgrade type. Implementations are stateless singletons: all per-instance
 /// state goes into `ctx.settings()` (persisted) or `ctx.transient<T>()` (runtime). Register with
 /// `ABP_REGISTER_UPGRADE(MyUpgrade)` in the .cpp file.
@@ -135,6 +147,10 @@ public:
     /// `item.count` (e.g. insert into the backpack with `Source::Pickup`). Called before the
     /// vanilla pickup; whatever is left goes to the player inventory as usual.
     virtual void onPickup(UpgradeContext const& /*ctx*/, core::ItemStackData& /*item*/) {}
+    /// Periodic tick while the backpack is placed as a block in a loaded chunk (interval:
+    /// `placed.upgradeTickInterval`). Override it for upgrades that work without a carrier
+    /// (smelting, hoppers, ...). `onTick` is never called for placed backpacks.
+    virtual void onPlacedTick(PlacedTickContext const& /*tick*/) {}
 
     // ---- UI ---------------------------------------------------------------------------------
     /// Settings button on the upgrades page. Default: opens `createSettingsMenu()` if it returns

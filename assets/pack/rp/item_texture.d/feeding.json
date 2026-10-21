@@ -1,0 +1,8 @@
+{
+  "abp_feeding_upgrade": {
+    "textures": "textures/items/feeding_upgrade"
+  },
+  "abp_advanced_feeding_upgrade": {
+    "textures": "textures/items/advanced_feeding_upgrade"
+  }
+}

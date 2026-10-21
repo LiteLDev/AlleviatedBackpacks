@@ -1,0 +1,23 @@
+{
+  "abp.crafting.name": "合成升级",
+  "abp.crafting.title": "合成",
+  "abp.crafting.button": "合成",
+  "abp.crafting.back": "返回背包",
+  "abp.crafting.shift_backpack": "Shift 点击产物：放入背包",
+  "abp.crafting.shift_inventory": "Shift 点击产物：放入物品栏",
+  "abp.crafting.click_to_toggle": "§7点击切换",
+  "abp.crafting.open_tab": "打开：{}",
+  "abp.crafting.storage_page": "背包第 {} 页，共 {} 页",
+  "abp.crafting.next_page_hint": "§7点击翻到下一页",
+  "abp.crafting.help_click": "§7点击产物合成一次",
+  "abp.crafting.help_shift": "§7Shift 点击产物尽可能多地合成",
+  "abp.crafting.recipe": "§8配方：{}",
+  "abp.crafting.refill_on": "从背包补充合成格：开",
+  "abp.crafting.refill_off": "从背包补充合成格：关",
+  "abp.crafting.refill_hint": "§7用完的材料会从背包中补充",
+  "abp.crafting.clear": "清空合成格",
+  "abp.crafting.clear_hint": "§7把合成格中的物品移入背包",
+  "abp.crafting.describe_grid": "§7合成格：已用 {}/9 格",
+  "abp.crafting.describe_refill_on": "§7从背包补充：开",
+  "abp.crafting.describe_refill_off": "§7从背包补充：关"
+}

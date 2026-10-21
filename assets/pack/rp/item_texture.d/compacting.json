@@ -1,0 +1,8 @@
+{
+  "abp_compacting_upgrade": {
+    "textures": "textures/items/compacting_upgrade"
+  },
+  "abp_advanced_compacting_upgrade": {
+    "textures": "textures/items/advanced_compacting_upgrade"
+  }
+}
