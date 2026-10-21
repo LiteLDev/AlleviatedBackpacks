@@ -60,9 +60,7 @@ public:
     [[nodiscard]] bool               automatic() const { return mAuto; }
 
     void onTick(TickContext const& tick) override;
-    /// Closes the backpack GUI first, then opens the cooking menu: switching directly between a
-    /// double and a single chest lets the client's late close of the old container close the new one.
-    void openSettings(Player& player, UpgradeContext const& ctx) override;
+
     [[nodiscard]] std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override;
     [[nodiscard]] std::vector<std::string>  describe(Player& player, UpgradeContext const& ctx) const override;
 

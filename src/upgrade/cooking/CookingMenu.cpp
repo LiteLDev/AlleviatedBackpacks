@@ -1,13 +1,16 @@
 // The chest menu of the cooking upgrades.
 //
-// Plain variants (3 rows):            Auto variants (6 rows):
-//   . . I . . . . . K                   F F F F F F F F F   <- input filter
-//   . . f . P - - O .                   . . . . L . . . .
-//   . . U . . . . . B                   G G G G G G G G G   <- fuel filter
-//                                       . . . . . . . . .
-// I input, U fuel, f flame (burn),      K I f U P . O . .
-// P progress, O output, K info,         m . n . . . . . B   (m/n: filter allow/deny)
-// B back, F/G ghost filter slots.
+// Both use a double chest, like the backpack GUI they are opened from (switching between a
+// double and a single chest in place does not reliably show the new screen on the client).
+//
+// Plain variants:                     Auto variants:
+//   . . . . . . . . K                   F F F F F F F F F   <- input filter
+//   . . I . . . . . .                   . . . . L . . . .
+//   . . f . P - - O .                   G G G G G G G G G   <- fuel filter
+//   . . U . . . . . .                   . . . . . . . . .
+//   . . . . . . . . .                   K I f U P . O . .
+//   . . . . . . . . B                   m . n . . . . . B   (m/n: filter allow/deny)
+// I input, U fuel, f flame (burn), P progress, O output, K info, B back, F/G ghost filter slots.
 
 #include <algorithm>
 #include <array>
@@ -26,7 +29,7 @@
 namespace abp::upgrade::cooking {
 
 MenuLayout const& layout(bool automatic) {
-    static MenuLayout const plain{.input = 2, .fuel = 20, .output = 16, .flame = 11, .progress = 13, .back = 26};
+    static MenuLayout const plain{.input = 11, .fuel = 29, .output = 25, .flame = 20, .progress = 22, .back = 53};
     static MenuLayout const autoLayout{
         .input            = 37,
         .fuel             = 39,
@@ -47,7 +50,7 @@ namespace {
 class CookingMenu : public ui::Menu {
 public:
     CookingMenu(std::string title, CookingUpgrade& upgrade, UpgradeContext ctx)
-    : Menu(std::move(title), upgrade.automatic() ? Rows::Six : Rows::Three),
+    : Menu(std::move(title), Rows::Six),
       mUpgrade(upgrade),
       mCtx(std::move(ctx)) {}
 
@@ -309,10 +312,7 @@ void CookingMenu::build(Player& player) {
         std::make_shared<ui::ButtonSlot>(
             ui::icon("minecraft:arrow", trFor(player, "abp.menu.back_generic", "Back")),
             [bp = mCtx.backpackPtr()](ui::ClickContext const& c) {
-                // Close first (single -> double chest switch, see CookingUpgrade::openSettings).
-                ui::MenuManager::get().closeThen(c.player, [bp](Player& p) {
-                    ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
-                });
+                ui::BackpackMenu::openBackpack(c.player, bp, {}, ui::BackpackMenu::View::Upgrades);
             }
         )
     );
