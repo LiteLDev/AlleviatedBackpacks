@@ -297,8 +297,11 @@ public:
         if (!item.empty()) setInput(ctx, crafting::giveBack(ctx.player(), ctx.backpack(), item));
     }
 
-    std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
-        return makeStonecutterMenu(player, ctx);
+    void openSettings(Player& player, UpgradeContext const& ctx) override {
+        auto target = ctx.withPlayer(nullptr);
+        crafting::switchMenu(player, [target](Player& p) {
+            ui::MenuManager::get().open(p, makeStonecutterMenu(p, target));
+        });
     }
 
     [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {

@@ -59,9 +59,17 @@ bool openTab(Player& player, std::shared_ptr<game::Backpack> backpack, std::stri
     for (auto const& t : TabRegistry::entries()) {
         if (t.upgradeId != upgradeId || !t.make) continue;
         auto menu = t.make(player, UpgradeContext(std::move(backpack), slot));
-        return menu && ui::MenuManager::get().open(player, std::move(menu));
+        if (!menu) return false;
+        switchMenu(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
+        return true;
     }
     return false;
+}
+
+void switchMenu(Player& player, std::function<void(Player&)> open) {
+    auto& mm = ui::MenuManager::get();
+    if (mm.current(player)) mm.closeThen(player, std::move(open));
+    else open(player);
 }
 
 // ---- moving items -------------------------------------------------------------------------------
@@ -227,7 +235,9 @@ void TabMenu::buildShared(Player& player) {
         kBackSlot,
         std::make_shared<ui::ButtonSlot>(
             ui::icon("minecraft:chest", trFor(player, "abp.crafting.back", "Back to backpack")),
-            [bp](ui::ClickContext const& c) { ui::BackpackMenu::openBackpack(c.player, bp); }
+            [bp](ui::ClickContext const& c) {
+                switchMenu(c.player, [bp](Player& p) { ui::BackpackMenu::openBackpack(p, bp); });
+            }
         )
     );
     bool intoBackpack = shiftIntoBackpack();

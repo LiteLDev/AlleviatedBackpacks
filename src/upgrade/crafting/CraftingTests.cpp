@@ -583,8 +583,9 @@ ABP_REGISTER_SELFTEST("crafting.backpack_button_opens_tab", [](Context& ctx) -> 
             1
     }
     );
-    co_await ctx.ticks(10);
-    auto tab = std::dynamic_pointer_cast<TabMenu>(mm.current(player));
+    std::shared_ptr<TabMenu> tab;
+    for (int t = 0; t < 20 && !(tab = std::dynamic_pointer_cast<TabMenu>(mm.current(player))); ++t)
+        co_await ctx.ticks(1);
     ctx.require(tab != nullptr, "crafting tab opened");
     mm.forceShown(player);
     ctx.check(tab->title() == "Crafting" || !tab->title().empty(), "titled");
@@ -598,10 +599,13 @@ ABP_REGISTER_SELFTEST("crafting.backpack_button_opens_tab", [](Context& ctx) -> 
             1
     }
     );
-    co_await ctx.ticks(10);
+    std::shared_ptr<ui::Menu> cur;
+    for (int t = 0; t < 20 && !std::dynamic_pointer_cast<ui::BackpackMenu>(cur = mm.current(player)); ++t) {
+        co_await ctx.ticks(1);
+    }
     ctx.check(
-        std::dynamic_pointer_cast<ui::BackpackMenu>(mm.current(player)) != nullptr,
-        "back button reopens the backpack"
+        std::dynamic_pointer_cast<ui::BackpackMenu>(cur) != nullptr,
+        "back button reopens the backpack (current: " + (cur ? cur->title() : std::string("none")) + ")"
     );
     mm.close(player);
 });
@@ -615,6 +619,30 @@ ABP_REGISTER_SELFTEST("crafting.closes_when_removed", [](Context& ctx) -> ll::co
     (void)upgrade::remove(u.backpackPtr(), u.slot(), &player);
     co_await ctx.ticks(3);
     ctx.check(mm.current(player) == nullptr, "menu closes when the upgrade is removed");
+});
+
+ABP_REGISTER_SELFTEST("crafting.settings_button_switches_menu", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& mm     = ui::MenuManager::get();
+    auto& player = ctx.player();
+    auto  u      = withCrafting(ctx);
+    ctx.require(ui::BackpackMenu::openBackpack(player, u.backpackPtr(), {}, ui::BackpackMenu::View::Upgrades), "open");
+    mm.forceShown(player);
+    // Settings button of upgrade slot 0 (row 2 of the upgrades page).
+    (void)mm.simulate(
+        player,
+        {
+            Action::Take,
+            {Where::Menu,   18 + u.slot()},
+            {Where::Cursor, 0            },
+            1
+    }
+    );
+    for (int t = 0; t < 20 && !std::dynamic_pointer_cast<TabMenu>(mm.current(player)); ++t) co_await ctx.ticks(1);
+    ctx.check(
+        std::dynamic_pointer_cast<TabMenu>(mm.current(player)) != nullptr,
+        "settings button opens the crafting tab"
+    );
+    mm.close(player);
 });
 
 } // namespace

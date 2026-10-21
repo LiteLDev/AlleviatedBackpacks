@@ -49,8 +49,14 @@ struct TabRegistrar {
 /// Index of the installed upgrade with this id in `backpack`, or -1.
 [[nodiscard]] int findUpgradeSlot(game::Backpack const& backpack, std::string_view upgradeId);
 
-/// Opens the tab of `upgradeId` in `backpack` (the upgrade must be installed).
+/// Opens the tab of `upgradeId` in `backpack` (the upgrade must be installed). When a menu is
+/// open, it is closed first and the tab opens a few ticks later (see `switchMenu`).
 bool openTab(Player& player, std::shared_ptr<game::Backpack> backpack, std::string_view upgradeId);
+
+/// Runs `open` (which opens another menu) after closing the player's current menu. Replacing an
+/// open chest screen directly makes the real client answer the server-side close with a stray
+/// ContainerClose that also closes the new screen, so menus are switched close-then-open.
+void switchMenu(Player& player, std::function<void(Player&)> open);
 
 // ---- moving items -------------------------------------------------------------------------------
 
