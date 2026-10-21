@@ -30,6 +30,5 @@
   "abp.admin.cleanup.ok": "已删除 {} 个空的、未使用的背包。",
 
   "abp.admin.openfor.title": "背包 {}",
-  "abp.admin.openfor.failed": "无法打开该背包。",
   "abp.admin.openfor.ok": "已打开背包 {}。"
 }

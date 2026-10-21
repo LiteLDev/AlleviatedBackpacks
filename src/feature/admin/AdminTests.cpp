@@ -301,6 +301,7 @@ ABP_REGISTER_SELFTEST("admin.openfor", [](Context& ctx) -> ll::coro::CoroTask<> 
     bp->inventory().insert(data("minecraft:emerald", 3), core::AccessContext{core::Source::Internal});
     auto r = runCommand("backpack openfor " + bp->uuid(), &player);
     ctx.check(r.ok, "openfor succeeds: " + r.text);
+    co_await ctx.ticks(12); // opened after a short delay (chat screen closing)
     auto menu = std::dynamic_pointer_cast<ui::BackpackMenu>(mm.current(player));
     ctx.require(menu != nullptr, "a backpack menu is open");
     ctx.check(menu->backpack() == bp, "the menu shows the requested backpack");

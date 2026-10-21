@@ -52,7 +52,8 @@ struct AdminGiveParams {
 
 namespace {
 
-constexpr std::size_t kMaxListLines = 100;
+constexpr std::size_t kMaxListLines   = 100;
+constexpr int         kOpenDelayTicks = 10; ///< let the chat screen close before the GUI opens
 
 Player* playerOf(CommandOrigin const& origin) {
     auto* e = origin.getEntity();
@@ -262,9 +263,7 @@ void registerCommands(ll::command::CommandHandle& cmd) {
             if (!bp) return output.error(say(origin, "abp.admin.err.uuid_unknown", "No backpack with uuid {}.", *uuid));
             markInspected(*uuid);
             auto title = trFor(*player, "abp.admin.openfor.title", "Backpack {}", uuid->substr(0, 8));
-            if (!ui::BackpackMenu::openBackpack(*player, bp, title)) {
-                return output.error(trFor(*player, "abp.admin.openfor.failed", "Could not open the backpack."));
-            }
+            openLater(*player, bp, title, kOpenDelayTicks);
             output.success(trFor(*player, "abp.admin.openfor.ok", "Opened backpack {}.", *uuid));
             log().info("admin: {} opened backpack {}", player->getRealName(), *uuid);
         }

@@ -30,6 +30,5 @@
   "abp.admin.cleanup.ok": "Removed {} empty, unused backpacks.",
 
   "abp.admin.openfor.title": "Backpack {}",
-  "abp.admin.openfor.failed": "Could not open the backpack.",
   "abp.admin.openfor.ok": "Opened backpack {}."
 }

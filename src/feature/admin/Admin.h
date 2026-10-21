@@ -73,6 +73,9 @@ void recordHolder(game::Backpack& backpack, Player& player);
 /// The backpack is being inspected by an admin (`/backpack openfor`): viewing it in the GUI does not
 /// make the admin a holder.
 void markInspected(std::string const& uuid);
+/// Opens `backpack`'s GUI for `player` after `ticks` server ticks (lets the chat screen that ran
+/// the command close first; a container opened while chat is still up is ignored by the client).
+void openLater(Player& player, std::shared_ptr<game::Backpack> backpack, std::string title, int ticks);
 /// A player has carried this backpack (or it existed before access tracking started).
 [[nodiscard]] bool playerAccessed(game::Backpack const& backpack);
 

@@ -296,6 +296,42 @@ std::unordered_set<std::string>& inspected() {
 
 void markInspected(std::string const& uuid) { inspected().insert(uuid); }
 
+namespace {
+struct PendingOpen {
+    std::int64_t                    player;
+    std::shared_ptr<game::Backpack> backpack;
+    std::string                     title;
+    int                             ticks;
+};
+std::vector<PendingOpen>& pendingOpens() {
+    static std::vector<PendingOpen> v;
+    return v;
+}
+
+void runPendingOpens(Level& level) {
+    auto& pending = pendingOpens();
+    if (pending.empty()) return;
+    std::vector<PendingOpen> due;
+    for (auto it = pending.begin(); it != pending.end();) {
+        if (--it->ticks <= 0) {
+            due.push_back(std::move(*it));
+            it = pending.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto& p : due) {
+        ActorUniqueID id;
+        id.rawID = p.player;
+        if (auto* player = level.getPlayer(id)) ui::BackpackMenu::openBackpack(*player, p.backpack, p.title);
+    }
+}
+} // namespace
+
+void openLater(Player& player, std::shared_ptr<game::Backpack> backpack, std::string title, int ticks) {
+    pendingOpens().push_back({player.getOrCreateUniqueID().rawID, std::move(backpack), std::move(title), std::max(1, ticks)});
+}
+
 // ---- rules API -----------------------------------------------------------------------------------
 
 bool isDisallowed(std::string_view itemId) {
@@ -622,6 +658,7 @@ public:
         for (auto& l : mListeners) bus.removeListener(l);
         mListeners.clear();
         upgrade::removeRuleBuilder("admin");
+        pendingOpens().clear();
         upgrade::setTypeGate(nullptr);
         gInstalled = false;
         applyRules();
@@ -632,6 +669,7 @@ private:
         stashes().clear();
         legacy() = {};
         inspected().clear();
+        pendingOpens().clear();
         if (!game::Storage::get().available()) return;
         loadOrMarkLegacy();
         if (auto level = ll::service::getLevel()) {
@@ -644,6 +682,7 @@ private:
 
     void tick(Level& level) {
         ++mTicks;
+        runPendingOpens(level);
         bool scan  = mTicks % std::max(1, cfg().holderScanInterval) == 0;
         bool quick = mTicks % kRestoreTicks == 0; // stash restore + open-menu check
         if (!scan && !quick) return;
