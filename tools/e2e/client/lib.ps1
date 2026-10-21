@@ -130,6 +130,19 @@ function Get-GameDataDir {
     return Join-Path $env:APPDATA 'Minecraft Bedrock'
 }
 
+# Puts the camera back to first person (options.txt `game_thirdperson:0`) so a scenario that
+# switched views (F5 / camera presets) can't leave the shared game in third person for later runs.
+function Reset-CameraPerspective {
+    $data = Get-GameDataDir
+    foreach ($o in Get-ChildItem -Recurse -Path $data -Filter 'options.txt' -ErrorAction SilentlyContinue) {
+        $lines = Get-Content $o.FullName
+        if ($lines -match '^game_thirdperson:[1-9]') {
+            $lines -replace '^game_thirdperson:\d+', 'game_thirdperson:0' | Set-Content $o.FullName
+            Write-Step "reset camera perspective to first person in $($o.FullName)"
+        }
+    }
+}
+
 function Get-WorldsDir {
     $data = Get-GameDataDir
     $dirs = @(Get-ChildItem (Join-Path $data 'Users') -Directory -ErrorAction SilentlyContinue |

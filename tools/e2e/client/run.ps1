@@ -50,6 +50,7 @@ try {
         Deploy-Mod $ModDir
         if (-not $KeepOtherMods) { Move-OtherModsAside }
         Restore-TestWorld
+        Reset-CameraPerspective
         $prelaunch = Join-Path $PSScriptRoot "scenarios/$Scenario.prelaunch.ps1"
         if (Test-Path $prelaunch) { . $prelaunch }
         try {
