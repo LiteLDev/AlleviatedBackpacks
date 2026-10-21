@@ -12,6 +12,12 @@
       "geometry": {
         "default": "geometry.alleviatedbackpacks.backpack"
       },
+      "scripts": {
+        "pre_animation": [
+          "v.is_worn = c.item_slot == 'chest';",
+          "v.in_off_hand = c.item_slot == 'off_hand';"
+        ]
+      },
       "render_controllers": [
         "controller.render.alleviatedbackpacks.backpack"
       ]

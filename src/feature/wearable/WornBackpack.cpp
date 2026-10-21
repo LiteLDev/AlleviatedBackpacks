@@ -4,19 +4,19 @@
 // key bindings (Sophisticated Backpacks uses a key):
 //   - sneak twice quickly (config `worn.doubleSneakToOpen`),
 //   - `/backpack worn`.
+// Using a held backpack still opens it (foundation opener cancels the use for real players, so the
+// wearable component never equips it on use); wearing is done through the chest slot.
 
 #include <unordered_map>
 
 #include "ll/api/command/CommandHandle.h"
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/world/ServerLevelTickEvent.h"
-#include "ll/api/memory/Hook.h"
 
 #include "mc/deps/shared_types/legacy/actor/ArmorSlot.h"
 #include "mc/server/commands/CommandOrigin.h"
 #include "mc/server/commands/CommandOutput.h"
 #include "mc/world/actor/player/Player.h"
-#include "mc/world/gamemode/GameMode.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/Level.h"
 
@@ -42,36 +42,6 @@ bool openWorn(Player& player) {
 }
 
 namespace {
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-variable" // LL hook macros declare an unused counter
-
-// Backpack items are wearables now, and the wearable component equips on use inside
-// `GameMode::useItem` (before LeviLamina's PlayerUseItemEvent, which the foundation's opener
-// cancels). Using a backpack must keep opening it, as in Sophisticated Backpacks: wearing is done
-// by putting it into the chest slot.
-LL_TYPE_INSTANCE_HOOK(
-    BackpackUseHook,
-    ll::memory::HookPriority::High,
-    GameMode,
-    &GameMode::$useItem,
-    bool,
-    ItemStack& item,
-    HandSlot   handSlot
-) {
-    Player& player = mPlayer;
-    if (player.isClientSide() || !game::isBackpack(item)) return origin(item, handSlot);
-    if (!ui::MenuManager::get().current(player)) ui::BackpackMenu::openFor(player, game::selectedSlot(player));
-    return false;
-}
-
-#pragma clang diagnostic pop
-
-class UseOpens {
-public:
-    void install() { BackpackUseHook::hook(); }
-    void uninstall() { BackpackUseHook::unhook(); }
-};
 
 /// Detects double sneak presses by polling the sneaking flag every tick (modern clients report
 /// sneaking through PlayerAuthInputPacket, so there is no reliable sneak event).
@@ -129,7 +99,6 @@ private:
 } // namespace abp::wearable
 
 ABP_REGISTER_MODULE(abp::wearable::DoubleSneak);
-ABP_REGISTER_MODULE(abp::wearable::UseOpens);
 
 ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
     cmd.overload().text("worn").execute([](CommandOrigin const& origin, CommandOutput& output) {

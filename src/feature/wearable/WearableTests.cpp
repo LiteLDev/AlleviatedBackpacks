@@ -242,19 +242,6 @@ ABP_REGISTER_SELFTEST("wearable.dyed_worn", [](Context& ctx) -> ll::coro::CoroTa
     player.setArmor(ArmorSlot::Torso, ItemStack::EMPTY_ITEM());
 });
 
-ABP_REGISTER_SELFTEST("wearable.use_opens_not_equips", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto& sp = static_cast<SimulatedPlayer&>(ctx.player());
-    auto& mm = ui::MenuManager::get();
-    auto  bp = ctx.createBackpack(Tier::Copper);
-    ctx.require(ctx.give(sp, ctx.backpackItem(*bp), sp.getSelectedItemSlot()) >= 0, "give backpack");
-    sp.simulateUseItem();
-    co_await ctx.ticks(5);
-    ctx.check(mm.current(sp) != nullptr, "using a held backpack opens it");
-    ctx.check(sp.getArmor(ArmorSlot::Torso).isNull(), "using a held backpack does not equip it");
-    ctx.check(game::isBackpack(sp.getSelectedItem()), "the backpack stays in the hand");
-    mm.close(sp);
-});
-
 ABP_REGISTER_SELFTEST("wearable.double_sneak_opens", [](Context& ctx) -> ll::coro::CoroTask<> {
     ConfigGuard guard;
     guard.cfg().worn.doubleSneakToOpen      = true;

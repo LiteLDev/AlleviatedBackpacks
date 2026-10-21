@@ -13,10 +13,13 @@
       ],
       "part_visibility": [
         {
-          "body": "c.item_slot == 'chest'"
+          "body": "v.is_worn"
         },
         {
-          "held": "c.item_slot != 'chest'"
+          "rightItem": "!v.is_worn && !v.in_off_hand"
+        },
+        {
+          "leftItem": "v.in_off_hand"
         }
       ]
     }

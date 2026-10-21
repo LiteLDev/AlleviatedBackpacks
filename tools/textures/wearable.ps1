@@ -8,8 +8,8 @@
 #
 # The model is a simple bag + lid + front pocket + clasp on the back (bone "body", which binds to
 # the wearer's body bone by name like vanilla armor), shoulder straps on the front, and a half-size
-# copy for hands (bone "held", bound with q.item_slot_to_bone_name). The render controller shows
-# one or the other depending on c.item_slot.
+# copies for the hands (bones "rightItem"/"leftItem"). All bones bind to the wearer's bones by
+# name, like vanilla armor. The attachable sets v.is_worn / v.in_off_hand from c.item_slot (context variables are only valid in its scripts); the render controller shows the matching bone.
 param([switch]$Preview)
 
 . "$PSScriptRoot/lib.ps1"
@@ -133,10 +133,10 @@ $straps = @(
 )
 
 $worn = @($parts + $straps | ForEach-Object { Cube $_.o $_.s $_.uv })
-# Held: half size, bag centre (0, 17, 4.5) moved to the bound hand bone's origin.
+# Held: half size, hanging below the hand (player model: right hand around x=-6, y=12).
 $heldCenter = @(0, 17, 4.5)
-$heldOffset = @(0, (-17 - 2), (-4.5 - 1))
-$held = @($parts | ForEach-Object { Cube $_.o $_.s $_.uv 0.5 $heldCenter $heldOffset })
+$heldRight = @($parts | ForEach-Object { Cube $_.o $_.s $_.uv 0.5 $heldCenter @(-6, -7, -6.5) })
+$heldLeft  = @($parts | ForEach-Object { Cube $_.o $_.s $_.uv 0.5 $heldCenter @(6, -7, -6.5) })
 
 $geo = [ordered]@{
     format_version      = '1.16.0'
@@ -152,7 +152,8 @@ $geo = [ordered]@{
             }
             bones       = @(
                 [ordered]@{ name = 'body'; pivot = @(0, 24, 0); cubes = $worn },
-                [ordered]@{ name = 'held'; binding = 'q.item_slot_to_bone_name(c.item_slot)'; pivot = @(0, 0, 0); cubes = $held }
+                [ordered]@{ name = 'rightItem'; pivot = @(-6, 15, 1); cubes = $heldRight },
+                [ordered]@{ name = 'leftItem'; pivot = @(6, 15, 1); cubes = $heldLeft }
             )
         }
     )
@@ -170,8 +171,9 @@ $rc = [ordered]@{
             materials       = @(@{ '*' = 'Material.default' })
             textures        = @('Texture.default')
             part_visibility = @(
-                @{ body = "c.item_slot == 'chest'" },
-                @{ held = "c.item_slot != 'chest'" }
+                @{ body = 'v.is_worn' },
+                @{ rightItem = '!v.is_worn && !v.in_off_hand' },
+                @{ leftItem = 'v.in_off_hand' }
             )
         }
     }
@@ -191,6 +193,7 @@ foreach ($name in $tiers.Keys) {
                 materials          = [ordered]@{ default = 'entity_alphatest' }
                 textures           = [ordered]@{ default = "textures/entity/alleviatedbackpacks/${name}_backpack" }
                 geometry           = [ordered]@{ default = 'geometry.alleviatedbackpacks.backpack' }
+                scripts            = [ordered]@{ pre_animation = @("v.is_worn = c.item_slot == 'chest';", "v.in_off_hand = c.item_slot == 'off_hand';") }
                 render_controllers = @('controller.render.alleviatedbackpacks.backpack')
             }
         }
