@@ -21,5 +21,6 @@
   "abp.inception.open_label": "Nested backpacks",
   "abp.inception.open_lore1": "§7Click to open a backpack stored here.",
   "abp.inception.open_lore2": "§7Tip: press Q on a stored backpack to open it.",
-  "abp.inception.choose": "Open a nested backpack"
+  "abp.inception.choose": "Open a nested backpack",
+  "abp.inception.none_inside": "There are no backpacks in this backpack."
 }

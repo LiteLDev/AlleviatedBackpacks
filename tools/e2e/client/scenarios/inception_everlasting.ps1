@@ -43,24 +43,12 @@ Click-Slot (Menu-Slot 45)
 Shift-Click (Hotbar 2)
 Save-Screenshot 'backpack-stored' | Out-Null
 
-# 3. Q on the stored backpack opens it.
+# 3. The "Nested backpacks" button (first feature button, slot 48) opens the stored backpack.
 $mark = Get-LogMark
-$s0 = Menu-Slot 0
-Move-Mouse $s0[0] $s0[1] -Relative
-Start-Sleep -Milliseconds 300
-Press-Key 'Q'
-$opened = $true
-try { Wait-LogLine 'menu shown: Leather Backpack \(54 slots\)' 8 -Since $mark | Out-Null }
-catch { $opened = $false }
-if ($opened) { Write-Step 'Q opened the nested backpack' }
-else {
-    Write-Step 'Q did not open the nested backpack: using the Nested backpacks button (slot 48)'
-    $mark = Get-LogMark
-    Click-Slot (Menu-Slot 48)
-    Wait-LogLine 'menu shown: Leather Backpack \(54 slots\)' 10 -Since $mark | Out-Null
-}
+Click-Slot (Menu-Slot 48)
+Wait-LogLine 'menu shown: Leather Backpack \(54 slots\)' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 1500
-Save-Screenshot 'nested-open' | Out-Null
+Save-Screenshot 'nested-open-button' | Out-Null
 
 # 4. Back button (slot 46) returns to the iron backpack.
 $mark = Get-LogMark
@@ -68,6 +56,19 @@ Click-Slot (Menu-Slot 46)
 Wait-LogLine 'menu shown: Iron Backpack \(54 slots\)' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 1500
 Save-Screenshot 'back-to-outer' | Out-Null
+
+# 5. Q on the stored backpack opens it too.
+$mark = Get-LogMark
+$s0 = Menu-Slot 0
+Move-Mouse $s0[0] $s0[1] -Relative
+Start-Sleep -Milliseconds 300
+Press-Key 'Q'
+try {
+    Wait-LogLine 'menu shown: Leather Backpack \(54 slots\)' 8 -Since $mark | Out-Null
+    Write-Step 'Q opened the nested backpack'
+} catch { $problems += 'Q on a stored backpack did not open it' }
+Start-Sleep -Milliseconds 1500
+Save-Screenshot 'nested-open-q' | Out-Null
 Close-Screen
 
 # 5. The backpack is still in the iron backpack (not dropped by Q), both upgrades installed.

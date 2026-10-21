@@ -21,5 +21,6 @@
   "abp.inception.open_label": "内部背包",
   "abp.inception.open_lore1": "§7点击打开存放在这里的背包。",
   "abp.inception.open_lore2": "§7提示：对存放的背包按 Q 即可打开。",
-  "abp.inception.choose": "打开内部背包"
+  "abp.inception.choose": "打开内部背包",
+  "abp.inception.none_inside": "此背包中没有背包。"
 }

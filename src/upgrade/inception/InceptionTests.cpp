@@ -258,7 +258,7 @@ ABP_REGISTER_SELFTEST("inception.open_nested_gui", [](Context& ctx) -> ll::coro:
             1
     }
     );
-    co_await ctx.ticks(12);
+    co_await ctx.ticks(25);
     auto nested = std::dynamic_pointer_cast<NestedBackpackMenu>(mm.current(player));
     ctx.require(nested != nullptr, "nested menu open");
     ctx.check(nested->backpack()->uuid() == b->uuid(), "showing b");
@@ -278,7 +278,7 @@ ABP_REGISTER_SELFTEST("inception.open_nested_gui", [](Context& ctx) -> ll::coro:
     ctx.check(button->visible(bctx), "button visible with a nested backpack");
     ui::ClickContext click{player, *nested, 48, ui::ClickType::Take, 1, ItemStack::EMPTY_ITEM()};
     button->onClick(bctx, click);
-    co_await ctx.ticks(12); // menus switch through closeThen
+    co_await ctx.ticks(25); // menus switch through closeThen
     auto deeper = std::dynamic_pointer_cast<NestedBackpackMenu>(mm.current(player));
     ctx.require(deeper != nullptr && deeper->backpack()->uuid() == c->uuid(), "c open");
     ctx.check(deeper->ancestors() == (std::vector<std::string>{a->uuid(), b->uuid()}), "chain = [a, b]");
@@ -295,7 +295,7 @@ ABP_REGISTER_SELFTEST("inception.open_nested_gui", [](Context& ctx) -> ll::coro:
             1
     }
     );
-    co_await ctx.ticks(12); // menus switch through closeThen
+    co_await ctx.ticks(25); // menus switch through closeThen
     auto back1 = std::dynamic_pointer_cast<NestedBackpackMenu>(mm.current(player));
     ctx.require(back1 != nullptr && back1->backpack()->uuid() == b->uuid(), "back to b");
 
@@ -312,7 +312,7 @@ ABP_REGISTER_SELFTEST("inception.open_nested_gui", [](Context& ctx) -> ll::coro:
             1
     }
     );
-    co_await ctx.ticks(12); // menus switch through closeThen
+    co_await ctx.ticks(25); // menus switch through closeThen
     back1 = std::dynamic_pointer_cast<NestedBackpackMenu>(mm.current(player));
     ctx.require(back1 != nullptr && back1->backpack()->uuid() == b->uuid(), "settings Back returns to nested b");
     ctx.check(back1->view() == ui::BackpackMenu::View::Upgrades, "on the upgrades page");
@@ -340,7 +340,7 @@ ABP_REGISTER_SELFTEST("inception.open_nested_gui", [](Context& ctx) -> ll::coro:
             1
     }
     );
-    co_await ctx.ticks(12); // menus switch through closeThen
+    co_await ctx.ticks(25); // menus switch through closeThen
     auto top = std::dynamic_pointer_cast<ui::BackpackMenu>(mm.current(player));
     ctx.require(top != nullptr, "back to a");
     ctx.check(std::dynamic_pointer_cast<NestedBackpackMenu>(top) == nullptr, "a is the top-level menu");
@@ -356,12 +356,12 @@ ABP_REGISTER_SELFTEST("inception.open_nested_gui", [](Context& ctx) -> ll::coro:
             1
     }
     );
-    co_await ctx.ticks(12);
+    co_await ctx.ticks(25);
     ctx.require(std::dynamic_pointer_cast<NestedBackpackMenu>(mm.current(player)) != nullptr, "b open again");
     mm.forceShown(player);
     auto removed = a->inventory().extract(bAt, 1, kPlayer);
     ctx.require(!removed.empty(), "b taken out of a");
-    co_await ctx.ticks(12);
+    co_await ctx.ticks(25);
     ctx.check(mm.current(player) == nullptr, "nested menu closed when the chain broke");
     mm.close(player);
 });

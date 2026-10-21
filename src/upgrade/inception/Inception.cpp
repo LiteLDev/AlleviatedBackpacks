@@ -8,10 +8,15 @@
 #include <algorithm>
 #include <unordered_set>
 
+#include "ll/api/chrono/GameChrono.h"
+#include "ll/api/coro/CoroTask.h"
 #include "ll/api/form/SimpleForm.h"
+#include "ll/api/service/Bedrock.h"
+#include "ll/api/thread/ServerThreadExecutor.h"
 
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/world/level/Level.h"
 
 #include "feature/admin/Admin.h"
 #include "game/BackpackItem.h"
@@ -31,8 +36,9 @@ ABP_REGISTER_CONFIG("inception", abp::upgrade::inception::InceptionConfig);
 namespace abp::upgrade::inception {
 
 namespace {
-constexpr std::string_view kSettingKey = "nestedUpgrades";
-constexpr std::string_view kFiller     = "minecraft:gray_stained_glass_pane";
+constexpr std::string_view kSettingKey       = "nestedUpgrades";
+constexpr std::string_view kFiller           = "minecraft:gray_stained_glass_pane";
+constexpr int              kReopenDelayTicks = 10; ///< extra ticks between closing one chest menu and opening the next
 
 std::string tierName(Player& player, core::Tier tier) {
     static constexpr std::string_view fallbacks[] = {
@@ -104,8 +110,19 @@ Chain chainFor(ui::Menu const* menu, game::Backpack const& parent) {
 /// close races the new open), so close first, like the forms do.
 void switchMenu(Player& player, std::function<void(Player&)> open) {
     auto& mm = ui::MenuManager::get();
-    if (mm.current(player)) mm.closeThen(player, std::move(open));
-    else open(player);
+    if (!mm.current(player)) {
+        open(player);
+        return;
+    }
+    mm.closeThen(player, [open = std::move(open)](Player& p) {
+        // Give the client time to tear the old chest screen down before the next ContainerOpen.
+        ll::coro::keepThis([id = p.getOrCreateUniqueID(), open]() -> ll::coro::CoroTask<> {
+            co_await ll::chrono::ticks(kReopenDelayTicks);
+            auto level = ll::service::getLevel();
+            if (!level) co_return;
+            if (auto* pl = level->getPlayer(id); pl && pl->isAlive() && !ui::MenuManager::get().current(*pl)) open(*pl);
+        }).launch(ll::thread::ServerThreadExecutor::getDefault());
+    });
 }
 
 void reopenNow(
@@ -553,10 +570,12 @@ ABP_REGISTER_STORAGE_CLICK([](ui::ClickContext const& c, std::shared_ptr<game::B
 ABP_REGISTER_BACKPACK_BUTTON(
     ui::BackpackButton{
         .id    = "inception.open",
-        .order = 5, // first: only shown when nested backpacks are inside
+        .order = 5, // first: only shown with an active Inception upgrade
         .visible =
             [](ui::BackpackMenuContext const& c) {
-                return hasActive(*c.backpack, kId) && !backpackSlots(*c.backpack).empty();
+                // Visible whenever Inception is active: the control row is only rebuilt on page / view
+                // changes, so the button must not depend on the (changing) contents.
+                return hasActive(*c.backpack, kId);
             },
         .icon =
             [](ui::BackpackMenuContext const& c) {
@@ -573,7 +592,12 @@ ABP_REGISTER_BACKPACK_BUTTON(
         .onClick =
             [](ui::BackpackMenuContext const& c, ui::ClickContext const&) {
                 auto slots = backpackSlots(*c.backpack);
-                if (slots.empty()) return;
+                if (slots.empty()) {
+                    c.player.sendMessage(
+                        trFor(c.player, "abp.inception.none_inside", "There are no backpacks in this backpack.")
+                    );
+                    return;
+                }
                 if (slots.size() == 1) {
                     (void)openNested(c.player, &c.menu, c.backpack, slots.front());
                     return;
