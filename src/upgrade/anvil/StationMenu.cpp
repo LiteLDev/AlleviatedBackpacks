@@ -249,15 +249,17 @@ void switchMenu(Player& player, std::function<void(Player&)> openNext) {
         openNext(player);
         return;
     }
-    mm.closeThen(player, [openNext = std::move(openNext)](Player& p) {
-        auto key = p.getOrCreateUniqueID();
-        ll::coro::keepThis([key, openNext]() -> ll::coro::CoroTask<> {
-            co_await ll::chrono::ticks(kSwitchExtraTicks);
-            auto level = ll::service::getLevel();
-            if (!level) co_return;
-            if (auto* pl = level->getPlayer(key); pl && !ui::MenuManager::get().current(*pl)) openNext(*pl);
-        }).launch(ll::thread::ServerThreadExecutor::getDefault());
-    });
+    mm.closeThen(player, [openNext = std::move(openNext)](Player& p) { openLater(p, std::move(openNext)); });
+}
+
+void openLater(Player& player, std::function<void(Player&)> openNext) {
+    auto key = player.getOrCreateUniqueID();
+    ll::coro::keepThis([key, openNext = std::move(openNext)]() -> ll::coro::CoroTask<> {
+        co_await ll::chrono::ticks(kSwitchExtraTicks);
+        auto level = ll::service::getLevel();
+        if (!level) co_return;
+        if (auto* pl = level->getPlayer(key); pl && !ui::MenuManager::get().current(*pl)) openNext(*pl);
+    }).launch(ll::thread::ServerThreadExecutor::getDefault());
 }
 
 bool showMenu(Player& player, std::shared_ptr<ui::Menu> menu) {

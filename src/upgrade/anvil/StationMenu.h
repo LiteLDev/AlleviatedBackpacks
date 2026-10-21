@@ -155,6 +155,9 @@ inline constexpr int kSwitchExtraTicks = 12;
 /// container. The real client does not show a fake chest that replaces an open one directly or
 /// right after a server-side close.
 void switchMenu(Player& player, std::function<void(Player&)> openNext);
+/// Runs `openNext` `kSwitchExtraTicks` later if the player is still there and has no menu open
+/// (e.g. after a form: the client ignores a container that opens while the form is going away).
+void openLater(Player& player, std::function<void(Player&)> openNext);
 /// `switchMenu` to `menu`.
 bool showMenu(Player& player, std::shared_ptr<ui::Menu> menu);
 

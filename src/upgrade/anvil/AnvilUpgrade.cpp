@@ -193,7 +193,9 @@ void AnvilMenu::openRenameForm(Player& player, StationRef ref) {
                     }
                 }
             }
-            if (ref.valid()) open(pl, ref.ctx());
+            openLater(pl, [ref](Player& p) {
+                if (ref.valid()) open(p, ref.ctx());
+            });
         });
     });
 }
