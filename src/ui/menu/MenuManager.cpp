@@ -437,11 +437,47 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose) {
             }
         }
     }
+    for (auto const& [id, o] : std::vector(mObservers)) {
+        if (!o.closed) continue;
+        try {
+            o.closed(player, *s->menu);
+        } catch (std::exception const& e) {
+            log().error("menu observer (closed) failed: {}", e.what());
+        }
+    }
     try {
         s->menu->onDestroyed();
     } catch (std::exception const& e) {
         log().error("menu onDestroyed failed: {}", e.what());
     }
+}
+
+void MenuManager::notifyBeforeShow(Player& player, Session& s) {
+    auto menu = s.menu; // observers must not open/close menus, but keep it alive anyway
+    int  id   = s.id;
+    for (auto const& [oid, o] : std::vector(mObservers)) {
+        if (!o.beforeShow) continue;
+        try {
+            o.beforeShow(player, *menu, id);
+        } catch (std::exception const& e) {
+            log().error("menu observer (beforeShow) failed: {}", e.what());
+        }
+    }
+}
+
+int MenuManager::addObserver(Observer observer) {
+    int id = mNextObserver++;
+    mObservers.emplace_back(id, std::move(observer));
+    return id;
+}
+
+void MenuManager::removeObserver(int id) {
+    std::erase_if(mObservers, [id](auto const& e) { return e.first == id; });
+}
+
+int MenuManager::containerIdOf(Player const& player) const {
+    auto it = mSessions.find(keyOf(player));
+    return it == mSessions.end() ? -1 : it->second->id;
 }
 
 void MenuManager::runDeferred() {
@@ -515,6 +551,7 @@ void MenuManager::forceShown(Player& player) {
     if (it == mSessions.end() || it->second->shown()) return;
     if (it->second->phase == Session::Phase::AwaitClose) place(player, *it->second);
     it->second->phase = Session::Phase::Shown;
+    notifyBeforeShow(player, *it->second);
     sync(player, *it->second, true);
 }
 
@@ -590,6 +627,7 @@ void MenuManager::tick() {
         if (s.phase == Session::Phase::Placed) {
             if (--s.wait > 0) continue;
             s.phase = Session::Phase::Shown;
+            notifyBeforeShow(*player, s);
             auto  pkt         = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerOpen);
             auto& o           = static_cast<ContainerOpenPacket&>(*pkt);
             o.mContainerId    = static_cast<ContainerID>(s.id);
@@ -617,6 +655,17 @@ void MenuManager::tick() {
         if (--cur.diffIn <= 0 || cur.menu->needsBuild()) {
             cur.diffIn = kDiffEvery;
             sync(*player, cur, false);
+        }
+        if (!mObservers.empty()) {
+            auto shownMenu = cur.menu;
+            for (auto const& [oid, o] : std::vector(mObservers)) {
+                if (!o.afterTick) continue;
+                try {
+                    o.afterTick(*player, *shownMenu);
+                } catch (std::exception const& e) {
+                    log().error("menu observer (afterTick) failed: {}", e.what());
+                }
+            }
         }
     }
     runDeferred();
@@ -756,7 +805,10 @@ ItemStack withCount(ItemStack s, int n) {
 /// Executes actions against a menu + the player's own containers.
 class ActionRunner {
 public:
-    ActionRunner(Player& player, Menu& menu) : mPlayer(player), mMenu(menu) {}
+    ActionRunner(Player& player, Menu& menu, std::shared_ptr<Slot> overrideSlot = nullptr)
+    : mPlayer(player),
+      mMenu(menu),
+      mOverride(std::move(overrideSlot)) {}
 
     std::vector<Ref> touched;
     bool             menuChanged = false;
@@ -774,7 +826,7 @@ public:
     }
 
     bool click(Ref const& r, ClickType type, int amount, ItemStack const& offered) {
-        auto* slot = mMenu.slot(r.index);
+        auto* slot = slotAt(r.index);
         if (!slot) return true; // nothing there: treat as handled (refuse)
         ClickContext ctx{mPlayer, mMenu, r.index, type, amount, offered};
         bool         handled = slot->click(ctx);
@@ -807,7 +859,7 @@ public:
         auto const& p = a.isMenu() ? b : a;
         auto        pItem = getItem(mPlayer, p);
         if (click(m, ClickType::Swap, pItem.mCount, pItem)) return false;
-        auto* slot = mMenu.slot(m.index);
+        auto* slot = slotAt(m.index);
         auto  taken = slot->take(mPlayer, 255);
         if (!pItem.isNull()) {
             int acc = slot->accept(mPlayer, pItem);
@@ -827,7 +879,7 @@ public:
         touch(src);
         if (src.isMenu()) {
             if (click(src, ClickType::Drop, n, ItemStack::EMPTY_ITEM())) return false;
-            auto taken = mMenu.slot(src.index)->take(mPlayer, n);
+            auto taken = slotAt(src.index)->take(mPlayer, n);
             if (taken.isNull()) return false;
             mPlayer.drop(taken, randomly);
             return true;
@@ -869,7 +921,7 @@ private:
     bool menuToPlayer(Ref const& src, Ref const& dst, int n) {
         auto type = dst.where == Where::Cursor ? ClickType::Take : ClickType::QuickMove;
         if (click(src, type, n, ItemStack::EMPTY_ITEM())) return false;
-        auto* slot  = mMenu.slot(src.index);
+        auto* slot  = slotAt(src.index);
         auto  taken = slot->take(mPlayer, n);
         if (taken.isNull()) return false;
         auto d     = getItem(mPlayer, dst);
@@ -902,7 +954,7 @@ private:
         int  accepted = 0;
         if (src.where == Where::Cursor) {
             if (click(dst, ClickType::Place, n, offered)) return false;
-            accepted = mMenu.slot(dst.index)->accept(mPlayer, offered);
+            accepted = slotAt(dst.index)->accept(mPlayer, offered);
         } else {
             accepted = mMenu.quickMoveIn(mPlayer, offered);
             menuChanged = true;
@@ -915,8 +967,8 @@ private:
     bool menuToMenu(Ref const& src, Ref const& dst, int n) {
         if (src.index == dst.index) return false;
         if (click(src, ClickType::Take, n, ItemStack::EMPTY_ITEM())) return false;
-        auto* from  = mMenu.slot(src.index);
-        auto* to    = mMenu.slot(dst.index);
+        auto* from  = slotAt(src.index);
+        auto* to    = slotAt(dst.index);
         if (!to) return false;
         auto  taken = from->take(mPlayer, n);
         if (taken.isNull()) return false;
@@ -925,8 +977,12 @@ private:
         return acc > 0;
     }
 
-    Player& mPlayer;
-    Menu&   mMenu;
+    /// The slot a menu address refers to (simulateOn replaces the menu's own slots).
+    [[nodiscard]] Slot* slotAt(int index) const { return mOverride ? mOverride.get() : mMenu.slot(index); }
+
+    Player&               mPlayer;
+    Menu&                 mMenu;
+    std::shared_ptr<Slot> mOverride;
 };
 
 ItemStackResponseSlotInfo slotInfo(Ref const& r, ItemStack const& item) {
@@ -971,6 +1027,47 @@ bool MenuManager::simulate(Player& player, SimAction const& action) {
     if (auto again = mSessions.find(keyOf(player)); again != mSessions.end()) sync(player, *again->second, false);
     runDeferred();
     return ok;
+}
+
+bool MenuManager::simulateOn(Player& player, SimAction const& action, std::shared_ptr<Slot> menuSlot) {
+    auto it = mSessions.find(keyOf(player));
+    if (it == mSessions.end() || !menuSlot) return false;
+    auto menu = it->second->menu; // keep alive even if a callback replaces it
+    menu->ensureBuilt(player);
+    ActionRunner run(player, *menu, std::move(menuSlot));
+    auto         src = fromAddress(action.src);
+    auto         dst = fromAddress(action.dst);
+    mBusy            = true;
+    bool ok          = false;
+    switch (action.type) {
+    case ActionType::Take:
+    case ActionType::Place:
+        ok = run.transfer(src, dst, action.amount);
+        break;
+    case ActionType::Swap:
+        ok = run.swap(src, dst);
+        break;
+    case ActionType::Drop:
+        ok = run.drop(src, action.amount, false);
+        break;
+    case ActionType::Destroy:
+        ok = run.destroy(src, action.amount);
+        break;
+    }
+    mBusy = false;
+    if (auto again = mSessions.find(keyOf(player)); again != mSessions.end() && again->second->menu == menu) {
+        sync(player, *again->second, false);
+    }
+    runDeferred();
+    return ok;
+}
+
+void MenuManager::resyncPlayer(Player& player) {
+    player.sendInventory(false);
+    InventorySlotPacket cursorPkt{
+        InventorySlotPacketPayload{ContainerID::PlayerOnlyUi, 0, player.mPlayerUIContainer->getItem(0)}
+    };
+    cursorPkt.sendTo(player);
 }
 
 bool MenuManager::handleRequestPacket(Player& player, void const* raw) {

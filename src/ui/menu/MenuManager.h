@@ -84,6 +84,31 @@ public:
     /// The item displayed in a menu slot as last synced to the client.
     [[nodiscard]] ItemStack shownItem(Player const& player, int slot) const;
 
+    /// Like `simulate`, but every `Where::Menu` address refers to `menuSlot` instead of the menu's
+    /// own slot at that index. Native screens use it for slots the chest page does not show (a
+    /// storage slot on another page, an upgrade slot while the storage view is shown): the action
+    /// goes through exactly the same rules (locked slots, `Slot::click/take/accept`) as a click in
+    /// the chest. Requires an open menu. Does not re-sync the player (see `resyncPlayer`).
+    bool simulateOn(Player& player, SimAction const& action, std::shared_ptr<Slot> menuSlot);
+    /// Sends the player's inventory and cursor to the client (after `simulate`/`simulateOn`).
+    void resyncPlayer(Player& player);
+    /// Container id of the player's open menu (-1 if none).
+    [[nodiscard]] int containerIdOf(Player const& player) const;
+
+    // ---- observers (additive hook: native renderers such as the client companion) ------------
+    struct Observer {
+        /// Right before the client is told to open `menu` (`containerId` = the screen's id). Also
+        /// runs for `forceShown`.
+        std::function<void(Player&, Menu&, int containerId)> beforeShow;
+        /// Every server tick after the shown `menu` was ticked and synced.
+        std::function<void(Player&, Menu&)> afterTick;
+        /// The menu's session ended (closed, replaced, player gone: then `player` is null).
+        std::function<void(Player*, Menu&)> closed;
+    };
+    /// Registers an observer; returns an id for `removeObserver`.
+    int  addObserver(Observer observer);
+    void removeObserver(int id);
+
     struct Session;
 
     // Internal (packet hooks).
@@ -125,6 +150,10 @@ private:
     std::vector<std::function<void()>>                         mDeferred;
     std::vector<Delayed>                                       mDelayed;
     bool                                                       mBusy = false;
+    std::vector<std::pair<int, Observer>>                      mObservers;
+    int                                                        mNextObserver = 1;
+
+    void notifyBeforeShow(Player& player, Session& s);
 };
 
 } // namespace abp::ui
