@@ -1,0 +1,21 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:everlasting_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "CSC",
+      "SBS",
+      "CSC"
+    ],
+    "key": {
+      "C": { "item": "minecraft:end_crystal" },
+      "S": { "item": "minecraft:nether_star" },
+      "B": { "item": "alleviatedbackpacks:upgrade_base" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:everlasting_upgrade" }
+  }
+}

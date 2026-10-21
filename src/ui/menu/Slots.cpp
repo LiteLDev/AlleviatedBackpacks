@@ -59,6 +59,13 @@ ItemStack StorageSlot::display(Player& player) const {
     return s;
 }
 
+bool StorageSlot::click(ClickContext const& ctx) {
+    for (auto const& handler : StorageClickRegistry::entries()) {
+        if (handler && handler(ctx, mBackpack, mIndex)) return true;
+    }
+    return false;
+}
+
 ItemStack StorageSlot::take(Player& player, int amount) {
     auto& inv = mBackpack->inventory();
     if (mIndex < 0 || mIndex >= inv.size()) return {};

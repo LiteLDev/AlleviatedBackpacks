@@ -58,7 +58,17 @@ std::vector<CarriedBackpack> scanBackpacks(Player& player) {
     return out;
 }
 
-std::vector<std::pair<CarriedBackpack, std::shared_ptr<Backpack>>> carriedBackpacks(Player& player, bool assignUuids) {
+namespace {
+NestedBackpackProvider& nestedProvider() {
+    static NestedBackpackProvider provider;
+    return provider;
+}
+} // namespace
+
+void setNestedBackpackProvider(NestedBackpackProvider provider) { nestedProvider() = std::move(provider); }
+
+std::vector<std::pair<CarriedBackpack, std::shared_ptr<Backpack>>>
+carriedBackpacks(Player& player, bool assignUuids, bool includeNested) {
     std::vector<std::pair<CarriedBackpack, std::shared_ptr<Backpack>>> out;
     auto&                                                              storage = Storage::get();
     if (!storage.available()) return out;
@@ -75,6 +85,7 @@ std::vector<std::pair<CarriedBackpack, std::shared_ptr<Backpack>>> carriedBackpa
             }
         }
     }
+    if (includeNested && !out.empty() && nestedProvider()) nestedProvider()(player, out);
     return out;
 }
 

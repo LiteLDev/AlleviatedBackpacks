@@ -36,10 +36,11 @@ private:
         if (upgrade::all().empty()) return;
         level.forEachPlayer([&](Player& player) {
             if (player.isClientSide() || !player.isAlive()) return true;
-            for (auto& [carried, bp] : carriedBackpacks(player)) {
+            for (auto& [carried, bp] : carriedBackpacks(player, false, true)) {
                 upgrade::forEachInstalled(bp, true, [&](upgrade::IUpgrade& u, upgrade::UpgradeContext const& ctx) {
+                    if (!carried.upgradeActive(u.info().id, u.info().groupOrId())) return;
                     try {
-                        u.onTick(upgrade::TickContext{ctx.withPlayer(&player), player, carried.where, interval});
+                        u.onTick(upgrade::TickContext{ctx.withPlayer(&player), player, carried.where, interval, carried.depth});
                     } catch (std::exception const& e) {
                         log().error("upgrade {} onTick failed: {}", u.info().id, e.what());
                     }
