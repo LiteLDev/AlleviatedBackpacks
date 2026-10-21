@@ -1,0 +1,16 @@
+{
+  "abp.stack.stack_starter.name": "Stack Upgrade Starter Tier",
+  "abp.stack.stack_tier_1.name": "Stack Upgrade Tier 1",
+  "abp.stack.stack_tier_2.name": "Stack Upgrade Tier 2",
+  "abp.stack.stack_tier_3.name": "Stack Upgrade Tier 3",
+  "abp.stack.stack_tier_4.name": "Stack Upgrade Tier 4",
+  "abp.stack.stack_omega.name": "Stack Upgrade Omega Tier",
+  "abp.stack.stack_downgrade_tier_1.name": "Stack Downgrade Tier 1",
+  "abp.stack.stack_downgrade_tier_2.name": "Stack Downgrade Tier 2",
+  "abp.stack.stack_downgrade_tier_3.name": "Stack Downgrade Tier 3",
+  "abp.stack.error.low_multiplier": "There's at least one slot that requires a stack limit higher than {}.",
+  "abp.stack.conversion.wrong": "§cThis conversion doesn't fit that upgrade.",
+  "abp.stack.conversion.done": "§aConverted to {}.",
+  "abp.stack.describe.multiplier": "§7Stack size multiplier: §f{}",
+  "abp.stack.describe.total": "§7Slot limit (all stack upgrades): §f{}"
+}

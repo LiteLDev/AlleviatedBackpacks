@@ -1,6 +1,7 @@
 #include "core/BackpackInventory.h"
 
 #include <algorithm>
+#include <climits>
 
 namespace abp::core {
 
@@ -188,23 +189,30 @@ long long BackpackInventory::count(std::function<bool(ItemStackData const&)> con
 }
 
 void BackpackInventory::sort(std::function<bool(ItemStackData const&, ItemStackData const&)> const& less) {
-    // Merge identical items into totals (first-seen order), then order the kinds.
-    std::vector<ItemStackData> kinds;
+    // Merge identical items into totals (first-seen order), then order the kinds. Totals are
+    // 64-bit: with large stack multipliers several slots together can exceed INT_MAX (the
+    // kind's own count, seen by `less`, saturates at INT_MAX).
+    struct Kind {
+        ItemStackData item;
+        long long     total;
+    };
+    std::vector<Kind> kinds;
     for (auto const& s : mSlots) {
         if (s.empty()) continue;
-        auto it = std::find_if(kinds.begin(), kinds.end(), [&](ItemStackData const& k) { return k.sameItem(s); });
-        if (it == kinds.end()) kinds.push_back(s);
-        else it->count += s.count;
+        auto it = std::find_if(kinds.begin(), kinds.end(), [&](Kind const& k) { return k.item.sameItem(s); });
+        if (it == kinds.end()) kinds.push_back({s, s.count});
+        else it->total += s.count;
     }
-    std::stable_sort(kinds.begin(), kinds.end(), less);
+    for (auto& k : kinds) k.item.count = static_cast<int>(std::min<long long>(k.total, INT_MAX));
+    std::stable_sort(kinds.begin(), kinds.end(), [&](Kind const& a, Kind const& b) { return less(a.item, b.item); });
     std::vector<ItemStackData> laid(mSlots.size());
     std::size_t                next = 0;
     for (auto const& k : kinds) {
-        int left = k.count;
+        long long left = k.total;
         while (left > 0) {
             if (next >= laid.size()) return; // would not fit (slot-dependent limits): keep the old layout
-            int n        = std::min(left, slotLimit(static_cast<int>(next), k));
-            laid[next++] = k.withCount(n);
+            int n        = static_cast<int>(std::min<long long>(left, slotLimit(static_cast<int>(next), k.item)));
+            laid[next++] = k.item.withCount(n);
             left        -= n;
         }
     }

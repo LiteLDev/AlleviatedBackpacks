@@ -1,0 +1,19 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:stack_omega_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "SSS",
+      "SSS",
+      "SSS"
+    ],
+    "key": {
+      "S": { "item": "alleviatedbackpacks:stack_tier_4_upgrade" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:stack_tier_4_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:stack_omega_upgrade", "count": 1 }
+  }
+}

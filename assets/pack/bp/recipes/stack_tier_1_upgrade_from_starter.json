@@ -1,0 +1,20 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:stack_tier_1_upgrade_from_starter"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      " X ",
+      "XSX",
+      " X "
+    ],
+    "key": {
+      "X": { "item": "minecraft:iron_block" },
+      "S": { "item": "alleviatedbackpacks:stack_starter_upgrade" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:stack_starter_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:stack_tier_1_upgrade", "count": 1 }
+  }
+}
