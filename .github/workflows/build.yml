@@ -41,6 +41,13 @@ jobs:
         shell: pwsh
         run: pwsh tools/build.ps1 -Target ${{ matrix.target_type }}
 
+      - name: Dump xmake package install logs
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem "$env:LOCALAPPDATA/.xmake/cache/packages" -Recurse -Filter install.txt -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "::group::$($_.FullName)"; Get-Content $_.FullName -Tail 400; Write-Host '::endgroup::' }
+
       - name: Unit tests
         if: matrix.target_type == 'server'
         run: |
