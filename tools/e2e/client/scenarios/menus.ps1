@@ -1,12 +1,15 @@
-# Chest GUI switching on the real client (menu framework): install three upgrades with normal
-# clicks (their buttons must appear without a view switch), then open each upgrade's settings menu
-# from the backpack, change a toggle and go Back, five rounds in a row; chat must keep working.
-# menus.prelaunch.ps1 turns on the packet log (config/menu.json debugPackets).
+# Chest GUI switching on the real client (menu framework): install five upgrades with normal
+# clicks (their buttons must appear without a view switch), then open each filter upgrade's
+# settings menu (27 slots) from the backpack, change a toggle and go Back, five rounds in a row;
+# switch between the crafting / stonecutter tabs (54 slots); server close + reopen a few ticks
+# later; chat must keep working. menus.prelaunch.ps1 turns on the packet log (debugPackets).
 Invoke-Chat '/clear @s'
 Invoke-Chat '/replaceitem entity @s slot.hotbar 0 alleviatedbackpacks:diamond_backpack'
 Invoke-Chat '/replaceitem entity @s slot.hotbar 1 alleviatedbackpacks:void_upgrade'
 Invoke-Chat '/replaceitem entity @s slot.hotbar 2 alleviatedbackpacks:pickup_upgrade'
 Invoke-Chat '/replaceitem entity @s slot.hotbar 3 alleviatedbackpacks:compacting_upgrade'
+Invoke-Chat '/replaceitem entity @s slot.hotbar 4 alleviatedbackpacks:crafting_upgrade'
+Invoke-Chat '/replaceitem entity @s slot.hotbar 5 alleviatedbackpacks:stonecutter_upgrade'
 Press-Key '1'
 Start-Sleep -Seconds 1
 
@@ -62,7 +65,7 @@ Save-Screenshot 'upgrades-empty' | Out-Null
 
 # 2. Normal click: pick each upgrade up from the hotbar and put it into upgrade slot u. Its
 #    settings button (slot 18 + u) must be synced right away, without switching views.
-for ($u = 0; $u -lt 3; $u++) {
+for ($u = 0; $u -lt 5; $u++) {
     $mark = Get-LogMark
     Click-At (Hotbar-Double ($u + 1))
     Click-At (Slot-Double $u)
@@ -89,6 +92,23 @@ for ($round = 1; $round -le 5; $round++) {
     }
 }
 
+# 3b. U14 tabs (54 slots each): crafting settings -> stonecutter tab -> crafting tab ... -> Back.
+#     Each switch must show the new chest with the new title (look at the screenshots).
+$mark = Get-LogMark
+Click-At (Slot-Double 21)
+Wait-Shown 'Crafting \(54 slots\)' $mark 'tab-crafting-0'
+for ($i = 1; $i -le 3; $i++) {
+    $mark = Get-LogMark
+    Click-At (Slot-Double 8)
+    Wait-Shown 'Stonecutter \(54 slots\)' $mark "tab-stonecutter-$i"
+    $mark = Get-LogMark
+    Click-At (Slot-Double 8)
+    Wait-Shown 'Crafting \(54 slots\)' $mark "tab-crafting-$i"
+}
+$mark = Get-LogMark
+Click-At (Slot-Double 0)
+Wait-Shown 'Diamond Backpack \(54 slots\)' $mark 'tab-back'
+
 # 4. Chat after the menus, then the whole round trip once more after a chat command.
 Close-Screen
 Assert-Chat 'after 5 rounds'
@@ -111,5 +131,20 @@ Start-Sleep -Milliseconds 300
 Save-Screenshot 'removed' | Out-Null
 Click-At (Hotbar-Double 3)   # put the upgrade back into the hotbar
 Close-Screen
+Assert-Chat 'after removal'
+
+# 6. Server-side close, then a new chest 4 ticks later (closeThen / tab / form paths): the client
+#    is still closing the old screen then, so the new one must wait for its close.
+for ($i = 1; $i -le 3; $i++) {
+    $mark = Get-LogMark
+    Invoke-Chat '/backpack menudebug closeopen'
+    Wait-LogLine 'closeopen: open again' 10 -Since $mark | Out-Null
+    # The log mark of the "open again" line, so only the reopened menu counts.
+    $lines = @(Get-LeviLog -Since $mark)
+    $at = $mark
+    for ($k = 0; $k -lt $lines.Count; $k++) { if ($lines[$k] -match 'closeopen: open again') { $at = $mark + $k } }
+    Wait-Shown 'Diamond Backpack \(54 slots\)' $at "closeopen-$i"
+    Close-Screen
+}
 Assert-Chat 'at the end'
 Assert-NoErrors

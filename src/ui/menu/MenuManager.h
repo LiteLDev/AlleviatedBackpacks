@@ -55,6 +55,9 @@ public:
     /// to show a form from a menu button.
     void closeThen(Player& player, std::function<void(Player&)> fn);
 
+    /// Runs `fn` on the server thread `ticks` ticks from now (dropped when the world stops).
+    void runLater(int ticks, std::function<void()> fn) { after(ticks, std::move(fn)); }
+
     [[nodiscard]] std::shared_ptr<Menu> current(Player const& player) const;
     /// True once the chest screen has been opened on the client (after the open delay).
     [[nodiscard]] bool                  isShown(Player const& player) const;
