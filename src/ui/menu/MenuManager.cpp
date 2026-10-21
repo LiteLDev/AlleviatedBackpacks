@@ -85,6 +85,12 @@ constexpr int kForgetClose = 200;
 constexpr int kFakeReuseCooldown = 100;
 constexpr int kAfterClose = 5; ///< ticks before `closeThen` callbacks run (no close to wait for)
 constexpr int kAfterAck   = 2; ///< ticks after the client's close before `closeThen` callbacks run
+/// A client that has another screen up (e.g. chat, right after a chat command) rejects a
+/// ContainerOpen with a ContainerClose for id -1 at once; the open is then sent again this much
+/// later, at most kMaxOpenRetries times.
+constexpr int kRejectWindow   = 10;
+constexpr int kRetryDelay     = 10;
+constexpr int kMaxOpenRetries = 3;
 constexpr int kDiffEvery   = 2; ///< ticks between display diffs
 constexpr float kMaxDistance = 8.0f;
 
@@ -167,6 +173,8 @@ struct MenuManager::Session {
     Phase                                      phase = Phase::AwaitClose;
     int                                        wait  = 0;
     bool                                       clientOpened = false; ///< ContainerOpen sent (not just forceShown)
+    std::int64_t                               openedAt = 0; ///< tick of the last ContainerOpen
+    int                                        retries  = 0; ///< ContainerOpens re-sent after a rejection
     bool                                       needFull = true;
     std::optional<std::uint64_t>               lastVersion;
     int                                        diffIn = 0;
@@ -588,6 +596,7 @@ void MenuManager::tick() {
             o.sendTo(*player);
             menuDebugLog("-> ContainerOpen id={} pos=({},{},{})", s.id, s.fake.front().x, s.fake.front().y, s.fake.front().z);
             s.clientOpened = true;
+            s.openedAt     = mTick;
             log().info("menu shown: {} ({} slots)", s.menu->title(), s.menu->size());
             sync(*player, s, true);
             continue;
@@ -1070,6 +1079,19 @@ bool MenuManager::handleClosePacket(Player& player, int containerId, int contain
             list.erase(c);
             if (list.empty()) mPendingCloses.erase(p);
         }
+    }
+    // The client rejected our ContainerOpen because another screen was still up (chat after a
+    // command): vanilla answers this close as usual; we send the open again a bit later.
+    if (containerId == -1 && it != mSessions.end() && it->second->shown() && it->second->clientOpened
+        && mTick - it->second->openedAt <= kRejectWindow && it->second->retries < kMaxOpenRetries) {
+        auto& s = *it->second;
+        menuDebugLog("client rejected ContainerOpen id={}; opening again in {} ticks", s.id, kRetryDelay);
+        ++s.retries;
+        s.phase        = Session::Phase::Placed;
+        s.wait         = kRetryDelay;
+        s.clientOpened = false;
+        s.needFull     = true;
+        return false;
     }
     if (!ours && !pending) return false; // not ours: vanilla handles it
     confirm();

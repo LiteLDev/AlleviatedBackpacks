@@ -138,6 +138,10 @@ Assert-Chat 'after removal'
 for ($i = 1; $i -le 3; $i++) {
     $mark = Get-LogMark
     Invoke-Chat '/backpack menudebug closeopen'
+    # Opened right after a chat command: the client still has the chat screen up and rejects
+    # the first ContainerOpen; the menu must show anyway (re-sent).
+    Start-Sleep -Milliseconds 500
+    Assert-Screen "closeopen-first-$i" 'menu opened from a chat command'
     Wait-LogLine 'closeopen: open again' 10 -Since $mark | Out-Null
     # The log mark of the "open again" line, so only the reopened menu counts.
     $lines = @(Get-LeviLog -Since $mark)
