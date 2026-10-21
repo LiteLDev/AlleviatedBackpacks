@@ -21,6 +21,7 @@
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/Storage.h"
+#include "core/Appearance.h"
 #include "mod/Commands.h"
 #include "net/Companion.h"
 #include "net/NativeScreens.h"
@@ -274,6 +275,113 @@ ABP_REGISTER_SELFTEST("companion.key_actions", [](Context& ctx) {
     ui::MenuManager::get().close(p);
 });
 
+ABP_REGISTER_SELFTEST("companion.virtual_presentation", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Leather);
+    CompanionScope scope(p);
+    auto           s = openNative(ctx, p, bp);
+    ctx.check(s != 0, "native session");
+    ctx.check(ui::MenuManager::get().isVirtual(p), "no fake chest for a companion");
+    ctx.check(ui::MenuManager::get().containerIdOf(p) >= 1000, "virtual screen id");
+    ctx.check(handleScreenAction(p, action(s, "close")), "close action");
+    ctx.check(ui::MenuManager::get().current(p) == nullptr && nativeSession(p) == 0, "closed");
+});
+
+namespace {
+class TestMenu : public ui::Menu {
+public:
+    int  clicks = 0;
+    core::ItemStackData ghost;
+    TestMenu() : Menu("Test menu", Rows::Three) {}
+    void build(Player&) override {
+        setSlot(0, std::make_shared<ui::ButtonSlot>(ui::icon("minecraft:emerald", "Button"), [this](ui::ClickContext const&) { ++clicks; }));
+        setSlot(1, std::make_shared<ui::GhostSlot>([this] { return ghost; }, [this](core::ItemStackData const& d) { ghost = d; }));
+        setSlot(2, std::make_shared<ui::StaticSlot>(ui::icon("minecraft:gray_stained_glass_pane", " ")));
+    }
+};
+} // namespace
+
+ABP_REGISTER_SELFTEST("companion.generic_menu", [](Context& ctx) {
+    auto& p = ctx.player();
+    CompanionScope scope(p);
+    auto menu = std::make_shared<TestMenu>();
+    ctx.require(ui::MenuManager::get().open(p, menu), "open");
+    ui::MenuManager::get().forceShown(p);
+    auto opens = scope.named("ScreenOpenPacket");
+    ctx.require(opens.size() == 1, "ScreenOpen sent");
+    auto m = core::screen::BackpackScreenModel::fromJson(opens[0]);
+    ctx.check(m.kind == "menu" && m.menuRows == 3 && m.menuSlots.size() == 27, "generic menu model");
+    ctx.check(m.menuSlots[0].id == "minecraft:emerald", "button icon");
+    ctx.check(m.menuSlots[2].id == core::screen::kFillerId, "decoration pane sent as filler");
+    auto s = nativeSession(p);
+    ctx.check(handleScreenAction(p, action(s, "menuClick", {{"index", 0}})) || menu->clicks == 1, "button click");
+    ctx.check(menu->clicks == 1, "button callback ran once");
+    p.setPlayerUIItem(PlayerUISlot::CursorSelected, game::ItemConv::make("minecraft:apple", 3), false);
+    (void)handleScreenAction(p, action(s, "menuClick", {{"index", 1}}));
+    ctx.check(menu->ghost.id == "minecraft:apple" && cursor(p).mCount == 3, "ghost slot copies the cursor item");
+    p.setPlayerUIItem(PlayerUISlot::CursorSelected, ItemStack::EMPTY_ITEM(), false);
+});
+
+ABP_REGISTER_SELFTEST("companion.settings_screen", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Leather);
+    bp->inventory().set(2, data("minecraft:dirt", 5));
+    CompanionScope scope(p);
+    auto           s = openNative(ctx, p, bp);
+    ctx.check(!handleScreenAction(p, action(s, "setting", {{"what", "memory"}, {"op", "select"}, {"index", 3}})), "empty slot can't be memorized");
+    ctx.check(handleScreenAction(p, action(s, "setting", {{"what", "memory"}, {"op", "select"}, {"index", 2}})), "memorize slot 2");
+    ctx.check(feature::gui::memory(*bp)[2].id == "minecraft:dirt", "remembered dirt");
+    ctx.check(handleScreenAction(p, action(s, "setting", {{"what", "noSort"}, {"op", "select"}, {"index", 4}})), "no-sort slot 4");
+    ctx.check(feature::gui::noSort(*bp)[4], "slot 4 not sorted");
+    ctx.check(handleScreenAction(p, action(s, "setting", {{"what", "noSortColor"}})), "next colour");
+    ctx.check(handleScreenAction(p, action(s, "setting", {{"what", "option"}, {"name", "keepSearchPhrase"}})), "toggle keep search phrase");
+    auto const* m = sentModel(p);
+    ctx.require(m != nullptr, "model");
+    auto settings = m->extra.value("settings", nlohmann::json::object());
+    ctx.check(settings.value("keepSearchPhrase", false), "keepSearchPhrase on for the backpack");
+    ctx.check(settings.value("noSortColor", -1) == static_cast<int>(core::DyeColor::Pink), "lime -> pink (dye order)");
+    ctx.check(handleScreenAction(p, action(s, "setting", {{"what", "memory"}, {"op", "unselectAll"}})), "forget all");
+    ctx.check(feature::gui::memoryCount(*bp) == 0, "memory cleared");
+    feature::gui::setNoSortAll(*bp, false);
+
+});
+
+ABP_REGISTER_SELFTEST("companion.distribute", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Leather);
+    CompanionScope scope(p);
+    auto           s = openNative(ctx, p, bp);
+    p.setPlayerUIItem(PlayerUISlot::CursorSelected, game::ItemConv::make("minecraft:stone", 30), false);
+    nlohmann::json slots = nlohmann::json::array({{{"area", "storage"}, {"index", 0}}, {{"area", "storage"}, {"index", 1}}, {{"area", "inventory"}, {"index", 20}}});
+    ctx.check(handleScreenAction(p, action(s, "distribute", {{"button", 0}, {"slots", slots}})), "split evenly");
+    ctx.check(bp->inventory().at(0).count == 10 && bp->inventory().at(1).count == 10, "10 + 10 in the backpack");
+    ctx.check(p.getInventory().getItem(20).mCount == 10 && cursor(p).isNull(), "10 in the inventory, cursor empty");
+});
+
+ABP_REGISTER_SELFTEST("companion.tab_menu_bridge", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Iron);
+    int   slot = ctx.installUpgrade(bp, "pickup");
+    CompanionScope scope(p);
+    auto           s = openNative(ctx, p, bp);
+    auto const*    m = sentModel(p);
+    ctx.require(m != nullptr, "model");
+    auto const& tab = m->upgrades[static_cast<std::size_t>(slot)].tab;
+    ctx.require(tab.contains("menu"), "the pickup filter menu is bridged into its tab");
+    ctx.check(tab["menu"].value("rows", 0) >= 1 && tab["menu"]["slots"].size() >= 9, "menu slots");
+    // The first ghost slot of the filter takes the cursor item.
+    int ghostIndex = -1;
+    auto const& slotsJson = tab["menu"]["slots"];
+    for (int i = 0; i < static_cast<int>(slotsJson.size()); ++i) {
+        if (slotsJson[static_cast<std::size_t>(i)].is_null()) { ghostIndex = i; break; }
+    }
+    ctx.require(ghostIndex >= 0, "an empty filter slot");
+    p.setPlayerUIItem(PlayerUISlot::CursorSelected, game::ItemConv::make("minecraft:cobblestone", 1), false);
+    (void)handleScreenAction(p, action(s, "tab", {{"slot", slot}, {"data", {{"menuClick", ghostIndex}, {"button", 0}}}}));
+    auto filter = bp->data().upgrades[static_cast<std::size_t>(slot)].settings.dump();
+    ctx.check(filter.find("cobblestone") != std::string::npos, "filter got the item: " + filter.substr(0, 200));
+    p.setPlayerUIItem(PlayerUISlot::CursorSelected, ItemStack::EMPTY_ITEM(), false);
+});
 } // namespace
 } // namespace abp::net
 

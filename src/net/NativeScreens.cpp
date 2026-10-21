@@ -386,8 +386,23 @@ constexpr MainOption kMainOptions[] = {
     {"keepSearchPhrase", "keepSearchPhrase", false},
 };
 
+/// Backpack-level settings of the native screens that the GUI unit doesn't know
+/// (`settings["companion"]` of the backpack data).
+nlohmann::json companionSection(game::Backpack const& bp) {
+    auto it = bp.data().settings.find("companion");
+    return it != bp.data().settings.end() && it->is_object() ? *it : nlohmann::json::object();
+}
+
+void setCompanionOption(game::Backpack& bp, std::string const& key, nlohmann::json value) {
+    auto& s = bp.data().settings["companion"];
+    if (!s.is_object()) s = nlohmann::json::object();
+    s[key] = std::move(value);
+    bp.markDirty();
+}
+
 bool optionValue(Player& p, game::Backpack const& bp, MainOption const& o, std::string const& context) {
-    auto const bpj = feature::gui::backpackOverrides(bp);
+    bool       gui = std::string_view(o.key) == feature::gui::kOpenTabFirst;
+    auto const bpj = gui ? feature::gui::backpackOverrides(bp) : companionSection(bp);
     auto const pj  = feature::gui::playerOverrides(p);
     if (context == "backpack" && bpj.contains(o.key) && bpj[o.key].is_boolean()) return bpj[o.key].get<bool>();
     if (pj.contains(o.key) && pj[o.key].is_boolean()) return pj[o.key].get<bool>();
@@ -400,7 +415,7 @@ constexpr char const* kMemoryMatchNbtKey  = "memoryMatchNbt";
 constexpr int         kDefaultNoSortColor = static_cast<int>(core::DyeColor::Lime);
 
 int noSortDye(game::Backpack const& bp) {
-    auto j = feature::gui::backpackOverrides(bp);
+    auto j = companionSection(bp);
     if (j.contains(kNoSortColorKey) && j[kNoSortColorKey].is_number_integer()) {
         int v = j[kNoSortColorKey].get<int>();
         if (v >= 0 && v < static_cast<int>(core::kDyes.size())) return v;
@@ -413,8 +428,7 @@ nlohmann::json settingsJson(Player& p, game::Backpack& bp) {
     nlohmann::json j{{"context", context}};
     for (auto const& o : kMainOptions) j[o.name] = optionValue(p, bp, o, context);
     j["noSortColor"]    = noSortDye(bp);
-    auto bpj            = feature::gui::backpackOverrides(bp);
-    j["memoryMatchNbt"] = bpj.value(kMemoryMatchNbtKey, false);
+    j["memoryMatchNbt"] = companionSection(bp).value(kMemoryMatchNbtKey, false);
     return j;
 }
 
@@ -541,7 +555,8 @@ bool handleSettingsAction(Player& player, ui::BackpackMenu& menu, NativeSession&
             auto context = contextOf(player);
             bool next    = !optionValue(player, *bp, o, context);
             if (context == "player") feature::gui::setPlayerOption(player, o.key, nlohmann::json(next));
-            else feature::gui::setBackpackOption(*bp, o.key, nlohmann::json(next));
+            else if (std::string_view(o.key) == feature::gui::kOpenTabFirst) feature::gui::setBackpackOption(*bp, o.key, nlohmann::json(next));
+            else setCompanionOption(*bp, o.key, nlohmann::json(next));
             return true;
         }
         return false;
@@ -572,12 +587,11 @@ bool handleSettingsAction(Player& player, ui::BackpackMenu& menu, NativeSession&
     if (what == "noSortColor") {
         int n    = static_cast<int>(core::kDyes.size());
         int next = (noSortDye(*bp) + (body.value("dir", 1) >= 0 ? 1 : n - 1)) % n;
-        feature::gui::setBackpackOption(*bp, kNoSortColorKey, nlohmann::json(next));
+        setCompanionOption(*bp, kNoSortColorKey, nlohmann::json(next));
         return true;
     }
     if (what == "memoryMatchNbt") {
-        auto j = feature::gui::backpackOverrides(*bp);
-        feature::gui::setBackpackOption(*bp, kMemoryMatchNbtKey, nlohmann::json(!j.value(kMemoryMatchNbtKey, false)));
+        setCompanionOption(*bp, kMemoryMatchNbtKey, nlohmann::json(!companionSection(*bp).value(kMemoryMatchNbtKey, false)));
         return true;
     }
     return false;
@@ -663,7 +677,7 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
     auto& mm     = MenuManager::get();
     bool  ok     = false;
     bool  items  = false; // the player's inventory/cursor may have changed
-    bool  silent = action == "click" || action == "menuClick" || action == "double" || action == "drop" || action == "hotbar";
+    bool  silent = action == "click" || action == "distribute" || action == "menuClick" || action == "double" || action == "drop" || action == "hotbar";
 
     if (action == "close") {
         mm.close(player);
@@ -684,6 +698,33 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
         if (cursor.isNull()) return false;
         int n = body.value("all", true) ? static_cast<int>(cursor.mCount) : 1;
         ok    = mm.simulate(player, act(ActionType::Drop, {Where::Cursor, 0}, {}, n));
+    } else if (action == "distribute") {
+        // Dragging the cursor stack over slots (vanilla quick craft): left = split evenly,
+        // right = one each. Only empty slots or slots with the same item take items.
+        items      = true;
+        auto slots = body.value("slots", nlohmann::json::array());
+        auto first = cursorOf(player);
+        if (first.isNull() || !slots.is_array() || slots.empty() || slots.size() > 200) return false;
+        int button = body.value("button", 0);
+        int per    = button == 1 ? 1 : std::max(1, static_cast<int>(first.mCount) / static_cast<int>(slots.size()));
+        for (auto const& e : slots) {
+            auto cursor = cursorOf(player);
+            if (cursor.isNull()) break;
+            auto a = e.value("area", std::string{});
+            int  i = e.value("index", -1);
+            int  n = std::min<int>(per, cursor.mCount);
+            if (a == "storage" && menu && i >= 0 && i < menu->backpack()->inventory().size()) {
+                auto const& d = menu->backpack()->inventory().at(i);
+                if (!d.empty() && !sameItem(cursor, d)) continue;
+                ok |= mm.simulateOn(player, act(ActionType::Place, {Where::Cursor, 0}, {Where::Menu, i}, n), menu->storageSlot(i));
+            } else if (a == "inventory" && i >= 0 && i < kInventory) {
+                auto const& it = player.getInventory().getItem(i);
+                if (!it.isNull() && !it.matchesItem(cursor)) continue;
+                int room = it.isNull() ? cursor.getMaxStackSize() : std::max(0, it.getMaxStackSize() - it.mCount);
+                if (std::min(n, room) <= 0) continue;
+                ok |= mm.simulate(player, act(ActionType::Place, {Where::Cursor, 0}, {Where::Inventory, i}, std::min(n, room)));
+            }
+        }
     } else if (action == "menuClick") {
         // A slot of a menu without its own native screen: exactly like a click in its chest.
         items = true;

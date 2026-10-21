@@ -254,6 +254,11 @@ private:
     std::unordered_map<std::string, std::string> mKeptSearch;
     std::unordered_map<std::string, int>         mKeptTab;
     int                                          mPendingTab = -1;
+
+    // vanilla quick craft (drag the cursor stack over slots)
+    int                  mDistButton = -1;
+    std::vector<SlotRef> mDistSlots;
+    void                 finishDistribution();
 };
 
 BackpackScreenLayer gLayer;
@@ -594,6 +599,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             drawCount(p, d.count, x, y);
         }
         if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index) highlight(x, y);
+        else if (mDistSlots.size() > 1 && std::find(mDistSlots.begin(), mDistSlots.end(), SlotRef{SlotRef::Area::Storage, ps.index}) != mDistSlots.end()) highlight(x, y);
     }
 
     // Player inventory.
@@ -863,6 +869,7 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
     if (!down) {
         mDraggingBar = false;
         if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.mouseUp(button, x, y);
+        if (mDistButton >= 0 && (button == MouseButton::Right ? 1 : 0) == mDistButton) finishDistribution();
         return true;
     }
     // Search box: left focuses, right clears (SC SearchBox); clicks elsewhere unfocus it.
@@ -945,6 +952,14 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
     if (button == MouseButton::Middle) return true;
     double t      = now();
     bool   shift  = input::shiftDown();
+    // With an item on the cursor the click happens on release: a drag over several slots
+    // distributes the stack instead (vanilla quick craft).
+    if (auto* pl = currentPlayer(); pl && !shift && !pl->mPlayerUIContainer->getItem(0).isNull()
+        && (slot.area == SlotRef::Area::Storage || slot.area == SlotRef::Area::Inventory)) {
+        mDistButton = button == MouseButton::Right ? 1 : 0;
+        mDistSlots  = {slot};
+        return true;
+    }
     bool   ctrl   = input::ctrlDown();
     bool   isDouble = button == MouseButton::Left && !shift && slot == mLastClick && t - mLastClickAt < 0.25;
     mLastClick    = slot;
@@ -984,7 +999,35 @@ bool BackpackScreenLayer::onMouseMove(float x, float y) {
         return true;
     }
     if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.mouseMove(x, y);
+    if (mDistButton >= 0 && mView == View::Storage && m->kind != "menu") {
+        auto s = slotAt(*m, x, y);
+        if ((s.area == SlotRef::Area::Storage || s.area == SlotRef::Area::Inventory)
+            && std::find(mDistSlots.begin(), mDistSlots.end(), s) == mDistSlots.end()) {
+            mDistSlots.push_back(s);
+        }
+    }
     return false;
+}
+
+void BackpackScreenLayer::finishDistribution() {
+    int button  = mDistButton;
+    mDistButton = -1;
+    if (mDistSlots.empty()) return;
+    if (mDistSlots.size() > 1) {
+        nlohmann::json slots = nlohmann::json::array();
+        for (auto const& s : mDistSlots) slots.push_back({{"area", areaName(s.area)}, {"index", s.index}});
+        send({{"action", "distribute"}, {"button", button}, {"slots", std::move(slots)}});
+        mDistSlots.clear();
+        return;
+    }
+    auto   slot     = mDistSlots.front();
+    double t        = now();
+    bool   isDouble = button == 0 && slot == mLastClick && t - mLastClickAt < 0.25;
+    mLastClick      = slot;
+    mLastClickAt    = isDouble ? -10 : t;
+    mDistSlots.clear();
+    if (isDouble) send({{"action", "double"}, {"area", areaName(slot.area)}, {"index", slot.index}});
+    else send({{"action", "click"}, {"area", areaName(slot.area)}, {"index", slot.index}, {"button", button}, {"shift", false}, {"ctrl", false}});
 }
 
 bool BackpackScreenLayer::onScroll(float x, float y, float delta) {
