@@ -1,0 +1,25 @@
+{
+  "abp.placed.blocked": "这里没有放置背包的空间。",
+  "abp.placed.failed": "这个背包无法放置。",
+  "abp.placed.unreadable": "无法读取这个背包的数据。",
+
+  "abp.upgrade.hopper.name": "漏斗升级",
+  "abp.upgrade.advanced_hopper.name": "高级漏斗升级",
+  "abp.hopper.dir.down": "下",
+  "abp.hopper.dir.up": "上",
+  "abp.hopper.dir.north": "北",
+  "abp.hopper.dir.south": "南",
+  "abp.hopper.dir.west": "西",
+  "abp.hopper.dir.east": "东",
+  "abp.hopper.dir.none": "无",
+  "abp.hopper.input_filter": "输入过滤",
+  "abp.hopper.input_filter.lore": "§7吸入背包的物品",
+  "abp.hopper.output_filter": "输出过滤",
+  "abp.hopper.output_filter.lore": "§7从背包输出的物品",
+  "abp.hopper.basic_info": "从上方吸入，向下方输出",
+  "abp.hopper.placed_only": "§7仅在背包被放置时工作",
+  "abp.hopper.pull_from": "从{}吸入：{}",
+  "abp.hopper.push_to": "向{}输出：{}",
+  "abp.hopper.describe.pull": "§7吸入方向：§f{}",
+  "abp.hopper.describe.push": "§7输出方向：§f{}"
+}
