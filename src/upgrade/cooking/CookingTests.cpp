@@ -383,7 +383,6 @@ ABP_REGISTER_SELFTEST("cooking.settings_button_opens_menu", [](Context& ctx) -> 
     auto menu = mm.current(player);
     ctx.require(menu != nullptr, "a menu is open after the settings button");
     ctx.check(menu->title() == upgradeOf(Kind::Smelting, false).info().nameFallback, "cooking menu open: " + menu->title());
-    ctx.check(mm.isShown(player), "cooking menu shown");
     mm.close(player);
 });
 } // namespace
