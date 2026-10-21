@@ -72,6 +72,10 @@ namespace abp::ui {
 namespace {
 constexpr int kOpenDelay   = 3; ///< ticks between the fake block packets and ContainerOpen
 constexpr int kSwitchDelay = 5; ///< same, when replacing an open menu
+/// When replacing a shown menu: max ticks to wait for the client to acknowledge the old screen's
+/// close before opening the new one (a ContainerOpen that arrives while the client is still
+/// closing the previous screen is dropped by the client).
+constexpr int kAwaitCloseMax = 20;
 constexpr int kAfterClose  = 5; ///< ticks before `closeThen` callbacks run
 constexpr int kDiffEvery   = 2; ///< ticks between display diffs
 constexpr float kMaxDistance = 8.0f;
@@ -148,6 +152,8 @@ struct MenuManager::Session {
     int                                        dim = 0;
     int                                        openIn = kOpenDelay;
     bool                                       shown = false;
+    int                                        awaitClose = -1; ///< id of the replaced, still-closing screen
+    int                                        awaitTicks = 0;
     bool                                       needFull = true;
     std::optional<std::uint64_t>               lastVersion;
     int                                        diffIn = 0;
@@ -184,7 +190,15 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
 
     auto key      = keyOf(player);
     bool replaced = mSessions.contains(key);
-    if (replaced) finish(&player, key, true);
+    // Fake positions of the menu being replaced: the new chest avoids them so the client never
+    // mixes in the old chest's state (e.g. a double chest's pairing).
+    std::vector<BlockPos> previous;
+    int                   closingId = -1;
+    if (replaced) {
+        previous = mSessions[key]->fake;
+        if (mSessions[key]->shown) closingId = mSessions[key]->id;
+        finish(&player, key, true);
+    }
 
     auto s  = std::make_unique<Session>();
     s->key  = key;
@@ -198,12 +212,17 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
     sp->mContainerCounter = static_cast<ContainerID>(next);
     s->id                 = next;
     s->openIn             = replaced ? kSwitchDelay : kOpenDelay;
+    s->awaitClose         = closingId;
+    s->awaitTicks         = closingId >= 0 ? kAwaitCloseMax : 0;
 
     // Fake chest(s) two blocks above the head (below the feet if that's out of the world).
     auto& region = player.getDimensionBlockSource();
     auto  base   = player.getFeetBlockPos();
     base.y += 3;
     if (base.y >= region.getMaxHeight()) base.y = std::max<int>(player.getFeetBlockPos().y - 3, region.getMinHeight());
+    if (std::find(previous.begin(), previous.end(), base) != previous.end()) {
+        base.y += base.y + 1 < region.getMaxHeight() ? 1 : -1;
+    }
     s->fake.push_back(base);
     if (s->menu->rows() == Menu::Rows::Six) s->fake.push_back(BlockPos{base.x + 1, base.y, base.z});
 
@@ -235,6 +254,48 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
     } catch (std::exception const& e) {
         log().error("menu onOpen failed: {}", e.what());
     }
+    return true;
+}
+
+bool MenuManager::swap(Player& player, std::shared_ptr<Menu> menu) {
+    if (!menu) return false;
+    if (mBusy) {
+        auto key = keyOf(player);
+        mDeferred.push_back([this, key, menu] {
+            if (auto* p = findPlayer(key)) swap(*p, menu);
+        });
+        return true;
+    }
+    auto it = mSessions.find(keyOf(player));
+    if (it == mSessions.end() || !it->second->shown || it->second->menu->rows() != menu->rows()) {
+        return open(player, std::move(menu));
+    }
+    auto old = it->second->menu;
+    try {
+        old->onClose(player);
+    } catch (std::exception const& e) {
+        log().error("menu onClose failed: {}", e.what());
+    }
+    try {
+        old->onDestroyed();
+    } catch (std::exception const& e) {
+        log().error("menu onDestroyed failed: {}", e.what());
+    }
+    // The callbacks may have closed or replaced the session.
+    it = mSessions.find(keyOf(player));
+    if (it == mSessions.end() || it->second->menu != old) return open(player, std::move(menu));
+    auto& s = *it->second;
+    s.menu  = std::move(menu);
+    s.menu->invalidate();
+    s.lastVersion.reset();
+    s.needFull = true;
+    try {
+        s.menu->onOpen(player);
+    } catch (std::exception const& e) {
+        log().error("menu onOpen failed: {}", e.what());
+    }
+    log().info("menu shown: {} ({} slots)", s.menu->title(), s.menu->size());
+    sync(player, s, true);
     return true;
 }
 
@@ -425,6 +486,8 @@ void MenuManager::tick() {
             continue;
         }
         if (!s.shown) {
+            if (s.awaitClose >= 0 && --s.awaitTicks > 0) continue;
+            s.awaitClose = -1;
             if (--s.openIn > 0) continue;
             auto  pkt         = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerOpen);
             auto& o           = static_cast<ContainerOpenPacket&>(*pkt);
@@ -889,28 +952,32 @@ bool MenuManager::handleClosePacket(Player& player, int containerId) {
     auto key = keyOf(player);
     auto it  = mSessions.find(key);
     bool ours = it != mSessions.end() && it->second->id == containerId;
+    // Confirms a client's close request. The client waits for this before it accepts another
+    // ContainerOpen, so it is also needed for the close the client sends back after a
+    // server-initiated close (menu replaced by another one).
+    auto confirm = [&] {
+        auto  pkt               = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
+        auto& c                 = static_cast<ContainerClosePacket&>(*pkt);
+        c.mContainerId          = static_cast<ContainerID>(containerId);
+        c.mContainerType        = SharedTypes::Legacy::ContainerType::Container;
+        c.mServerInitiatedClose = false;
+        c.sendTo(player);
+    };
     if (!ours) {
-        // A late close for a menu we already closed server-side: swallow it.
+        // A late close for a menu we already closed server-side: confirm and swallow it.
         if (auto c = mClosedIds.find(key); c != mClosedIds.end() && c->second == containerId) {
             mClosedIds.erase(c);
-            // Still confirm it: after a server-initiated close the client waits for this answer and
-            // ignores the next ContainerOpen until it gets one (menu -> menu switches stayed blank).
-            auto  pkt               = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
-            auto& reply             = static_cast<ContainerClosePacket&>(*pkt);
-            reply.mContainerId      = static_cast<ContainerID>(containerId);
-            reply.mContainerType    = SharedTypes::Legacy::ContainerType::Container;
-            reply.mServerInitiatedClose = false;
-            reply.sendTo(player);
+            confirm();
+            // The client finished closing the replaced screen: the new one may open now.
+            if (it != mSessions.end() && it->second->awaitClose == containerId) {
+                it->second->awaitClose = -1;
+                it->second->openIn     = std::max(it->second->openIn, kOpenDelay);
+            }
             return true;
         }
         return false;
     }
-    auto  pkt               = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
-    auto& c                 = static_cast<ContainerClosePacket&>(*pkt);
-    c.mContainerId          = static_cast<ContainerID>(containerId);
-    c.mContainerType        = SharedTypes::Legacy::ContainerType::Container;
-    c.mServerInitiatedClose = false;
-    c.sendTo(player);
+    confirm();
     finish(&player, key, false);
     mClosedIds.erase(key);
     return true;

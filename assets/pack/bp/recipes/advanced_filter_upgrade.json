@@ -1,0 +1,22 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:advanced_filter_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      " D ",
+      "GFG",
+      "RRR"
+    ],
+    "key": {
+      "D": { "item": "minecraft:diamond" },
+      "F": { "item": "alleviatedbackpacks:filter_upgrade" },
+      "G": { "item": "minecraft:gold_ingot" },
+      "R": { "item": "minecraft:redstone" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:filter_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:advanced_filter_upgrade" }
+  }
+}

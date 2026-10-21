@@ -1,0 +1,25 @@
+{
+  "abp.placed.blocked": "There is no room for the backpack here.",
+  "abp.placed.failed": "This backpack can't be placed.",
+  "abp.placed.unreadable": "This backpack's data can't be loaded.",
+
+  "abp.upgrade.hopper.name": "Hopper Upgrade",
+  "abp.upgrade.advanced_hopper.name": "Advanced Hopper Upgrade",
+  "abp.hopper.dir.down": "Down",
+  "abp.hopper.dir.up": "Up",
+  "abp.hopper.dir.north": "North",
+  "abp.hopper.dir.south": "South",
+  "abp.hopper.dir.west": "West",
+  "abp.hopper.dir.east": "East",
+  "abp.hopper.dir.none": "none",
+  "abp.hopper.input_filter": "Input filter",
+  "abp.hopper.input_filter.lore": "§7Items pulled into the backpack",
+  "abp.hopper.output_filter": "Output filter",
+  "abp.hopper.output_filter.lore": "§7Items pushed out of the backpack",
+  "abp.hopper.basic_info": "Pulls from above, pushes below",
+  "abp.hopper.placed_only": "§7Works while the backpack is placed",
+  "abp.hopper.pull_from": "Pull from {}: {}",
+  "abp.hopper.push_to": "Push to {}: {}",
+  "abp.hopper.describe.pull": "§7Pulls from: §f{}",
+  "abp.hopper.describe.push": "§7Pushes to: §f{}"
+}

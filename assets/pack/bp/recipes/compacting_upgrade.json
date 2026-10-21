@@ -1,0 +1,22 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:compacting_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "IPI",
+      "PBP",
+      "RPR"
+    ],
+    "key": {
+      "I": { "item": "minecraft:iron_ingot" },
+      "P": { "item": "minecraft:piston" },
+      "B": { "item": "alleviatedbackpacks:upgrade_base" },
+      "R": { "item": "minecraft:redstone" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:compacting_upgrade" }
+  }
+}

@@ -6,17 +6,13 @@
 #include "upgrade/inception/Inception.h"
 
 #include <algorithm>
+#include <functional>
 #include <unordered_set>
 
-#include "ll/api/chrono/GameChrono.h"
-#include "ll/api/coro/CoroTask.h"
 #include "ll/api/form/SimpleForm.h"
-#include "ll/api/service/Bedrock.h"
-#include "ll/api/thread/ServerThreadExecutor.h"
 
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
-#include "mc/world/level/Level.h"
 
 #include "feature/admin/Admin.h"
 #include "game/BackpackItem.h"
@@ -36,9 +32,8 @@ ABP_REGISTER_CONFIG("inception", abp::upgrade::inception::InceptionConfig);
 namespace abp::upgrade::inception {
 
 namespace {
-constexpr std::string_view kSettingKey       = "nestedUpgrades";
-constexpr std::string_view kFiller           = "minecraft:gray_stained_glass_pane";
-constexpr int              kReopenDelayTicks = 10; ///< extra ticks between closing one chest menu and opening the next
+constexpr std::string_view kSettingKey = "nestedUpgrades";
+constexpr std::string_view kFiller     = "minecraft:gray_stained_glass_pane";
 
 std::string tierName(Player& player, core::Tier tier) {
     static constexpr std::string_view fallbacks[] = {
@@ -105,25 +100,9 @@ Chain chainFor(ui::Menu const* menu, game::Backpack const& parent) {
     return c;
 }
 
-/// Runs `open` once the current chest menu (if any) is gone. Replacing a shown chest menu with
-/// another one directly doesn't reliably show the new screen on a real client (the old screen's
-/// close races the new open), so close first, like the forms do.
-void switchMenu(Player& player, std::function<void(Player&)> open) {
-    auto& mm = ui::MenuManager::get();
-    if (!mm.current(player)) {
-        open(player);
-        return;
-    }
-    mm.closeThen(player, [open = std::move(open)](Player& p) {
-        // Give the client time to tear the old chest screen down before the next ContainerOpen.
-        ll::coro::keepThis([id = p.getOrCreateUniqueID(), open]() -> ll::coro::CoroTask<> {
-            co_await ll::chrono::ticks(kReopenDelayTicks);
-            auto level = ll::service::getLevel();
-            if (!level) co_return;
-            if (auto* pl = level->getPlayer(id); pl && pl->isAlive() && !ui::MenuManager::get().current(*pl)) open(*pl);
-        }).launch(ll::thread::ServerThreadExecutor::getDefault());
-    });
-}
+/// Opens the next menu. `MenuManager::open` replaces the shown chest menu and waits for the client
+/// to finish closing the old screen before opening the new one. (Not `swap`: the title must change.)
+void switchMenu(Player& player, std::function<void(Player&)> const& open) { open(player); }
 
 void reopenNow(
     Player&                                player,

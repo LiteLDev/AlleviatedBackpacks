@@ -28,6 +28,7 @@
 #include "mc/world/level/BlockSource.h"
 #include "mc/world/level/Level.h"
 
+#include "feature/wearable/Wearable.h"
 #include "game/BackpackItem.h"
 #include "game/Storage.h"
 #include "mod/Config.h"
@@ -56,7 +57,17 @@ namespace {
 /// must not touch the storage.
 bool everlastingActor(ItemActor const& actor) {
     if (actor.getLevel().isClientSide()) return false;
-    return isEverlasting(actor.item());
+    auto const& stack = actor.item();
+    if (game::isBackpack(stack) && !game::backpackUuid(stack)) {
+        // A backpack dropped by a mob (U19) generates its contents, random upgrades included, on
+        // first open. Generate them now so a rolled Everlasting upgrade protects the drop too.
+        if (auto loot = wearable::pendingLoot(stack); loot && loot->upgrades && game::Storage::get().available()) {
+            auto& mutableStack = const_cast<ItemActor&>(actor).item();
+            bool  changed      = false;
+            (void)game::Storage::get().forItem(mutableStack, &changed);
+        }
+    }
+    return isEverlasting(stack);
 }
 
 /// A safe spot for an item at `pos`: on top of the nearest column with solid ground.

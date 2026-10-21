@@ -1,0 +1,23 @@
+{
+  "abp.toolswapper.name": "工具切换升级",
+  "abp.toolswapper.advanced.name": "高级工具切换升级",
+  "abp.toolswapper.describe": "§7自动从背包中换上最合适的工具或武器",
+  "abp.toolswapper.on": "§a开",
+  "abp.toolswapper.off": "§c关",
+  "abp.toolswapper.click_to_toggle": "§7点击切换",
+  "abp.toolswapper.click_to_open": "§e点击打开",
+  "abp.toolswapper.weapons": "切换武器：{}",
+  "abp.toolswapper.weapons.desc": "§7攻击时换上最强的武器",
+  "abp.toolswapper.mode": "切换工具：{}",
+  "abp.toolswapper.mode.desc": "§7破坏方块时换上最合适的工具",
+  "abp.toolswapper.mode.any": "§a手持任意物品时",
+  "abp.toolswapper.mode.tools": "§e仅手持工具时",
+  "abp.toolswapper.mode.off": "§c关闭",
+  "abp.toolswapper.durability": "跳过即将损坏的工具：{}",
+  "abp.toolswapper.durability.desc": "§7耐久即将耗尽的工具留在背包里",
+  "abp.toolswapper.interact": "交互时切换：{}",
+  "abp.toolswapper.interact.desc": "§7空手：对羊换剪刀；潜行使用：原木/泥土/小径换斧/锄/锹",
+  "abp.toolswapper.filter": "工具过滤器",
+  "abp.toolswapper.filter.count": "§7过滤器：§f{} 个物品",
+  "abp.toolswapper.filter.desc": "§7允许换上的工具"
+}

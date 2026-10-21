@@ -7,6 +7,7 @@
 --   assets/pack/rp/item_texture.d/*.json      -> RP textures/item_texture.json   (texture_data entries)
 --   assets/pack/rp/terrain_texture.d/*.json   -> RP textures/terrain_texture.json
 --   assets/pack/rp/texts.d/<locale>/*.lang    -> RP texts/<locale>.lang (+ texts/languages.json)
+--   assets/pack/rp/sounds.d/*.json            -> RP sounds/sound_definitions.json (sound_definitions entries)
 -- Everything else under assets/pack/{bp,rp} is copied as is (directories ending in ".d" are skipped).
 -- "${version}" in pack manifests is replaced by the mod version as a JSON array [major, minor, patch].
 
@@ -76,6 +77,15 @@ local function merge_atlas(src, dst, fragdir, filename, atlas)
     json.savefile(out, {resource_pack_name = "alleviatedbackpacks", texture_name = atlas, texture_data = data})
 end
 
+local function merge_sounds(src, dst)
+    local dir = path.join(src, "sounds.d")
+    if not os.isdir(dir) then return end
+    local data = merge_json_fragments(dir, "sound_definitions.json")
+    local out = path.join(dst, "sounds", "sound_definitions.json")
+    os.mkdir(path.directory(out))
+    json.savefile(out, {format_version = "1.20.20", sound_definitions = data})
+end
+
 local function merge_texts(src, dst)
     local textsd = path.join(src, "texts.d")
     if not os.isdir(textsd) then return end
@@ -139,6 +149,7 @@ function main(target, target_type)
     copy_pack(rpsrc, rpdst, version)
     merge_atlas(rpsrc, rpdst, "item_texture.d", "item_texture.json", "atlas.items")
     merge_atlas(rpsrc, rpdst, "terrain_texture.d", "terrain_texture.json", "atlas.terrain")
+    merge_sounds(rpsrc, rpdst)
     merge_texts(rpsrc, rpdst)
 
     cprint("${bright green}[assemble]: ${reset}%s", outdir)

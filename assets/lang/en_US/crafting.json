@@ -1,0 +1,23 @@
+{
+  "abp.crafting.name": "Crafting Upgrade",
+  "abp.crafting.title": "Crafting",
+  "abp.crafting.button": "Crafting",
+  "abp.crafting.back": "Back to backpack",
+  "abp.crafting.shift_backpack": "Shift-click result: into backpack",
+  "abp.crafting.shift_inventory": "Shift-click result: into inventory",
+  "abp.crafting.click_to_toggle": "§7Click to change",
+  "abp.crafting.open_tab": "Open: {}",
+  "abp.crafting.storage_page": "Backpack page {} of {}",
+  "abp.crafting.next_page_hint": "§7Click for the next page",
+  "abp.crafting.help_click": "§7Click the result to craft one",
+  "abp.crafting.help_shift": "§7Shift-click the result to craft as many as possible",
+  "abp.crafting.recipe": "§8Recipe: {}",
+  "abp.crafting.refill_on": "Refill grid from backpack: on",
+  "abp.crafting.refill_off": "Refill grid from backpack: off",
+  "abp.crafting.refill_hint": "§7Used-up ingredients are refilled from the backpack",
+  "abp.crafting.clear": "Clear grid",
+  "abp.crafting.clear_hint": "§7Moves the grid into the backpack",
+  "abp.crafting.describe_grid": "§7Grid: {}/9 slots used",
+  "abp.crafting.describe_refill_on": "§7Refill from backpack: on",
+  "abp.crafting.describe_refill_off": "§7Refill from backpack: off"
+}

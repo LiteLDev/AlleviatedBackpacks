@@ -1,0 +1,12 @@
+{
+  "abp.feeding.name": "喂食升级",
+  "abp.feeding.advanced.name": "高级喂食升级",
+  "abp.feeding.mode.always": "饥饿时即进食",
+  "abp.feeding.mode.half": "至少用到一半饱食度",
+  "abp.feeding.mode.full": "不浪费饱食度",
+  "abp.feeding.hunger": "进食时机：{}",
+  "abp.feeding.hurt": "生命值低于一半时进食：{}",
+  "abp.feeding.describe.allow": "§7仅食用：{} 种物品",
+  "abp.feeding.describe.deny": "§7不食用：{} 种物品",
+  "abp.feeding.describe.basic": "§7在不浪费饱食度时进食"
+}

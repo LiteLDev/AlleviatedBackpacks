@@ -22,9 +22,13 @@
 #include "mc/legacy/ActorUniqueID.h"
 #include "mc/server/SimulatedPlayer.h"
 
+#include "feature/admin/Admin.h"
+#include "feature/wearable/Wearable.h"
+#include "feature/wearable/WearableConfig.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/Storage.h"
+#include "mod/Config.h"
 #include "selftest/SelfTest.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/everlasting/Everlasting.h"
@@ -278,6 +282,12 @@ ABP_REGISTER_SELFTEST("everlasting.death_drop", [](Context& ctx) -> ll::coro::Co
     Drops drops(player);
     ctx.require(ctx.give(player, ctx.backpackItem(*p.everlasting), 0) == 0, "give backpack");
     player.setPlayerGameType(GameType::Survival); // creative players drop nothing on death
+    // With admin.keepBackpacksOnDeath the backpack is kept (nothing to protect): test the drop.
+    struct KeepRestore {
+        bool saved = config::get<admin::AdminConfig>().keepBackpacksOnDeath;
+        ~KeepRestore() { config::mut<admin::AdminConfig>().keepBackpacksOnDeath = saved; }
+    } keepRestore;
+    config::mut<admin::AdminConfig>().keepBackpacksOnDeath = false;
     co_await ctx.ticks(2);
     player.kill();
     co_await ctx.ticks(20);
@@ -309,6 +319,34 @@ ABP_REGISTER_SELFTEST("everlasting.death_drop", [](Context& ctx) -> ll::coro::Co
     dropped->hurtByCause(1000.0f, Cause::Lava);
     co_await ctx.ticks(2);
     ctx.check(drops.get(id) != nullptr, "dropped backpack survives lava");
+});
+
+// A mob's backpack (U19) rolls its random upgrades lazily; once dropped, a rolled Everlasting
+// upgrade must protect it right away.
+ABP_REGISTER_SELFTEST("everlasting.mob_drop", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& player = ctx.player();
+    co_await ctx.ticks(10);
+    auto saved = config::get<wearable::WearableConfig>();
+    struct Restore {
+        wearable::WearableConfig saved;
+        ~Restore() { config::mut<wearable::WearableConfig>() = saved; }
+    } restore{saved};
+    auto& mobs                = config::mut<wearable::WearableConfig>().mobs;
+    mobs.upgradeChancePerSlot = 1.0f;
+    mobs.upgradeBlacklist.clear();
+    for (auto const& u : upgrade::all()) {
+        if (u->info().id != kId) mobs.upgradeBlacklist.push_back(u->info().id);
+    }
+    Drops drops(player);
+    auto  id = drops.spawn(wearable::makeMobBackpack(Tier::Leather, wearable::PendingLoot{.upgrades = true}), 2.0f);
+    ctx.require(drops.get(id) != nullptr, "mob backpack dropped");
+    ctx.check(drops.get(id)->isFireImmune(), "rolled Everlasting protects the dropped mob backpack");
+    auto uuid = game::backpackUuid(drops.get(id)->item());
+    ctx.require(uuid.has_value(), "contents generated on drop");
+    drops.get(id)->hurtByCause(1000.0f, Cause::Lava);
+    co_await ctx.ticks(2);
+    ctx.check(drops.get(id) != nullptr, "survives lava");
+    game::Storage::get().erase(*uuid);
 });
 
 } // namespace

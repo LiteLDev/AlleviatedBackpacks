@@ -1,0 +1,23 @@
+{
+  "abp.tank.name": "Tank Upgrade",
+  "abp.tank.contents": "§b{}: §f{} §7/ {} mB",
+  "abp.tank.empty": "§7Empty §8({} mB)",
+  "abp.tank.on": "§aOn",
+  "abp.tank.off": "§cOff",
+  "abp.tank.input": "Fill the tank ▶",
+  "abp.tank.input.help1": "§7Put a filled bucket or bottle here:",
+  "abp.tank.input.help2": "§7it is poured into the tank and the",
+  "abp.tank.input.help3": "§7empty container stays in the slot.",
+  "abp.tank.output": "Empty the tank ▶",
+  "abp.tank.output.help1": "§7Put an empty bucket or bottle here:",
+  "abp.tank.output.help2": "§7it is filled from the tank.",
+  "abp.tank.fluid.water": "Water",
+  "abp.tank.fluid.lava": "Lava",
+  "abp.tank.fluid.milk": "Milk",
+  "abp.tank.fluid.powder_snow": "Powder Snow",
+  "abp.tank.fluid.honey": "Honey",
+  "abp.tank.fluid.experience": "Experience",
+  "abp.tank.fluid.potion": "Potion #{}",
+  "abp.tank.fluid.splash_potion": "Splash Potion #{}",
+  "abp.tank.fluid.lingering_potion": "Lingering Potion #{}"
+}
