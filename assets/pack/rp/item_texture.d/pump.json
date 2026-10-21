@@ -1,0 +1,8 @@
+{
+  "abp_pump_upgrade": {
+    "textures": "textures/items/pump_upgrade"
+  },
+  "abp_advanced_pump_upgrade": {
+    "textures": "textures/items/advanced_pump_upgrade"
+  }
+}
