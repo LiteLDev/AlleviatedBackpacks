@@ -1,0 +1,22 @@
+{
+  "abp.upgrade.filter.name": "Filter Upgrade",
+  "abp.upgrade.advanced_filter.name": "Advanced Filter Upgrade",
+
+  "abp.filter_upgrade.direction": "Direction: {}",
+  "abp.filter_upgrade.direction.both": "Input and output",
+  "abp.filter_upgrade.direction.input": "Input only",
+  "abp.filter_upgrade.direction.output": "Output only",
+  "abp.filter_upgrade.direction.help": "§7Which automated transfers the filter checks",
+
+  "abp.filter_upgrade.lore.empty_allow": "§7Filter empty: §aaccepts everything",
+  "abp.filter_upgrade.lore.empty_deny": "§7Deny list empty: §aaccepts everything",
+  "abp.filter_upgrade.lore.allow": "§7Allow list: §f{} items",
+  "abp.filter_upgrade.lore.deny": "§7Deny list: §f{} items",
+  "abp.filter_upgrade.lore.allow_tags": "§7Allow list: §f{} tags",
+  "abp.filter_upgrade.lore.deny_tags": "§7Deny list: §f{} tags",
+  "abp.filter_upgrade.lore.match_namespace": "§7Matches by namespace (mod)",
+  "abp.filter_upgrade.lore.match_tag": "§7Matches by tag",
+  "abp.filter_upgrade.lore.nbt": "§7Matches NBT",
+  "abp.filter_upgrade.lore.durability": "§7Matches durability",
+  "abp.filter_upgrade.lore.direction": "§7Direction: §f{}"
+}
