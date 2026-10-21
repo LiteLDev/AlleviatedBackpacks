@@ -113,6 +113,7 @@ struct PendingCraft {
     std::optional<BackpackCraft>               craft;
     std::string                                uuid;
     std::string                                createdUuid; ///< storage entry made for this craft
+    int                                        applied = 0; ///< results bound to the backpack
     std::chrono::steady_clock::time_point      started = std::chrono::steady_clock::now();
 };
 
@@ -186,7 +187,7 @@ bool onConsumed(CraftHandlerBase& handler, FullContainerName const& container, i
             if (isBackpackStack(stack)) apply(stack);
         }
     }
-    if (applied) log().debug("backpack craft: carried {} into {} result(s)", pending.uuid, applied);
+    pending.applied = applied;
     return true;
 }
 
@@ -199,7 +200,9 @@ void onPostRequest(CraftHandlerBase& handler, bool success) {
         if (!pending.createdUuid.empty()) game::Storage::get().erase(pending.createdUuid);
         return;
     }
-    if (pending.craft && commitColors(pending.uuid, *pending.craft)) log().debug("backpack {} dyed", pending.uuid);
+    if (!pending.craft || !pending.applied) return;
+    bool dyed = commitColors(pending.uuid, *pending.craft);
+    log().info("backpack craft: {} carried into the crafted backpack{}", pending.uuid.empty() ? "(unopened)" : pending.uuid, dyed ? " (dyed)" : "");
 }
 } // namespace
 
