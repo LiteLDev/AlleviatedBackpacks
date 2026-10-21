@@ -1,0 +1,22 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:void_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      " E ",
+      "OBO",
+      "LOL"
+    ],
+    "key": {
+      "E": { "item": "minecraft:ender_pearl" },
+      "O": { "item": "minecraft:obsidian" },
+      "B": { "item": "alleviatedbackpacks:upgrade_base" },
+      "L": { "item": "minecraft:lava_bucket" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:void_upgrade" }
+  }
+}
