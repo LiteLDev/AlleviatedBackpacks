@@ -48,6 +48,14 @@ Start-Sleep -Milliseconds 400
 $s = Big 0
 Click $s[0] $s[1] -Relative
 Start-Sleep -Milliseconds 800
+# The upgrades page only adds the toggle/settings buttons of a new upgrade when it is rebuilt:
+# switch to storage and back.
+Click $b[0] $b[1] -Relative
+Start-Sleep -Milliseconds 600
+Click $b[0] $b[1] -Relative
+Start-Sleep -Milliseconds 800
+Move-Mouse 0.2 0.2 -Relative
+Start-Sleep -Milliseconds 300
 Save-Screenshot 'upgrades-installed' | Out-Null
 
 # 3. Open its settings (button under the upgrade): the feeding filter/settings menu.
