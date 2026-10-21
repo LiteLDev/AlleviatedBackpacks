@@ -1,0 +1,25 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:attachable": {
+    "description": {
+      "identifier": "alleviatedbackpacks:gold_backpack",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/alleviatedbackpacks/gold_backpack"
+      },
+      "geometry": {
+        "default": "geometry.alleviatedbackpacks.backpack"
+      },
+      "scripts": {
+        "pre_animation": [
+          "v.is_worn = q.is_item_name_any('slot.armor.chest', 0, 'alleviatedbackpacks:gold_backpack');"
+        ]
+      },
+      "render_controllers": [
+        "controller.render.alleviatedbackpacks.backpack"
+      ]
+    }
+  }
+}

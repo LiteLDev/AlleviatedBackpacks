@@ -1,0 +1,22 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:blasting_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "RIR",
+      "IBI",
+      "RFR"
+    ],
+    "key": {
+      "R": { "item": "minecraft:redstone" },
+      "I": { "item": "minecraft:iron_ingot" },
+      "B": { "item": "alleviatedbackpacks:upgrade_base" },
+      "F": { "item": "minecraft:blast_furnace" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:blasting_upgrade" }
+  }
+}

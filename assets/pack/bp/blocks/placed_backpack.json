@@ -1,0 +1,39 @@
+{
+  "format_version": "1.26.0",
+  "minecraft:block": {
+    "description": {
+      "identifier": "alleviatedbackpacks:placed_backpack",
+      "menu_category": { "category": "none", "is_hidden_in_commands": true },
+      "states": {
+        "alleviatedbackpacks:facing": [0, 1, 2, 3],
+        "alleviatedbackpacks:tier": [0, 1, 2, 3, 4, 5]
+      }
+    },
+    "components": {
+      "minecraft:display_name": "tile.alleviatedbackpacks:placed_backpack.name",
+      "minecraft:geometry": "geometry.abp_placed_backpack",
+      "minecraft:material_instances": {
+        "*": { "texture": "abp_placed_leather_backpack", "render_method": "alpha_test" }
+      },
+      "minecraft:collision_box": { "origin": [-5, 0, -5], "size": [10, 13, 8] },
+      "minecraft:selection_box": { "origin": [-5, 0, -5], "size": [10, 13, 8] },
+      "minecraft:destructible_by_mining": { "seconds_to_destroy": 1.0 },
+      "minecraft:destructible_by_explosion": false,
+      "minecraft:movable": { "movement_type": "immovable" },
+      "minecraft:loot": "loot_tables/blocks/abp_placed_backpack.json",
+      "minecraft:light_dampening": 0,
+      "minecraft:map_color": "#9c6b3c"
+    },
+    "permutations": [
+      { "condition": "q.block_state('alleviatedbackpacks:facing') == 0", "components": { "minecraft:transformation": { "rotation": [0, 180, 0] } } },
+      { "condition": "q.block_state('alleviatedbackpacks:facing') == 1", "components": { "minecraft:transformation": { "rotation": [0, 90, 0] } } },
+      { "condition": "q.block_state('alleviatedbackpacks:facing') == 2", "components": { "minecraft:transformation": { "rotation": [0, 0, 0] } } },
+      { "condition": "q.block_state('alleviatedbackpacks:facing') == 3", "components": { "minecraft:transformation": { "rotation": [0, 270, 0] } } },
+      { "condition": "q.block_state('alleviatedbackpacks:tier') == 1", "components": { "minecraft:material_instances": { "*": { "texture": "abp_placed_copper_backpack", "render_method": "alpha_test" } } } },
+      { "condition": "q.block_state('alleviatedbackpacks:tier') == 2", "components": { "minecraft:material_instances": { "*": { "texture": "abp_placed_iron_backpack", "render_method": "alpha_test" } } } },
+      { "condition": "q.block_state('alleviatedbackpacks:tier') == 3", "components": { "minecraft:material_instances": { "*": { "texture": "abp_placed_gold_backpack", "render_method": "alpha_test" } } } },
+      { "condition": "q.block_state('alleviatedbackpacks:tier') == 4", "components": { "minecraft:material_instances": { "*": { "texture": "abp_placed_diamond_backpack", "render_method": "alpha_test" } } } },
+      { "condition": "q.block_state('alleviatedbackpacks:tier') == 5", "components": { "minecraft:material_instances": { "*": { "texture": "abp_placed_netherite_backpack", "render_method": "alpha_test" } } } }
+    ]
+  }
+}

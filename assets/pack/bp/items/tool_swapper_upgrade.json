@@ -1,0 +1,14 @@
+{
+  "format_version": "1.21.40",
+  "minecraft:item": {
+    "description": {
+      "identifier": "alleviatedbackpacks:tool_swapper_upgrade",
+      "menu_category": { "category": "items" }
+    },
+    "components": {
+      "minecraft:icon": "abp_tool_swapper_upgrade",
+      "minecraft:max_stack_size": 16,
+      "minecraft:display_name": { "value": "item.alleviatedbackpacks:tool_swapper_upgrade.name" }
+    }
+  }
+}

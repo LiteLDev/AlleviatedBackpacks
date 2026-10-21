@@ -1,0 +1,23 @@
+{
+  "abp.toolswapper.name": "Tool Swapper Upgrade",
+  "abp.toolswapper.advanced.name": "Advanced Tool Swapper Upgrade",
+  "abp.toolswapper.describe": "§7Swaps in the best tool or weapon from the backpack",
+  "abp.toolswapper.on": "§aOn",
+  "abp.toolswapper.off": "§cOff",
+  "abp.toolswapper.click_to_toggle": "§7Click to toggle",
+  "abp.toolswapper.click_to_open": "§eClick to open",
+  "abp.toolswapper.weapons": "Swap weapons: {}",
+  "abp.toolswapper.weapons.desc": "§7Take the best weapon when attacking",
+  "abp.toolswapper.mode": "Swap tools: {}",
+  "abp.toolswapper.mode.desc": "§7Take the best tool when breaking blocks",
+  "abp.toolswapper.mode.any": "§aAny held item",
+  "abp.toolswapper.mode.tools": "§eOnly when holding a tool",
+  "abp.toolswapper.mode.off": "§cOff",
+  "abp.toolswapper.durability": "Skip nearly broken tools: {}",
+  "abp.toolswapper.durability.desc": "§7Leave tools that are about to break in the backpack",
+  "abp.toolswapper.interact": "Swap for interactions: {}",
+  "abp.toolswapper.interact.desc": "§7Empty hand: shears for sheep; sneak-use: axe/hoe/shovel for logs, dirt, paths",
+  "abp.toolswapper.filter": "Tool filter",
+  "abp.toolswapper.filter.count": "§7Filter: §f{} items",
+  "abp.toolswapper.filter.desc": "§7Which tools may be swapped in"
+}
