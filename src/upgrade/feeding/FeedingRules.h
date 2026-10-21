@@ -50,7 +50,8 @@ struct EaterState {
     }
 }
 
-/// Foods that are skipped unless explicitly whitelisted (they have harmful effects).
+/// Foods that are skipped unless explicitly whitelisted: harmful effects (or a possible one, like
+/// raw chicken's hunger and suspicious stew's random effect) and chorus fruit's random teleport.
 [[nodiscard]] inline std::vector<std::string> defaultHarmfulFoods() {
     return {
         "minecraft:rotten_flesh",
@@ -59,6 +60,7 @@ struct EaterState {
         "minecraft:poisonous_potato",
         "minecraft:chicken",
         "minecraft:suspicious_stew",
+        "minecraft:chorus_fruit",
     };
 }
 
@@ -67,10 +69,15 @@ struct EaterState {
 }
 
 /// Whether the filter lets the upgrade eat `item`. Harmful foods need an explicit allow-list
-/// match (an empty allow list does not count).
+/// entry: a ghost of that very item (an empty allow list, a namespace or a tag match don't count).
 [[nodiscard]] inline bool
 filterAllows(core::Filter const& filter, core::ItemStackData const& item, bool harmful, core::ITagProvider const* tags) {
-    if (harmful) return filter.mode == core::FilterMode::Allow && filter.matches(item, tags);
+    if (harmful) {
+        if (filter.mode != core::FilterMode::Allow) return false;
+        core::Filter byItem = filter;
+        byItem.matchBy      = core::MatchBy::Item;
+        return byItem.matches(item, tags);
+    }
     return filter.passes(item, tags);
 }
 

@@ -58,10 +58,7 @@ void tick(std::shared_ptr<game::Backpack> const& bp, int slot, Player& p) {
 }
 
 void setFilter(std::shared_ptr<game::Backpack> const& bp, int slot, core::Filter const& f) {
-    UpgradeContext ctx(bp, slot);
-    if (!ctx.settings().is_object()) ctx.settings() = nlohmann::json::object();
-    ctx.settings()[kFilterKey] = f.toJson();
-    ctx.saveSettings(true);
+    writeSetting(UpgradeContext(bp, slot), kFilterKey, f.toJson());
 }
 
 // ---- basic -------------------------------------------------------------------------------------
@@ -117,7 +114,14 @@ ABP_REGISTER_SELFTEST("feeding.skips_harmful_and_nonfood", [](Context& ctx) {
     auto  bp   = ctx.createBackpack(Tier::Leather);
     int   slot = ctx.installUpgrade(bp, "feeding");
     auto& p    = hungryPlayer(ctx, 0);
-    char const* harmful[] = {"minecraft:rotten_flesh", "minecraft:spider_eye", "minecraft:pufferfish", "minecraft:poisonous_potato", "minecraft:chicken"};
+    char const* harmful[] = {
+        "minecraft:rotten_flesh",
+        "minecraft:spider_eye",
+        "minecraft:pufferfish",
+        "minecraft:poisonous_potato",
+        "minecraft:chicken",
+        "minecraft:chorus_fruit",
+    };
     int i = 0;
     for (auto id : harmful) bp->inventory().set(i++, data(id, 2));
     bp->inventory().set(i++, data("minecraft:stone", 2));
@@ -141,6 +145,21 @@ ABP_REGISTER_SELFTEST("feeding.whitelist_harmful", [](Context& ctx) {
     tick(bp, slot, p);
     ctx.check(countIn(*bp, "minecraft:rotten_flesh") == 1, "allow-listed rotten flesh eaten");
     ctx.check(eaterState(p).hunger == 4, "rotten flesh gave 4");
+});
+
+ABP_REGISTER_SELFTEST("feeding.broad_match_keeps_harmful", [](Context& ctx) {
+    auto  bp   = ctx.createBackpack(Tier::Leather);
+    int   slot = ctx.installUpgrade(bp, "advanced_feeding");
+    auto& p    = hungryPlayer(ctx, 0);
+    bp->inventory().set(0, data("minecraft:rotten_flesh", 2));
+    bp->inventory().set(1, data("minecraft:baked_potato", 2));
+    core::Filter f(kAdvancedFilterSlots);
+    f.matchBy = core::MatchBy::Namespace; // allow everything "minecraft"
+    f.setGhost(0, data("minecraft:bread", 1));
+    setFilter(bp, slot, f);
+    tick(bp, slot, p);
+    ctx.check(countIn(*bp, "minecraft:rotten_flesh") == 2, "namespace match does not allow-list rotten flesh");
+    ctx.check(countIn(*bp, "minecraft:baked_potato") == 1, "baked potato eaten");
 });
 
 ABP_REGISTER_SELFTEST("feeding.filters", [](Context& ctx) {
@@ -239,10 +258,8 @@ ABP_REGISTER_SELFTEST("feeding.advanced_modes", [](Context& ctx) {
     bp->inventory().set(0, data("minecraft:cooked_beef", 10));
     UpgradeContext uc(bp, slot);
     auto           setMode = [&](HungerMode m, bool hurt) {
-        if (!uc.settings().is_object()) uc.settings() = nlohmann::json::object();
-        uc.settings()[kHungerModeKey]  = static_cast<int>(m);
-        uc.settings()[kEatWhenHurtKey] = hurt;
-        uc.saveSettings();
+        writeSetting(uc, kHungerModeKey, static_cast<int>(m));
+        writeSetting(uc, kEatWhenHurtKey, hurt);
     };
     // Defaults: half, eat when hurt.
     auto o = optionsOf(uc, true);
@@ -273,10 +290,8 @@ ABP_REGISTER_SELFTEST("feeding.advanced_hurt", [](Context& ctx) {
     int   slot = ctx.installUpgrade(bp, "advanced_feeding");
     auto& p    = hungryPlayer(ctx, 19);
     UpgradeContext uc(bp, slot);
-    uc.settings()                  = nlohmann::json::object();
-    uc.settings()[kHungerModeKey]  = static_cast<int>(HungerMode::Full);
-    uc.settings()[kEatWhenHurtKey] = true;
-    uc.saveSettings();
+    writeSetting(uc, kHungerModeKey, static_cast<int>(HungerMode::Full));
+    writeSetting(uc, kEatWhenHurtKey, true);
     bp->inventory().set(0, data("minecraft:cooked_beef", 2));
     setHealth(p, 15);
     tick(bp, slot, p);
@@ -284,8 +299,7 @@ ABP_REGISTER_SELFTEST("feeding.advanced_hurt", [](Context& ctx) {
     setHealth(p, 6);
     tick(bp, slot, p);
     ctx.check(countIn(*bp, "minecraft:cooked_beef") == 1, "below half health: eaten despite waste");
-    uc.settings()[kEatWhenHurtKey] = false;
-    uc.saveSettings();
+    writeSetting(uc, kEatWhenHurtKey, false);
     setHunger(p, 19);
     setHealth(p, 6);
     tick(bp, slot, p);

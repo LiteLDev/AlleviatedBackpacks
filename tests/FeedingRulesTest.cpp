@@ -68,6 +68,16 @@ TEST(FeedingRules, HarmfulNeedsExplicitAllow) {
     EXPECT_TRUE(filterAllows(f, bread, false, nullptr));
 }
 
+TEST(FeedingRules, BroadMatchesDontWhitelistHarmful) {
+    auto   flesh = ItemStackData::of("minecraft:rotten_flesh", 1);
+    Filter f(9);
+    f.setGhost(0, ItemStackData::of("minecraft:cooked_beef", 1));
+    f.matchBy = abp::core::MatchBy::Namespace; // "minecraft" matches rotten flesh too
+    EXPECT_TRUE(f.matches(flesh));
+    EXPECT_FALSE(filterAllows(f, flesh, true, nullptr));
+    EXPECT_TRUE(isHarmful("minecraft:chorus_fruit", defaultHarmfulFoods()));
+}
+
 TEST(FeedingRules, ModeFromInt) {
     EXPECT_EQ(hungerModeFromInt(0), HungerMode::Always);
     EXPECT_EQ(hungerModeFromInt(1), HungerMode::Half);

@@ -34,6 +34,8 @@ inline constexpr bool       kAdvancedDefaultHurt = true;
 /// The feeding options of an installed (basic or advanced) feeding upgrade.
 [[nodiscard]] FeedingOptions optionsOf(UpgradeContext const& ctx, bool advanced);
 [[nodiscard]] core::Filter   filterOf(UpgradeContext const& ctx, bool advanced);
+/// Stores one settings value (feeding registers no inventory hooks, so no hook rebuild).
+void writeSetting(UpgradeContext const& ctx, char const* key, nlohmann::json value);
 
 /// Food level / health of a player.
 [[nodiscard]] EaterState eaterState(Player& player);
@@ -44,6 +46,9 @@ void setHealth(Player& player, float value);
 
 /// Nutrition of a food item, nullopt for non-food.
 [[nodiscard]] std::optional<int> nutritionOf(core::ItemStackData const& item);
+
+/// Survival/adventure, alive and missing some food.
+[[nodiscard]] bool canBeFed(Player& player);
 
 /// Eats at most one food from the backpack if the rules say so. Returns the backpack slot eaten
 /// from, or -1.

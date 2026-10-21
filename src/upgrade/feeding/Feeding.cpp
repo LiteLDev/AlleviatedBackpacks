@@ -57,6 +57,12 @@ core::Filter filterOf(UpgradeContext const& ctx, bool advanced) {
     return f;
 }
 
+void writeSetting(UpgradeContext const& ctx, char const* key, nlohmann::json value) {
+    if (!ctx.settings().is_object()) ctx.settings() = nlohmann::json::object();
+    ctx.settings()[key] = std::move(value);
+    ctx.saveSettings(false);
+}
+
 // ---- player state -------------------------------------------------------------------------------
 
 EaterState eaterState(Player& player) {
@@ -92,16 +98,24 @@ std::optional<int> nutritionOf(core::ItemStackData const& item) {
     static std::map<std::pair<std::string, int>, std::optional<int>> cache;
     auto key = std::make_pair(item.id, item.aux);
     if (auto it = cache.find(key); it != cache.end()) return it->second;
+    ItemStack   stack = game::ItemConv::toStack(item, 1);
+    Item const* type  = stack.mItem.get();
+    if (!type) return std::nullopt; // unresolved item: don't cache
     std::optional<int> result;
-    ItemStack          stack = game::ItemConv::toStack(item, 1);
-    if (Item const* type = stack.mItem.get()) {
-        if (IFoodItemComponent* food = type->getFood()) result = food->getNutrition();
-    }
+    if (IFoodItemComponent* food = type->getFood()) result = food->getNutrition();
     cache.emplace(std::move(key), result);
     return result;
 }
 
 namespace {
+
+/// Food level and saturation (to tell whether eating did anything).
+std::pair<float, float> foodValues(Player& player) {
+    std::pair<float, float> v{0.f, 0.f};
+    if (AttributeInstance const* at = player.getAttribute(Player::HUNGER()).mPtr) v.first = at->mCurrentValue;
+    if (AttributeInstance const* at = player.getAttribute(Player::SATURATION()).mPtr) v.second = at->mCurrentValue;
+    return v;
+}
 
 /// Puts a container left over by eating (bowl, bottle) into the backpack, else the player.
 void returnContainer(Player& player, game::Backpack& bp, core::ItemStackData const& left) {
@@ -121,23 +135,29 @@ bool eatFrom(Player& player, game::Backpack& bp, int slot) {
         (void)bp.inventory().insertInto(slot, taken, core::AccessContext{core::Source::Internal, &player});
         return false;
     }
+    auto before = foodValues(player);
     // The vanilla "finished eating" path: nutrition, effects, sounds and container conversion.
     (void)type->useTimeDepleted(food, &player.getLevel(), &player);
-    if (!food.isNull() && food.mCount > 0) {
-        auto left = game::ItemConv::toData(food);
-        if (!left.sameItem(taken)) returnContainer(player, bp, left);
-        // An unconsumed food (should not happen outside creative) is simply eaten from the backpack.
+    bool unchanged = !food.isNull() && food.mCount > 0 && game::ItemConv::toData(food).sameItem(taken);
+    if (unchanged && foodValues(player) == before) {
+        // The item refused to be eaten (e.g. an add-on food with use conditions): put it back.
+        (void)bp.inventory().insertInto(slot, taken, core::AccessContext{core::Source::Internal, &player});
+        return false;
     }
+    if (!unchanged && !food.isNull() && food.mCount > 0) returnContainer(player, bp, game::ItemConv::toData(food));
     bp.markDirty();
     return true;
 }
 
 } // namespace
 
+bool canBeFed(Player& player) {
+    return !player.isCreative() && !player.isSpectator() && player.isAlive() && eaterState(player).missing() > 0;
+}
+
 int tryFeed(Player& player, UpgradeContext const& ctx, FeedingOptions const& options, core::Filter const& filter) {
-    if (player.isCreative() || player.isSpectator() || !player.isAlive()) return -1;
+    if (!canBeFed(player)) return -1;
     auto state = eaterState(player);
-    if (state.missing() <= 0) return -1;
     auto const& harmful = config::get<FeedingConfig>().harmfulFoods;
     auto&       bp      = ctx.backpack();
     auto const& inv     = bp.inventory();
@@ -180,11 +200,7 @@ public:
     : FilterMenu(
           std::move(title),
           [ctx, advanced] { return filterOf(ctx, advanced); },
-          [ctx](core::Filter const& f) {
-              if (!ctx.settings().is_object()) ctx.settings() = nlohmann::json::object();
-              ctx.settings()[kFilterKey] = f.toJson();
-              ctx.saveSettings(true);
-          },
+          [ctx](core::Filter const& f) { writeSetting(ctx, kFilterKey, f.toJson()); },
           std::move(options)
       ),
       mCtx(std::move(ctx)),
@@ -225,9 +241,7 @@ public:
 
 private:
     void write(char const* key, nlohmann::json value) {
-        if (!mCtx.settings().is_object()) mCtx.settings() = nlohmann::json::object();
-        mCtx.settings()[key] = std::move(value);
-        mCtx.saveSettings(false);
+        writeSetting(mCtx, key, std::move(value));
         invalidate();
     }
 
@@ -254,6 +268,7 @@ public:
     }
 
     void onTick(TickContext const& tick) override {
+        if (!canBeFed(tick.player)) return; // cheap check before parsing the settings
         (void)tryFeed(tick.player, tick.ctx, optionsOf(tick.ctx, Advanced), filterOf(tick.ctx, Advanced));
     }
 
