@@ -1,0 +1,23 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:restock_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      " C ",
+      "IBI",
+      "RHR"
+    ],
+    "key": {
+      "B": { "item": "alleviatedbackpacks:upgrade_base" },
+      "C": { "item": "minecraft:chest" },
+      "H": { "item": "minecraft:hopper" },
+      "I": { "item": "minecraft:iron_ingot" },
+      "R": { "item": "minecraft:redstone" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:restock_upgrade" }
+  }
+}

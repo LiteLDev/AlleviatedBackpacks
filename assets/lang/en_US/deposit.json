@@ -1,0 +1,12 @@
+{
+  "abp.upgrade.deposit.name": "Deposit Upgrade",
+  "abp.upgrade.advanced_deposit.name": "Advanced Deposit Upgrade",
+  "abp.deposit.contents": "Only items already in the container: {}",
+  "abp.deposit.contents.help": "§7When on, the filter list is ignored",
+  "abp.deposit.describe.contents": "§7Only items already in the container",
+  "abp.deposit.describe.filter_all": "§7Filter: everything",
+  "abp.deposit.describe.filter_allow": "§7Allow list: {} items",
+  "abp.deposit.describe.filter_deny": "§7Deny list: {} items",
+  "abp.deposit.done": "Deposited {} stacks",
+  "abp.deposit.nothing": "Nothing to deposit"
+}
