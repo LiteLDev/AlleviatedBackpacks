@@ -20,8 +20,9 @@ namespace abp::game {
 /// - Mutating anything else in `data()` requires `markDirty()`.
 /// - `revision()` increases on every change; menus use it to know when to redraw.
 /// - Runtime hooks (inventory filters, limit modifiers, capabilities) are rebuilt by
-///   `rebuildHooks()` from the installed, enabled upgrades. Never add hooks by hand from outside
-///   an upgrade's `attach()`, they would be dropped on the next rebuild.
+///   `rebuildHooks()` from the installed, enabled upgrades (and the built-in hook contributors,
+///   see `addHookContributor`). Never add hooks by hand from anywhere else, they would be dropped
+///   on the next rebuild.
 class Backpack : public std::enable_shared_from_this<Backpack> {
 public:
     explicit Backpack(core::BackpackData data);

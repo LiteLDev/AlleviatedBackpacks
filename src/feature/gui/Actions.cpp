@@ -13,6 +13,8 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/Level.h"
+#include "mc/world/level/block/Block.h"
+#include "mc/world/level/block/BlockType.h"
 
 #include "feature/gui/Gui.h"
 #include "game/Backpack.h"
@@ -315,14 +317,24 @@ public:
                     static_cast<int>(SharedTypes::Legacy::ArmorSlot::Torso)
                 };
                 if (!game::isBackpack(game::itemAt(player, chest))) return;
-                ev.cancel();
-                auto level = ll::service::getLevel();
-                std::uint64_t now = level ? static_cast<std::uint64_t>(level->getCurrentServerTick().tickID) : 0;
-                auto key   = player.getOrCreateUniqueID().rawID;
-                if (auto it = mLast.find(key); it != mLast.end() && now - it->second < 10) return;
-                mLast[key] = now;
+                // Levers, doors, chests, ... keep working.
+                if (auto block = ev.block(); block.has_value()
+                    && (block->getBlockType().isInteractiveBlock() || block->getBlockType().isContainerBlock())) {
+                    return;
+                }
+                auto          level = ll::service::getLevel();
+                std::uint64_t now   = level ? static_cast<std::uint64_t>(level->getCurrentServerTick().tickID) : 0;
+                auto          key   = player.getOrCreateUniqueID().rawID;
+                // One click sends several interact packets: swallow the repeats of a successful open.
+                if (auto it = mLast.find(key); it != mLast.end() && now - it->second < 10) {
+                    ev.cancel();
+                    return;
+                }
                 if (ui::MenuManager::get().current(player)) return;
-                ui::BackpackMenu::openFor(player, chest);
+                if (!ui::BackpackMenu::openFor(player, chest)) return;
+                ev.cancel();
+                std::erase_if(mLast, [now](auto const& kv) { return now - kv.second >= 10; });
+                mLast[key] = now;
             }
         );
     }

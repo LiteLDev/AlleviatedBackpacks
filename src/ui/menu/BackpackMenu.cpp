@@ -92,26 +92,35 @@ private:
 /// A storage slot whose display runs through the registered `BackpackSlotDecorator`s.
 class DecoratedStorageSlot : public StorageSlot {
 public:
-    DecoratedStorageSlot(std::shared_ptr<game::Backpack> bp, int index, BackpackMenu* menu)
+    using Decorators = std::vector<BackpackSlotDecorator const*>;
+
+    DecoratedStorageSlot(std::shared_ptr<game::Backpack> bp, int index, BackpackMenu* menu, std::shared_ptr<Decorators const> decorators)
     : StorageSlot(bp, index),
       mBackpack(std::move(bp)),
-      mMenu(menu) {}
+      mMenu(menu),
+      mDecorators(std::move(decorators)) {}
+
+    /// The registered decorators in `order` (computed once per page build).
+    static std::shared_ptr<Decorators const> sorted() {
+        auto out = std::make_shared<Decorators>();
+        for (auto const& d : BackpackSlotDecoratorRegistry::entries()) {
+            if (d.decorate) out->push_back(&d);
+        }
+        std::stable_sort(out->begin(), out->end(), [](auto* a, auto* b) { return a->order < b->order; });
+        return out;
+    }
 
     [[nodiscard]] ItemStack display(Player& player) const override {
-        auto shown = StorageSlot::display(player);
-        std::vector<BackpackSlotDecorator const*> decorators;
-        for (auto const& d : BackpackSlotDecoratorRegistry::entries()) {
-            if (d.decorate) decorators.push_back(&d);
-        }
-        std::stable_sort(decorators.begin(), decorators.end(), [](auto* a, auto* b) { return a->order < b->order; });
+        auto                shown = StorageSlot::display(player);
         BackpackMenuContext ctx{player, *mMenu, mBackpack};
-        for (auto const* d : decorators) d->decorate(ctx, index(), shown);
+        for (auto const* d : *mDecorators) d->decorate(ctx, index(), shown);
         return shown;
     }
 
 private:
-    std::shared_ptr<game::Backpack> mBackpack;
-    BackpackMenu*                   mMenu; ///< owns this slot
+    std::shared_ptr<game::Backpack>   mBackpack;
+    BackpackMenu*                     mMenu; ///< owns this slot
+    std::shared_ptr<Decorators const> mDecorators;
 };
 } // namespace
 
@@ -148,11 +157,12 @@ void BackpackMenu::build(Player& player) {
 }
 
 void BackpackMenu::buildStorage(Player&) {
-    int  size      = mBackpack->inventory().size();
-    bool decorated = !BackpackSlotDecoratorRegistry::entries().empty();
+    int  size       = mBackpack->inventory().size();
+    auto decorators = DecoratedStorageSlot::sorted();
+    bool decorated  = !decorators->empty();
     for (int i = 0; i < kPageSlots; ++i) {
         int index = mPage * kPageSlots + i;
-        if (index < size && decorated) setSlot(i, std::make_shared<DecoratedStorageSlot>(mBackpack, index, this));
+        if (index < size && decorated) setSlot(i, std::make_shared<DecoratedStorageSlot>(mBackpack, index, this, decorators));
         else if (index < size) setSlot(i, std::make_shared<StorageSlot>(mBackpack, index));
         else setSlot(i, filler());
     }

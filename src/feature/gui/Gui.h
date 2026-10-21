@@ -57,6 +57,8 @@ inline constexpr char const* kKeepHotbar    = "keepHotbar";
 [[nodiscard]] nlohmann::json playerOverrides(Player& player);
 /// Sets (or clears with nullopt) one global option of the player. Persisted in the world.
 void setPlayerOption(Player& player, std::string const& key, std::optional<nlohmann::json> value);
+/// Applies several global options at once (one write); `null` values clear the option.
+void setPlayerOptions(Player& player, nlohmann::json const& patch);
 /// The backpack's own overrides (JSON object, possibly empty).
 [[nodiscard]] nlohmann::json backpackOverrides(game::Backpack const& backpack);
 /// Sets (or clears with nullopt = "use my global setting") one option of the backpack.

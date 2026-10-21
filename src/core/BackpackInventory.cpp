@@ -86,18 +86,22 @@ InsertResult BackpackInventory::insert(ItemStackData const& stack, AccessContext
         return r;
     }
     int remaining = stack.count;
-    // Pass 0: preferred slots (e.g. memory slots), in the order given.
+    // Pass 0: preferred slots (e.g. memory slots), in the order given. Each slot is filled once
+    // (as far as it goes); later passes skip it, which also keeps `simulate` from counting it twice.
+    std::vector<int> done;
     for (auto const& p : mPreferences) {
         for (int i : p.fn(stack)) {
             if (remaining <= 0) break;
-            if (i < 0 || i >= size()) continue;
+            if (i < 0 || i >= size() || std::find(done.begin(), done.end(), i) != done.end()) continue;
             if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
             remaining -= fillSlot(i, stack, remaining, simulate);
+            done.push_back(i);
         }
     }
     // Pass 1: merge into existing stacks. Pass 2: empty slots.
     for (int pass = 0; pass < 2 && remaining > 0; ++pass) {
         for (int i = 0; i < size() && remaining > 0; ++i) {
+            if (!done.empty() && std::find(done.begin(), done.end(), i) != done.end()) continue;
             auto const& cur = mSlots[static_cast<std::size_t>(i)];
             if (pass == 0 ? (cur.empty() || !cur.sameItem(stack)) : !cur.empty()) continue;
             if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;

@@ -276,16 +276,19 @@ void showGlobalOptions(Player& player, std::shared_ptr<game::Backpack> bp) {
     form.appendToggle(kKeepHotbar, trFor(player, "abp.gui.opt.keep_hotbar", "\"Move all\" buttons keep the hotbar"), g.keepHotbar);
     form.sendTo(player, [bp, sortOpts](Player& p, ll::form::CustomFormResult const& result, ll::form::FormCancelReason) {
         if (result) {
+            nlohmann::json patch = nlohmann::json::object();
             if (auto it = result->find(kSortBy); it != result->end()) {
                 if (int i = indexOf(sortOpts, it->second); i >= 0) {
-                    setPlayerOption(p, kSortBy, std::string(core::toString(static_cast<core::SortBy>(i))));
+                    patch[kSortBy] = std::string(core::toString(static_cast<core::SortBy>(i)));
                 }
             }
             for (auto const* key : {kOpenTabFirst, kNotifications, kKeepHotbar}) {
                 auto it = result->find(key);
                 if (it == result->end()) continue;
-                if (auto const* v = std::get_if<uint64>(&it->second)) setPlayerOption(p, key, *v != 0);
+                if (auto const* v = std::get_if<uint64>(&it->second)) patch[key] = *v != 0;
+                else if (auto const* d = std::get_if<double>(&it->second)) patch[key] = *d != 0.0;
             }
+            setPlayerOptions(p, patch);
         }
         back(p, bp);
     });

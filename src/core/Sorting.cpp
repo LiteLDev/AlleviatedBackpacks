@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <memory>
+#include <unordered_map>
 #include <tuple>
 
 namespace abp::core {
@@ -54,8 +56,18 @@ ItemLess comparatorFor(SortBy by, ITagProvider const* tags) {
             return nameLess(a, b);
         };
     case SortBy::Tag:
-        return [tags](ItemStackData const& a, ItemStackData const& b) {
-            auto ta = firstTag(a, tags), tb = firstTag(b, tags);
+        // Tags are looked up once per item id (comparisons happen O(n log n) times).
+        return [tags, memo = std::make_shared<std::unordered_map<std::string, std::string>>()](
+                   ItemStackData const& a,
+                   ItemStackData const& b
+               ) {
+            auto first = [&](ItemStackData const& item) -> std::string const& {
+                auto it = memo->find(item.id);
+                if (it == memo->end()) it = memo->emplace(item.id, firstTag(item, tags)).first;
+                return it->second;
+            };
+            auto const& ta = first(a);
+            auto const& tb = first(b);
             if (ta != tb) {
                 if (ta.empty()) return false; // untagged items go last
                 if (tb.empty()) return true;
@@ -73,7 +85,29 @@ bool memoryMatches(ItemStackData const& remembered, ItemStackData const& item) {
     return !remembered.empty() && !item.empty() && remembered.id == item.id && remembered.aux == item.aux;
 }
 
+namespace {
+bool sortOnce(BackpackInventory& inv, ItemLess const& less, SortLayout const& layout);
+} // namespace
+
 bool sortInventory(BackpackInventory& inv, ItemLess const& less, SortLayout const& layout) {
+    if (sortOnce(inv, less, layout)) return true;
+    // A memory slot may still hold some other item (remembered after it was filled). If that makes
+    // the layout impossible, leave such items where they are and try again.
+    SortLayout relaxed = layout;
+    bool       changed = false;
+    relaxed.locked.resize(static_cast<std::size_t>(inv.size()), false);
+    for (int i = 0; i < inv.size() && i < static_cast<int>(layout.memory.size()); ++i) {
+        auto const& m = layout.memory[static_cast<std::size_t>(i)];
+        if (!m.empty() && !inv.at(i).empty() && !memoryMatches(m, inv.at(i)) && !relaxed.locked[static_cast<std::size_t>(i)]) {
+            relaxed.locked[static_cast<std::size_t>(i)] = true;
+            changed                                    = true;
+        }
+    }
+    return changed && sortOnce(inv, less, relaxed);
+}
+
+namespace {
+bool sortOnce(BackpackInventory& inv, ItemLess const& less, SortLayout const& layout) {
     int const n        = inv.size();
     auto      isLocked = [&](int i) {
         return i < static_cast<int>(layout.locked.size()) && layout.locked[static_cast<std::size_t>(i)];
@@ -134,5 +168,6 @@ bool sortInventory(BackpackInventory& inv, ItemLess const& less, SortLayout cons
     }
     return true;
 }
+} // namespace
 
 } // namespace abp::core

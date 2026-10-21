@@ -112,13 +112,34 @@ TEST(Sorting, MemorySlotsGetTheirItemAndStayReserved) {
 
 TEST(Sorting, DoesNotFitKeepsLayout) {
     BackpackInventory inv(2);
-    inv.set(0, item("minecraft:apple", 5));
+    inv.addLimitModifier("t", 0, [](int slot, ItemStackData const&, int limit) { return slot == 0 ? 1 : limit; });
+    inv.set(0, item("minecraft:stone", 64)); // set() bypasses the limit
+    inv.set(1, item("minecraft:apple", 2));
+    EXPECT_FALSE(sortInventory(inv, comparatorFor(SortBy::Name)));
+    EXPECT_EQ(inv.at(0).id, "minecraft:stone");
+    EXPECT_EQ(inv.at(1).id, "minecraft:apple");
+}
+
+TEST(Sorting, MismatchedMemorySlotKeepsItsItemWhenFull) {
+    BackpackInventory inv(2);
+    inv.set(0, item("minecraft:apple", 5)); // remembered diamond, but an apple is still there
     inv.set(1, item("minecraft:stone", 5));
     SortLayout layout;
     layout.memory = {item("minecraft:diamond", 1), {}};
-    EXPECT_FALSE(sortInventory(inv, comparatorFor(SortBy::Name), layout));
+    EXPECT_TRUE(sortInventory(inv, comparatorFor(SortBy::Name), layout));
     EXPECT_EQ(inv.at(0).id, "minecraft:apple");
     EXPECT_EQ(inv.at(1).id, "minecraft:stone");
+}
+
+TEST(BackpackInventory, SlotPreferenceSimulateCountsOnce) {
+    BackpackInventory inv(2);
+    inv.set(1, item("minecraft:dirt", 1));
+    inv.addSlotPreference("mem", 0, [](ItemStackData const&) { return std::vector<int>{0, 0}; });
+    auto sim = inv.insert(item("minecraft:stone", 128), kPlayer, true);
+    EXPECT_EQ(sim.inserted, 64);
+    auto real = inv.insert(item("minecraft:stone", 128), kPlayer);
+    EXPECT_EQ(real.inserted, 64);
+    EXPECT_EQ(real.remainder.count, 64);
 }
 
 TEST(Sorting, MemoryMatchIgnoresNbt) {

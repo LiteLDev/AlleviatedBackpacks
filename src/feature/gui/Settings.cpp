@@ -195,9 +195,18 @@ nlohmann::json playerOverrides(Player& player) { return playerJson(player); }
 Options playerOptions(Player& player) { return apply(serverDefaults(), playerJson(player)); }
 
 void setPlayerOption(Player& player, std::string const& key, std::optional<nlohmann::json> value) {
+    nlohmann::json patch = nlohmann::json::object();
+    patch[key]           = value ? std::move(*value) : nlohmann::json(nullptr);
+    setPlayerOptions(player, patch);
+}
+
+void setPlayerOptions(Player& player, nlohmann::json const& patch) {
+    if (!patch.is_object() || patch.empty()) return;
     auto& j = playerJson(player);
-    if (value) j[key] = std::move(*value);
-    else j.erase(key);
+    for (auto const& [key, value] : patch.items()) {
+        if (value.is_null()) j.erase(key);
+        else j[key] = value;
+    }
     savePlayer(player);
 }
 
