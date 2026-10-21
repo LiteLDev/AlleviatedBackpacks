@@ -287,21 +287,12 @@ public:
       mCtx(std::move(ctx)),
       mAdvanced(advanced) {}
 
-    /// FilterMenu picks a single chest for up to 18 ghost slots, but Bedrock clients don't show a
-    /// single-chest fake menu opened from the (double-chest) backpack GUI. Asking for this many
-    /// ghost slots makes it a double chest like the backpack; the unused ones become fillers.
-    static constexpr int kDoubleChestSlots = 36;
-
     static constexpr int kToggleOffset = 5; ///< control-row slot of the toggle
     static constexpr int kInfoOffset   = 6;
 
     void build(Player& player) override {
         FilterMenu::build(player);
         int  control = size() - 9;
-        int  ghosts  = mAdvanced ? kAdvancedFilterSlots : kBasicFilterSlots;
-        for (int i = ghosts; i < control; ++i) {
-            setSlot(i, std::make_shared<ui::StaticSlot>(ui::icon("minecraft:gray_stained_glass_pane", " ")));
-        }
         bool only    = onlyReversible(mCtx.settings());
         auto state   = only ? trFor(player, "abp.filter.on", "§aOn") : trFor(player, "abp.filter.off", "§cOff");
         setSlot(
@@ -361,25 +352,15 @@ public:
         });
     }
 
-    /// Bedrock clients don't show a single chest that directly replaces an open double chest, so
-    /// the backpack GUI closes first and the settings chest opens fresh (same for "back").
-    void openSettings(Player& player, UpgradeContext const& ctx) override {
-        auto menu = createSettingsMenu(player, ctx);
-        if (!menu) return;
-        ui::MenuManager::get().closeThen(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
-    }
-
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         ui::FilterMenu::Options options;
-        options.slots        = CompactingMenu::kDoubleChestSlots; // see CompactingMenu
+        options.slots        = advanced() ? kAdvancedFilterSlots : kBasicFilterSlots;
         options.allowMatchBy = advanced();
         // Items with custom data or damage never compact, so NBT / durability matching is moot.
         options.allowNbt        = false;
         options.allowDurability = false;
         options.onBack       = [bp = ctx.backpackPtr()](Player& p) {
-            ui::MenuManager::get().closeThen(p, [bp](Player& pl) {
-                ui::BackpackMenu::openBackpack(pl, bp, {}, ui::BackpackMenu::View::Upgrades);
-            });
+            ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
         };
         return std::make_shared<CompactingMenu>(displayName(*this, &player), ctx, advanced(), std::move(options));
     }
@@ -711,10 +692,10 @@ ABP_REGISTER_SELFTEST("compacting.settings_from_backpack", [](Context& ctx) -> l
     auto menu = mm.current(player);
     ctx.require(menu != nullptr, "a menu is open after the settings button");
     ctx.check(menu->title() == displayName(*upgrade::byId("compacting"), &player), "settings menu open: " + menu->title());
-    ctx.check(menu->size() == 54, "double chest like the backpack");
+    ctx.check(menu->size() == 27, "basic filter fits a single chest");
     mm.forceShown(player);
     // Back returns to the backpack's upgrades page.
-    (void)mm.simulate(player, {Action::Take, {Where::Menu, 53}, {Where::Cursor, 0}, 1});
+    (void)mm.simulate(player, {Action::Take, {Where::Menu, 26}, {Where::Cursor, 0}, 1});
     co_await ctx.ticks(10);
     auto back = std::dynamic_pointer_cast<ui::BackpackMenu>(mm.current(player));
     ctx.check(back && back->view() == ui::BackpackMenu::View::Upgrades, "back to the upgrades page");
