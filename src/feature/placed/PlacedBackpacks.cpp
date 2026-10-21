@@ -1,4 +1,5 @@
 #include "feature/placed/PlacedBackpacks.h"
+#include "feature/placed/ContainerIO.h"
 
 #include <cmath>
 #include <exception>
@@ -94,6 +95,17 @@ Block const* blockFor(core::Tier tier, int facing) {
 }
 
 BlockPos posOf(BlockLocation const& l) { return BlockPos{l.x, l.y, l.z}; }
+
+/// The held backpack has an active upgrade that acts on sneak + use on a container (Deposit /
+/// Restock, unit U10): such a click must deposit / restock, not place the backpack.
+bool holdsInteractionBackpack(Player const& player) {
+    auto const& item = player.getSelectedItem();
+    if (!game::isBackpack(item)) return false;
+    auto uuid = game::backpackUuid(item);
+    if (!uuid) return false;
+    auto bp = game::Storage::get().find(*uuid);
+    return bp && (upgrade::hasActive(*bp, "deposit") || upgrade::hasActive(*bp, "restock"));
+}
 
 bool sameDimension(Player const& p, BlockLocation const& l) { return static_cast<int>(p.getDimensionId()) == l.dim; }
 
@@ -608,7 +620,7 @@ void PlacedBackpacks::install() {
     }));
     mListeners.push_back(bus.emplaceListener<ll::event::PlayerInteractBlockEvent>([this](ll::event::PlayerInteractBlockEvent& ev) {
         auto& player = ev.self();
-        if (player.isClientSide()) return;
+        if (player.isClientSide() || ev.isCancelled()) return;
         auto&       region = player.getDimensionBlockSource();
         auto const& pos    = ev.blockPos();
         bool        ours   = isBackpackBlock(region.getBlock(pos)) && mEntries.contains(locationOf(region, pos));
@@ -616,6 +628,8 @@ void PlacedBackpacks::install() {
         bool        holdingBackpack = game::isBackpack(player.getSelectedItem());
         bool        relevant        = ours || (sneak && holdingBackpack);
         if (!relevant) return;
+        // Sneak + use of a backpack with a Deposit / Restock upgrade on a container is theirs.
+        if (!ours && holdsInteractionBackpack(player) && containerAt(region, pos)) return;
         // Holding "use" repeats the event: one action per click.
         auto key = player.getOrCreateUniqueID().rawID;
         if (auto it = mCooldowns.find(key); it != mCooldowns.end() && mNow - it->second < kActionCooldown) {

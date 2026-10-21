@@ -126,6 +126,41 @@ ABP_REGISTER_SELFTEST("placed.open_gui", [](Context& ctx) -> ll::coro::CoroTask<
     ctx.check(mm.current(sp) == nullptr, "GUI closed after the block was removed");
 });
 
+ABP_REGISTER_SELFTEST("placed.deposit_wins_on_containers", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& sp = ctx.spawnPlayer();
+    co_await toGround(ctx, sp);
+    Site site(sp);
+    auto chest = site.at(0, 0);
+    auto above = site.at(0, 1);
+    site.set(chest, "minecraft:chest");
+    site.set(above, "minecraft:air");
+    site.touch(above);
+    auto* c = containerAt(site.region(), chest);
+    ctx.require(c != nullptr, "chest container");
+    auto count = PlacedBackpacks::get().count();
+
+    // With a Deposit upgrade, sneak + use on a chest deposits; it never places the backpack.
+    auto bp = ctx.createBackpack(Tier::Iron);
+    ctx.installUpgrade(bp, "deposit");
+    bp->inventory().insert(data("minecraft:cobblestone", 20), kInternal);
+    ctx.require(sp.simulateSetItem(ctx.backpackItem(*bp), true, 0), "hold the backpack");
+    sp.simulateSneaking();
+    useOn(sp, chest, 1);
+    co_await ctx.ticks(2);
+    ctx.check(!PlacedBackpacks::isBackpackBlock(site.region().getBlock(above)), "not placed on the chest");
+    ctx.check(PlacedBackpacks::get().count() == count, "no placed backpack registered");
+    ctx.check(game::isBackpack(sp.getInventory().getItem(0)), "backpack still in the hand");
+    ctx.check(countIn(*c, "minecraft:cobblestone") > 0, "deposit ran instead");
+
+    // Without such an upgrade, sneak + use on the chest places the backpack on top of it.
+    co_await ctx.ticks(kCooldownTicks + 10);
+    auto plain = ctx.createBackpack(Tier::Leather);
+    ctx.require(sp.simulateSetItem(ctx.backpackItem(*plain), true, 0), "hold a plain backpack");
+    useOn(sp, chest, 1);
+    ctx.check(PlacedBackpacks::isBackpackBlock(site.region().getBlock(above)), "a plain backpack is placed on the chest");
+    sp.simulateStopSneaking();
+});
+
 ABP_REGISTER_SELFTEST("placed.viewers_closed", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& a = ctx.spawnPlayer();
     co_await toGround(ctx, a);
