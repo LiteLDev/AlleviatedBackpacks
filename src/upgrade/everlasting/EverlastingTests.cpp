@@ -13,6 +13,7 @@
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockPos.h"
 #include "mc/world/level/BlockSource.h"
+#include "mc/world/level/GameType.h"
 #include "mc/world/level/Level.h"
 #include "mc/world/level/Spawner.h"
 #include "mc/world/level/block/Block.h"
@@ -276,6 +277,8 @@ ABP_REGISTER_SELFTEST("everlasting.death_drop", [](Context& ctx) -> ll::coro::Co
     auto  p = makePair(ctx);
     Drops drops(player);
     ctx.require(ctx.give(player, ctx.backpackItem(*p.everlasting), 0) == 0, "give backpack");
+    player.setPlayerGameType(GameType::Survival); // creative players drop nothing on death
+    co_await ctx.ticks(2);
     player.kill();
     co_await ctx.ticks(15);
     co_await ctx.ticks(5);
@@ -288,7 +291,11 @@ ABP_REGISTER_SELFTEST("everlasting.death_drop", [](Context& ctx) -> ll::coro::Co
             drops.track(a->getOrCreateUniqueID());
         }
     }
-    ctx.require(dropped != nullptr, "backpack dropped on death");
+    ctx.require(
+        dropped != nullptr,
+        std::string("backpack dropped on death (alive=") + (player.isAlive() ? "1" : "0") + ", still in inventory="
+            + (game::isBackpack(player.getInventory().getItem(0)) ? "1" : "0") + ")"
+    );
     auto id = dropped->getOrCreateUniqueID();
     ctx.check(dropped->isFireImmune(), "dropped backpack is everlasting");
     dropped->hurtByCause(1000.0f, Cause::Lava);

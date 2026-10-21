@@ -1,9 +1,10 @@
 # U15: Inception & Everlasting upgrades. Selftests in a local world, then the real GUI:
-# install an Inception upgrade by shift-click, store a backpack inside, open it from the GUI (Q on
-# its slot, or the "Nested backpacks" button) and go back with the Back button.
+# install the Inception (and Everlasting) upgrade by shift-click, store a backpack inside, open it
+# from the GUI (Q on its slot, or the "Nested backpacks" button) and go back with the Back button.
+$problems = @()
 foreach ($glob in 'inception.*', 'everlasting.*') {
     $r = Invoke-SelfTest $glob
-    if ($r.Fail -gt 0 -or $r.Pass -lt 5) { throw "selftests $glob : pass=$($r.Pass) fail=$($r.Fail)" }
+    if ($r.Fail -gt 0 -or $r.Pass -lt 5) { $problems += "selftests $glob : pass=$($r.Pass) fail=$($r.Fail)" }
 }
 
 Invoke-Chat '/clear @s'
@@ -51,8 +52,9 @@ Press-Key 'Q'
 $opened = $true
 try { Wait-LogLine 'menu shown: Leather Backpack \(54 slots\)' 8 -Since $mark | Out-Null }
 catch { $opened = $false }
-if (-not $opened) {
-    Write-Step 'Q did not open the nested backpack: using the Nested backpacks button'
+if ($opened) { Write-Step 'Q opened the nested backpack' }
+else {
+    Write-Step 'Q did not open the nested backpack: using the Nested backpacks button (slot 48)'
     $mark = Get-LogMark
     Click-Slot (Menu-Slot 48)
     Wait-LogLine 'menu shown: Leather Backpack \(54 slots\)' 10 -Since $mark | Out-Null
@@ -68,10 +70,11 @@ Start-Sleep -Milliseconds 800
 Save-Screenshot 'back-to-outer' | Out-Null
 Close-Screen
 
-# 5. The backpack is still in the iron backpack (not dropped by Q).
+# 5. The backpack is still in the iron backpack (not dropped by Q), both upgrades installed.
 $mark = Get-LogMark
 Invoke-Chat '/backpack info'
 $line = Wait-LogLine 'backpack info: ' 10 -Since $mark
-if ($line -notmatch ' items=1 ') { throw "expected the nested backpack inside, got: $line" }
-if ($line -notmatch 'inception' -or $line -notmatch 'everlasting') { throw "expected both upgrades installed, got: $line" }
+if ($line -notmatch ' items=1 ') { $problems += "expected the nested backpack inside, got: $line" }
+if ($line -notmatch 'inception' -or $line -notmatch 'everlasting') { $problems += "expected both upgrades installed, got: $line" }
 Assert-NoErrors
+if ($problems.Count) { throw ($problems -join '; ') }
