@@ -1,0 +1,12 @@
+{
+  "abp.upgrade.restock.name": "Restock Upgrade",
+  "abp.upgrade.advanced_restock.name": "Advanced Restock Upgrade",
+  "abp.restock.contents": "Only items already in the backpack: {}",
+  "abp.restock.contents.help": "§7When on, the filter list is ignored",
+  "abp.restock.describe.contents": "§7Only items already in the backpack",
+  "abp.restock.describe.filter_all": "§7Filter: everything",
+  "abp.restock.describe.filter_allow": "§7Allow list: {} items",
+  "abp.restock.describe.filter_deny": "§7Deny list: {} items",
+  "abp.restock.done": "Restocked {} stacks",
+  "abp.restock.nothing": "Nothing to restock"
+}

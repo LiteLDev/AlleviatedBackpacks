@@ -1,0 +1,22 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:advanced_deposit_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      " D ",
+      "GUG",
+      "RRR"
+    ],
+    "key": {
+      "D": { "item": "minecraft:diamond" },
+      "G": { "item": "minecraft:gold_ingot" },
+      "R": { "item": "minecraft:redstone" },
+      "U": { "item": "alleviatedbackpacks:deposit_upgrade" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:deposit_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:advanced_deposit_upgrade" }
+  }
+}
