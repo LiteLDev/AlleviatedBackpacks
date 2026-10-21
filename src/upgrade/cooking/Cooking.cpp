@@ -34,6 +34,7 @@ constexpr char const* kStateKey       = "state";
 constexpr char const* kInputFilterKey = "inputFilter";
 constexpr char const* kFuelFilterKey  = "fuelFilter";
 constexpr char const* kProductsKey    = "products";
+constexpr char const* kPendingXpKey   = "xpPending"; ///< result id -> items whose XP nobody got yet
 
 /// Per-world caches of recipe results and fuel values (cleared when the level changes).
 struct Caches {
@@ -310,6 +311,12 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
             int xp = 0;
             for (auto const& [id, e] : produced) xp += xpFor(e.first, e.second);
             if (xp > 0) carrier->addExperience(xp);
+            claimPendingXp(ctx, *carrier);
+        } else if (!produced.empty()) {
+            // Placed: keep the experience until someone claims it (menu or carrying it again).
+            auto& pending = ctx.settings()[kPendingXpKey];
+            if (!pending.is_object()) pending = nlohmann::json::object();
+            for (auto const& [id, e] : produced) pending[id] = pending.value(id, 0) + e.second;
         }
         if (newProduct) setProductIds(ctx, products);
     }
@@ -318,6 +325,24 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
 }
 
 void CookingUpgrade::onTick(TickContext const& tick) { advance(tick.ctx, &tick.player, std::max(1, tick.interval)); }
+
+void CookingUpgrade::onPlacedTick(PlacedTickContext const& tick) { advance(tick.ctx, nullptr, std::max(1, tick.interval)); }
+
+int CookingUpgrade::claimPendingXp(UpgradeContext const& ctx, Player& player) {
+    auto& s  = ctx.settings();
+    auto  it = s.find(kPendingXpKey);
+    if (it == s.end()) return 0;
+    int xp = 0;
+    if (it->is_object()) {
+        for (auto const& [id, n] : it->items()) {
+            if (n.is_number_integer()) xp += xpFor(game::ItemConv::toData(game::ItemConv::make(id, 1)), n.get<int>());
+        }
+    }
+    s.erase(it);
+    ctx.saveSettings(false);
+    if (xp > 0) player.addExperience(xp);
+    return xp;
+}
 
 std::shared_ptr<ui::Menu> CookingUpgrade::createSettingsMenu(Player& player, UpgradeContext const& ctx) {
     return makeMenu(player, *this, ctx);

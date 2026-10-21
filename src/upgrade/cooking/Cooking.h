@@ -60,6 +60,9 @@ public:
     [[nodiscard]] bool               automatic() const { return mAuto; }
 
     void onTick(TickContext const& tick) override;
+    /// Keeps cooking while the backpack is placed as a block (no carrier: the Auto variants keep the
+    /// experience of stored results until a player claims it, see claimPendingXp).
+    void onPlacedTick(PlacedTickContext const& tick) override;
 
     [[nodiscard]] std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override;
     [[nodiscard]] std::vector<std::string>  describe(Player& player, UpgradeContext const& ctx) const override;
@@ -75,6 +78,10 @@ public:
     [[nodiscard]] static core::Filter fuelFilter(UpgradeContext const& ctx);
     static void                       setInputFilter(UpgradeContext const& ctx, core::Filter const& filter);
     static void                       setFuelFilter(UpgradeContext const& ctx, core::Filter const& filter);
+
+    /// Auto variants: gives `player` the experience of results stored while nobody carried the
+    /// backpack (placed). Returns the XP awarded.
+    static int claimPendingXp(UpgradeContext const& ctx, Player& player);
 
     /// True while `ctx` still refers to an installed upgrade of this type (menus check it).
     [[nodiscard]] bool installedAt(UpgradeContext const& ctx) const;

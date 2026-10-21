@@ -5,6 +5,8 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
+#include "feature/placed/PlacedBackpacks.h"
+#include "feature/placed/TestSite.h"
 #include "game/ItemConv.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
@@ -384,6 +386,65 @@ ABP_REGISTER_SELFTEST("cooking.settings_button_opens_menu", [](Context& ctx) -> 
     ctx.require(menu != nullptr, "a menu is open after the settings button");
     ctx.check(menu->title() == upgradeOf(Kind::Smelting, false).info().nameFallback, "cooking menu open: " + menu->title());
     mm.close(player);
+});
+// ---- placed backpacks (U2) --------------------------------------------------------------------
+
+/// Places `bp` as a block on a test site next to `player` (moved to the U2 test area first).
+BlockPos placeForTest(Context& ctx, placed::test::Site& site, game::Backpack const& bp) {
+    auto pos = site.at(0, 1);
+    site.set(pos, "minecraft:air");
+    site.touch(pos);
+    auto item = ctx.backpackItem(bp);
+    auto r    = placed::PlacedBackpacks::get().place(site.region(), pos, item, 2);
+    ctx.require(r == placed::PlacedBackpacks::PlaceResult::Ok, "place() failed: " + std::to_string(static_cast<int>(r)));
+    return pos;
+}
+
+ABP_REGISTER_SELFTEST("cooking.placed_keeps_cooking", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& mm = ui::MenuManager::get();
+    auto& sp = ctx.spawnPlayer();
+    co_await placed::test::toGround(ctx, sp);
+    placed::test::Site              site(sp);
+    std::shared_ptr<game::Backpack> bp;
+    auto                            u = withUpgrade(ctx, bp, "smoking");
+    CookState                       st;
+    st.input = data("minecraft:beef", 3); // 3 x 0.35 xp: at least 1
+    st.fuel  = data("minecraft:coal", 1);
+    CookingUpgrade::setState(u, st);
+    (void)placeForTest(ctx, site, *bp);
+    co_await ctx.ticks(330);
+    auto s = CookingUpgrade::state(u);
+    ctx.check(s.output.id == "minecraft:cooked_beef" && s.output.count == 3, "smoked while placed: " + str(s.output));
+    // XP goes to whoever takes the results.
+    auto menu = upgradeOf(Kind::Smoking, false).createSettingsMenu(sp, u);
+    ctx.require(menu != nullptr && mm.open(sp, menu), "open");
+    mm.forceShown(sp);
+    int xp0 = sp.getXpEarnedAtCurrentLevel();
+    ctx.check(mm.simulate(sp, {Action::Take, {Where::Menu, layout(false).output}, {Where::Inventory, 5}, 3}), "take results");
+    ctx.check(sp.getXpEarnedAtCurrentLevel() > xp0, "taker gets the experience");
+    mm.close(sp);
+});
+
+ABP_REGISTER_SELFTEST("cooking.placed_auto_pending_xp", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& mm = ui::MenuManager::get();
+    auto& sp = ctx.spawnPlayer();
+    co_await placed::test::toGround(ctx, sp);
+    placed::test::Site              site(sp);
+    std::shared_ptr<game::Backpack> bp;
+    auto                            u = withUpgrade(ctx, bp, "auto_blasting");
+    core::AccessContext             internal{core::Source::Internal};
+    bp->inventory().insert(data("minecraft:raw_iron", 3), internal);
+    bp->inventory().insert(data("minecraft:coal", 1), internal);
+    (void)placeForTest(ctx, site, *bp);
+    co_await ctx.ticks(340);
+    ctx.check(countOf(*bp, "minecraft:iron_ingot") == 3, "auto-blasted while placed: " + std::to_string(countOf(*bp, "minecraft:iron_ingot")));
+    ctx.check(u.settings().contains("xpPending"), "experience kept while nobody carries it");
+    int xp0  = sp.getXpEarnedAtCurrentLevel();
+    auto menu = upgradeOf(Kind::Blasting, true).createSettingsMenu(sp, u);
+    ctx.require(menu != nullptr && mm.open(sp, menu), "open");
+    ctx.check(sp.getXpEarnedAtCurrentLevel() > xp0, "opening the menu claims the experience");
+    ctx.check(!u.settings().contains("xpPending"), "claimed once");
+    mm.close(sp);
 });
 } // namespace
 } // namespace abp::upgrade::cooking

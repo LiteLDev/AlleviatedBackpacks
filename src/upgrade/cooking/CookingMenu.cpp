@@ -50,6 +50,10 @@ public:
       mCtx(std::move(ctx)) {}
 
     void build(Player& player) override;
+    void onOpen(Player& player) override {
+        // Results stored while the backpack was placed: their experience goes to whoever opens this.
+        if (mUpgrade.automatic() && alive()) CookingUpgrade::claimPendingXp(mCtx, player);
+    }
     void onTick(Player& player) override {
         // Put-backs are only rollbacks of moves within one request (see itemSlot()).
         for (auto& t : mTaken) t.clear();
@@ -176,7 +180,7 @@ std::shared_ptr<ui::Slot> CookingMenu::flameSlot() {
             "minecraft:blaze_powder",
             trFor(p, "abp.cooking.flame.on", "§6Burning: {}%", pct),
             {trFor(p, "abp.cooking.flame.left", "§7Fuel left: {}s", (st.burn + 19) / 20)},
-            std::max(1, pct)
+            std::max(1, pct * 64 / 100) // count as a 64-step bar (the exact % is in the name)
         );
     };
     return slot;
@@ -197,10 +201,10 @@ std::shared_ptr<ui::Slot> CookingMenu::progressSlot() {
             lore.push_back(trFor(p, "abp.cooking.progress.no_recipe", "§cThis can't be cooked here"));
         }
         return ui::icon(
-            pct > 0 ? "minecraft:spectral_arrow" : "minecraft:arrow",
+            "minecraft:arrow",
             trFor(p, "abp.cooking.progress", "Cooking: {}%", pct),
             lore,
-            std::max(1, pct)
+            std::max(1, pct * 64 / 100) // count as a 64-step bar (the exact % is in the name)
         );
     };
     return slot;
