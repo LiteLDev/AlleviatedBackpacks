@@ -1,0 +1,20 @@
+{
+  "abp_leather_backpack_dyed": {
+    "textures": "textures/items/leather_backpack_dyed"
+  },
+  "abp_copper_backpack_dyed": {
+    "textures": "textures/items/copper_backpack_dyed"
+  },
+  "abp_iron_backpack_dyed": {
+    "textures": "textures/items/iron_backpack_dyed"
+  },
+  "abp_gold_backpack_dyed": {
+    "textures": "textures/items/gold_backpack_dyed"
+  },
+  "abp_diamond_backpack_dyed": {
+    "textures": "textures/items/diamond_backpack_dyed"
+  },
+  "abp_netherite_backpack_dyed": {
+    "textures": "textures/items/netherite_backpack_dyed"
+  }
+}

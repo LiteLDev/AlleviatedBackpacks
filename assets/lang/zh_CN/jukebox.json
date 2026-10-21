@@ -1,0 +1,24 @@
+{
+  "abp.upgrade.jukebox.name": "唱片机升级",
+  "abp.upgrade.advanced_jukebox.name": "高级唱片机升级",
+
+  "abp.jukebox.back": "返回升级页",
+  "abp.jukebox.play": "播放",
+  "abp.jukebox.stop": "停止",
+  "abp.jukebox.previous": "上一张唱片",
+  "abp.jukebox.next": "下一张唱片",
+  "abp.jukebox.shuffle.on": "随机播放：§a开",
+  "abp.jukebox.shuffle.off": "随机播放：§c关",
+  "abp.jukebox.repeat.all": "循环：全部唱片",
+  "abp.jukebox.repeat.one": "循环：单张唱片",
+  "abp.jukebox.repeat.none": "循环：关",
+  "abp.jukebox.click_to_change": "§7点击切换",
+  "abp.jukebox.now_playing": "§a▶ 正在播放",
+  "abp.jukebox.status.playing": "§a正在播放：§f{}",
+  "abp.jukebox.status.stopped": "§7未在播放",
+  "abp.jukebox.status.time": "§7{} / {}",
+  "abp.jukebox.discs": "§7唱片：{}/{}",
+  "abp.jukebox.hint": "§7将唱片放入下方的槽位",
+  "abp.jukebox.no_disc": "请先在唱片机中放入一张唱片。",
+  "abp.jukebox.not_carried": "需要携带（或放置）背包才能播放音乐。"
+}

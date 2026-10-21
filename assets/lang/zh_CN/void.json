@@ -1,0 +1,14 @@
+{
+  "abp.void.name": "虚空升级",
+  "abp.void.advanced_name": "高级虚空升级",
+  "abp.void.mode.all": "销毁：所有匹配物品",
+  "abp.void.mode.all.desc": "§7所有匹配的物品都会被销毁",
+  "abp.void.mode.overflow": "销毁：仅溢出部分",
+  "abp.void.mode.overflow.desc": "§7保留一组，销毁放不下的部分",
+  "abp.void.work_in_gui": "在界面中生效：{}",
+  "abp.void.work_in_gui.desc": "§7手动放入的物品也会被销毁",
+  "abp.void.describe.allow": "§7销毁 {} 种列出的物品",
+  "abp.void.describe.deny": "§7销毁除 {} 种列出物品外的所有物品",
+  "abp.void.describe.overflow": "§7仅溢出部分",
+  "abp.void.describe.gui": "§7在界面中也生效"
+}

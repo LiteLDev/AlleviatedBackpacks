@@ -1,0 +1,24 @@
+{
+  "abp.upgrade.jukebox.name": "Jukebox Upgrade",
+  "abp.upgrade.advanced_jukebox.name": "Advanced Jukebox Upgrade",
+
+  "abp.jukebox.back": "Back to upgrades",
+  "abp.jukebox.play": "Play",
+  "abp.jukebox.stop": "Stop",
+  "abp.jukebox.previous": "Previous disc",
+  "abp.jukebox.next": "Next disc",
+  "abp.jukebox.shuffle.on": "Shuffle: §aOn",
+  "abp.jukebox.shuffle.off": "Shuffle: §cOff",
+  "abp.jukebox.repeat.all": "Repeat: all discs",
+  "abp.jukebox.repeat.one": "Repeat: one disc",
+  "abp.jukebox.repeat.none": "Repeat: off",
+  "abp.jukebox.click_to_change": "§7Click to change",
+  "abp.jukebox.now_playing": "§a▶ Playing",
+  "abp.jukebox.status.playing": "§aNow playing: §f{}",
+  "abp.jukebox.status.stopped": "§7Not playing",
+  "abp.jukebox.status.time": "§7{} / {}",
+  "abp.jukebox.discs": "§7Discs: {}/{}",
+  "abp.jukebox.hint": "§7Put music discs into the slots below",
+  "abp.jukebox.no_disc": "Put a music disc into the jukebox first.",
+  "abp.jukebox.not_carried": "Carry the backpack (or place it) to play music."
+}

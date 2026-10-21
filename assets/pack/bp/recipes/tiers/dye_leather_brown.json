@@ -1,0 +1,27 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:leather_backpack_dye_brown"
+    },
+    "tags": [
+      "crafting_table"
+    ],
+    "ingredients": [
+      {
+        "item": "alleviatedbackpacks:leather_backpack"
+      },
+      {
+        "item": "minecraft:brown_dye"
+      }
+    ],
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:leather_backpack"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:leather_backpack"
+    }
+  }
+}

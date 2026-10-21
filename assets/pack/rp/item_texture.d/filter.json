@@ -1,0 +1,8 @@
+{
+  "abp_filter_upgrade": {
+    "textures": "textures/items/filter_upgrade"
+  },
+  "abp_advanced_filter_upgrade": {
+    "textures": "textures/items/advanced_filter_upgrade"
+  }
+}

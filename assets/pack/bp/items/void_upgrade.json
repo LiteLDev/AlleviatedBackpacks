@@ -1,0 +1,14 @@
+{
+  "format_version": "1.21.40",
+  "minecraft:item": {
+    "description": {
+      "identifier": "alleviatedbackpacks:void_upgrade",
+      "menu_category": { "category": "items" }
+    },
+    "components": {
+      "minecraft:icon": "abp_void_upgrade",
+      "minecraft:max_stack_size": 1,
+      "minecraft:display_name": { "value": "item.alleviatedbackpacks:void_upgrade.name" }
+    }
+  }
+}

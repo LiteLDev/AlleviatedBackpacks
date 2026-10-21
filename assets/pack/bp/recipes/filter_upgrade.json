@@ -1,0 +1,21 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:filter_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "RSR",
+      "SBS",
+      "RSR"
+    ],
+    "key": {
+      "B": { "item": "alleviatedbackpacks:upgrade_base" },
+      "R": { "item": "minecraft:redstone" },
+      "S": { "item": "minecraft:string" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:filter_upgrade" }
+  }
+}
