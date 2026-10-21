@@ -106,7 +106,12 @@ xmake build -y abp-tests; xmake run abp-tests
 ```
 
 - `git config --global core.longpaths true` is required (long LeviLamina header paths).
-- `clang-cl` must be on PATH for xmake's package builds (`C:\Program Files\LLVM\bin`).
+- `clang-cl` must be on PATH for xmake's package builds (`C:\Program Files\LLVM\bin`). LeviLamina is
+  built from source (no prebuilt package), so whichever `clang-cl` comes first on PATH compiles it.
+  `tools/build.ps1` appends the registry PATH after the caller's PATH and prefers `$env:LLVM_PATH`, so
+  CI uses setup-llvm's LLVM 22. The runner's preinstalled `C:\Program Files\LLVM` fails on LL's headers.
+- CI: a failed package install prints `installdir.failed\logs\install.txt` in the "Dump xmake package
+  install logs" step. The `download ... rapidjson ... failed` line is harmless (xmake falls back to git clone).
 - `xmake-requires.lock` is committed; it holds entries for both target types.
 - In game: `/backpack selftest ["glob"]` (alias `/abp`; op or server console). Quote globs that
   contain `*` or `.`, e.g. `backpack selftest "menu.*"`; the parser rejects them unquoted. Output lines are
