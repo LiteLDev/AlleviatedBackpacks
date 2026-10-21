@@ -403,7 +403,7 @@ ABP_REGISTER_SELFTEST("feeding.open_settings_from_backpack", [](Context& ctx) ->
         auto cur = mm.current(p);
         opened   = cur != nullptr && cur->size() == 27;
     }
-    ctx.check(opened, "feeding settings open after the backpack closed");
+    ctx.check(opened, "feeding settings opened from the backpack GUI");
     mm.close(p);
 });
 

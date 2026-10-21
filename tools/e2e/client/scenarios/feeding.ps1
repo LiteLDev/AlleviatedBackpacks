@@ -12,81 +12,67 @@ Invoke-Chat '/replaceitem entity @s slot.hotbar 2 cooked_beef 16'
 Press-Key '1'
 Start-Sleep -Seconds 1
 
-# Double chest (backpack GUI) geometry, fractions of the 1600x900 client area.
-$x0 = 0.365; $dx = 0.035; $y0 = 0.232; $dy = 0.0622
-function Big([int]$slot) { @(($x0 + ($slot % 9) * $dx), ($y0 + [math]::Floor($slot / 9) * $dy)) }
-$hotbarY = 0.819
-function Hotbar([int]$i) { @(($x0 + $i * $dx), $hotbarY) }
-
-function Assert-BackpackItems([scriptblock]$check, [string]$what) {
+# Fractions of the 1600x900 client area. Slots are 0.035 wide and 0.0622 high.
+function Slot-Double([int]$i) { @((0.365 + ($i % 9) * 0.035), (0.232 + [Math]::Floor($i / 9) * 0.0622)) }
+function Hotbar-Double([int]$i) { @((0.365 + $i * 0.035), 0.819) }
+function Slot-Single([int]$i) { @((0.365 + ($i % 9) * 0.035), (0.325 + [Math]::Floor($i / 9) * 0.0622)) }
+function Click-At($p, [switch]$Shift) {
+    if ($Shift) { [AbpE2E.Native]::Key(0x10, $false) }
+    Click $p[0] $p[1] -Relative
+    if ($Shift) { [AbpE2E.Native]::Key(0x10, $true) }
+    Start-Sleep -Milliseconds 600
+}
+function Get-BackpackInfo {
     $mark = Get-LogMark
     Invoke-Chat '/backpack info'
     $line = Wait-LogLine 'backpack info: ' 10 -Since $mark
     if ($line -notmatch ' items=(\d+)') { throw "no item count in: $line" }
-    if (-not (& $check ([int]$Matches[1]))) { throw "$what (got: $line)" }
-    return $line
+    return @{ Line = $line; Items = [int]$Matches[1] }
 }
 
-# 1. Open the backpack, shift-click the steak in.
+# 1. Open the backpack, shift-click the steak in; upgrades page, shift-click the upgrade in.
 $mark = Get-LogMark
 Click 0.5 0.5 -Relative -Right
 Wait-LogLine 'menu shown: Diamond Backpack \(54 slots\)' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 800
-$h = Hotbar 2
-[AbpE2E.Native]::Key(0x10, $false)
-Click $h[0] $h[1] -Relative
-[AbpE2E.Native]::Key(0x10, $true)
+Click-At (Hotbar-Double 2) -Shift
+Click-At (Slot-Double 52)
+Click-At (Hotbar-Double 1) -Shift
+Move-Mouse (Slot-Double 0)[0] (Slot-Double 0)[1] -Relative
 Start-Sleep -Milliseconds 600
+Save-Screenshot 'upgrade-installed' | Out-Null
 
-# 2. Upgrades view: put the upgrade into the first upgrade slot.
-$b = Big 52
-Click $b[0] $b[1] -Relative
-Start-Sleep -Milliseconds 800
-$h = Hotbar 1
-Click $h[0] $h[1] -Relative
-Start-Sleep -Milliseconds 400
-$s = Big 0
-Click $s[0] $s[1] -Relative
-Start-Sleep -Milliseconds 800
-# The upgrades page only adds the toggle/settings buttons of a new upgrade when it is rebuilt:
-# switch to storage and back.
-Click $b[0] $b[1] -Relative
-Start-Sleep -Milliseconds 600
-Click $b[0] $b[1] -Relative
-Start-Sleep -Milliseconds 800
-Move-Mouse 0.2 0.2 -Relative
-Start-Sleep -Milliseconds 300
-Save-Screenshot 'upgrades-installed' | Out-Null
-
-# 3. Open its settings (button under the upgrade): the feeding filter/settings menu.
+# 2. Its settings button opens the feeding settings (single chest: 16 filter slots + controls).
 $mark = Get-LogMark
-$s = Big 18
-Click $s[0] $s[1] -Relative
+Click-At (Slot-Double 18)
 Wait-LogLine 'menu shown: Advanced Feeding Upgrade \(27 slots\)' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 1500
+Start-Sleep -Milliseconds 800
 Save-Screenshot 'settings' | Out-Null
 
-# Single chest geometry: same columns, rows shifted down by half of the 3 missing rows.
-$sy0 = 0.325
-function Small([int]$slot) { @(($x0 + ($slot % 9) * $dx), ($sy0 + [math]::Floor($slot / 9) * $dy)) }
-# Hunger mode button (control row, slot 5): Half -> Full -> Always.
-$m = Small 23
-Click $m[0] $m[1] -Relative
-Start-Sleep -Milliseconds 500
-Click $m[0] $m[1] -Relative
-Start-Sleep -Milliseconds 700
-Move-Mouse $m[0] $m[1] -Relative
-Start-Sleep -Milliseconds 500
+# 3. Hunger mode (control slot 5): Half -> Full -> Always; hover it for the tooltip.
+Click-At (Slot-Single 23)
+Click-At (Slot-Single 23)
+Move-Mouse (Slot-Single 23)[0] (Slot-Single 23)[1] -Relative
+Start-Sleep -Milliseconds 600
 Save-Screenshot 'settings-mode-always' | Out-Null
+
+# 4. Back to the backpack, close it.
+$mark = Get-LogMark
+Click-At (Slot-Single 26)
+Wait-LogLine 'menu shown: .*\(54 slots\)' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 800
+Save-Screenshot 'back-to-upgrades' | Out-Null
 Close-Screen
 Start-Sleep -Milliseconds 500
 
-$line = Assert-BackpackItems { param($n) $n -eq 16 } 'expected 16 steak in the backpack'
-if ($line -notmatch 'advanced_feeding') { throw "upgrade not installed: $line" }
+$info = Get-BackpackInfo
+if ($info.Items -ne 16) { throw "expected 16 steak in the backpack: $($info.Line)" }
+if ($info.Line -notmatch 'advanced_feeding') { throw "advanced feeding upgrade not installed: $($info.Line)" }
 
-# 4. Get hungry; the backpack feeds the player.
+# 5. Get hungry: the backpack feeds the player.
 Invoke-Chat '/effect @s hunger 8 250'
 Start-Sleep -Seconds 10
 Save-Screenshot 'fed' | Out-Null
-Assert-BackpackItems { param($n) $n -lt 16 } 'expected the feeding upgrade to eat steak' | Out-Null
+$info = Get-BackpackInfo
+if ($info.Items -ge 16) { throw "expected the feeding upgrade to eat steak: $($info.Line)" }
 Assert-NoErrors

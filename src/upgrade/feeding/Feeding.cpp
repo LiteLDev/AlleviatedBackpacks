@@ -272,14 +272,6 @@ public:
         (void)tryFeed(tick.player, tick.ctx, optionsOf(tick.ctx, Advanced), filterOf(tick.ctx, Advanced));
     }
 
-    /// Switching straight from the backpack's double chest to this single-chest menu leaves the
-    /// real client without a screen: close fully first.
-    void openSettings(Player& player, UpgradeContext const& ctx) override {
-        auto menu = createSettingsMenu(player, ctx);
-        if (!menu) return;
-        ui::MenuManager::get().closeThen(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
-    }
-
     [[nodiscard]] std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         ui::FilterMenu::Options options;
         options.slots           = Advanced ? kAdvancedFilterSlots : kBasicFilterSlots;
@@ -287,9 +279,7 @@ public:
         options.allowNbt        = Advanced;
         options.allowDurability = Advanced;
         options.onBack          = [bp = ctx.backpackPtr()](Player& p) {
-            ui::MenuManager::get().closeThen(p, [bp](Player& pl) {
-                ui::BackpackMenu::openBackpack(pl, bp, {}, ui::BackpackMenu::View::Upgrades);
-            });
+            ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
         };
         return std::make_shared<FeedingMenu>(displayName(*this, &player), ctx.withPlayer(nullptr), Advanced, std::move(options));
     }
