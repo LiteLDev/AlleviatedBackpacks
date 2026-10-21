@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "mc/scripting/modules/minecraft/ScriptFacing.h"
+#include "mc/deps/shared_types/legacy/actor/ArmorSlot.h"
 #include "mc/server/SimulatedPlayer.h"
 #include "mc/world/actor/player/Inventory.h"
 #include "mc/world/level/GameType.h"
@@ -79,9 +80,13 @@ ABP_REGISTER_SELFTEST("placed.place_and_pick_up", [](Context& ctx) -> ll::coro::
     ctx.require(entry.has_value(), "position registered");
     ctx.check(entry->uuid == bp->uuid(), "position -> uuid");
 
-    // Sneak + use with an empty hand picks it up into the hand.
+    // Sneak + use with an empty hand picks it up into the hand (even while wearing another
+    // backpack, whose "sneak + use opens the worn backpack" must not win on a placed backpack).
+    auto worn = ctx.createBackpack(Tier::Leather);
+    game::setItemAt(sp, {game::ItemLocation::Kind::Armor, static_cast<int>(SharedTypes::Legacy::ArmorSlot::Torso)}, ctx.backpackItem(*worn));
     co_await ctx.ticks(kCooldownTicks);
     useOn(sp, target, 1);
+    ctx.check(ui::MenuManager::get().current(sp) == nullptr, "the worn backpack did not open");
     ctx.check(site.region().getBlock(target).isAir(), "block removed on pick up");
     ctx.check(!PlacedBackpacks::get().at(locationOf(site.region(), target)), "entry removed");
     auto const& held = sp.getInventory().getItem(0);

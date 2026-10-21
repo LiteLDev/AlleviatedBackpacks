@@ -638,7 +638,7 @@ void PlacedBackpacks::install() {
             mCooldowns[key] = mNow; // also after a refused placement (no GUI right after)
         }
         // Sneaking with another item on a placed backpack: vanilla placement against it.
-    }));
+    }, ll::event::EventPriority::High)); // before other sneak-use handlers (e.g. open the worn backpack)
     // A placement click must not also open the backpack that was just placed / is in the hand.
     mListeners.push_back(bus.emplaceListener<ll::event::PlayerUseItemEvent>(
         [this](ll::event::PlayerUseItemEvent& ev) {

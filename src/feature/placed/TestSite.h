@@ -7,7 +7,16 @@
 #include <string_view>
 #include <vector>
 
+#include "ll/api/command/CommandRegistrar.h"
+#include "ll/api/service/Bedrock.h"
+
 #include "mc/deps/core/string/HashedString.h"
+#include "mc/server/commands/CommandOutput.h"
+#include "mc/server/commands/CommandPermissionLevel.h"
+#include "mc/server/commands/ServerCommandOrigin.h"
+#include "mc/server/SimulatedPlayer.h"
+#include "mc/world/level/Level.h"
+#include "mc/world/level/dimension/Dimension.h"
 #include "mc/world/Container.h"
 #include "mc/world/actor/item/ItemActor.h"
 #include "mc/world/actor/player/Player.h"
@@ -33,7 +42,7 @@ namespace abp::placed::test {
 class Site {
 public:
     /// Origin `dx` blocks east of the player, on the ground (the first air block of that column).
-    Site(Player& player, int dx = 3, int dz = 0) : mRegion(player.getDimensionBlockSource()) {
+    Site(Player& player, int dx = 3, int dz = 0) : mRegion(player.getDimension().getBlockSourceFromMainChunkSource()) {
         auto feet = player.getFeetPos();
         int  x    = static_cast<int>(std::floor(feet.x)) + dx;
         int  z    = static_cast<int>(std::floor(feet.z)) + dz;
@@ -108,18 +117,42 @@ inline int groundY(BlockSource& region, int x, int z) {
     return region.getMinHeight();
 }
 
-/// Moves a freshly spawned player (it spawns high above the world spawn) down onto the ground of
-/// its column, once that chunk is loaded.
+/// Moves a freshly spawned test player (it spawns high above the world spawn) to the U2 test area
+/// (the middle of a chunk away from spawn) and onto the ground there, once it is loaded.
 inline ll::coro::CoroTask<> toGround(selftest::Context& ctx, Player& player) {
-    auto& region = player.getDimensionBlockSource();
+    auto& region = player.getDimension().getBlockSourceFromMainChunkSource();
     auto  feet   = player.getFeetPos();
-    int   x      = static_cast<int>(std::floor(feet.x));
-    int   z      = static_cast<int>(std::floor(feet.z));
-    for (int i = 0; i < 200 && !region.areChunksFullyLoaded(BlockPos{x, 0, z}, 1); ++i) co_await ctx.ticks(1);
-    ctx.require(region.areChunksFullyLoaded(BlockPos{x, 0, z}, 1), "chunks around the test player never loaded");
+    // Chunks around the world spawn sometimes never finish loading after many quick test players
+    // came and went there (BDS), so use an area of our own, kept loaded by a ticking area (adding
+    // it again fails harmlessly).
+    int x = 1032;
+    int  z  = 1032;
+    auto& sp = static_cast<SimulatedPlayer&>(player); // test players are simulated players
+    sp.simulateFly(); // no fall damage while the area loads
+    player.teleport(
+        Vec3{static_cast<float>(x) + 0.5f, static_cast<float>(region.getMaxHeight() - 2), static_cast<float>(z) + 0.5f},
+        player.getDimensionId()
+    );
+    if (auto level = ll::service::getLevel()) {
+        ServerCommandOrigin origin("abp-selftest", level->asServer(), CommandPermissionLevel::Owner, player.getDimensionId());
+        auto out = ll::command::CommandRegistrar::getServerInstance().executeCommand(
+            "tickingarea add circle " + std::to_string(x) + " 0 " + std::to_string(z) + " 2 abp_selftest_u2",
+            origin
+        );
+        (void)out;
+    }
+    for (int i = 0; i < 200 && !region.hasChunksAt(BlockPos{x, 0, z}, 16, false); ++i) co_await ctx.ticks(1);
+    ctx.require(
+        region.hasChunksAt(BlockPos{x, 0, z}, 16, false),
+        "chunks around the test player never loaded (spawned at " + std::to_string(feet.y) + ", now at "
+            + std::to_string(player.getFeetPos().x) + " " + std::to_string(player.getFeetPos().y) + " "
+            + std::to_string(player.getFeetPos().z) + ", hasChunks " + std::to_string(region.hasChunksAt(BlockPos{x, 0, z}, 0, false))
+            + ", alive " + std::to_string(player.isAlive()) + ")"
+    );
     auto y = groundY(region, x, z);
     player.teleport(Vec3{static_cast<float>(x) + 0.5f, static_cast<float>(y), static_cast<float>(z) + 0.5f}, player.getDimensionId());
-    co_await ctx.ticks(2);
+    sp.simulateStopFlying();
+    co_await ctx.ticks(10);
 }
 
 /// Runs the player's real "use item on block" path (what a right click sends).
