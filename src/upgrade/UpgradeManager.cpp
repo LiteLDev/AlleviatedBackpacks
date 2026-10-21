@@ -197,14 +197,9 @@ bool canInstall(
     return type->canInstall(UpgradeContext(backpack, slot, player), why);
 }
 
-bool install(
-    std::shared_ptr<game::Backpack> const& backpack,
-    int                                    slot,
-    core::ItemStackData const&             item,
-    Player*                                player,
-    std::string*                           reason
-) {
-    if (!canInstall(backpack, slot, item, player, reason)) return false;
+namespace {
+/// Puts `item` into the (free) slot and runs onInstall. No checks, no hook rebuild.
+void installUnchecked(std::shared_ptr<game::Backpack> const& backpack, int slot, core::ItemStackData const& item, Player* player) {
     auto [clean, settings] = extractSettings(item.withCount(1));
     auto& s                = backpack->data().upgrades[static_cast<std::size_t>(slot)];
     s.item                 = clean;
@@ -218,20 +213,14 @@ bool install(
     } catch (std::exception const& e) {
         log().error("upgrade {} onInstall failed: {}", type->info().id, e.what());
     }
-    backpack->rebuildHooks();
-    return true;
 }
 
-std::optional<core::ItemStackData>
-remove(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player, std::string* reason) {
-    auto& slots = backpack->data().upgrades;
-    if (slot < 0 || slot >= static_cast<int>(slots.size())) return std::nullopt;
-    auto& s = slots[static_cast<std::size_t>(slot)];
-    if (s.empty()) return std::nullopt;
+/// Runs onRemove and empties the (occupied) slot. Returns the item with its settings embedded.
+/// No checks, no hook rebuild.
+core::ItemStackData removeUnchecked(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player) {
+    auto&          s = backpack->data().upgrades[static_cast<std::size_t>(slot)];
     UpgradeContext ctx(backpack, slot, player);
     if (auto* type = upgradeFor(s.item)) {
-        std::string dummy;
-        if (!type->canRemove(ctx, reason ? *reason : dummy)) return std::nullopt;
         try {
             type->onRemove(ctx);
         } catch (std::exception const& e) {
@@ -242,6 +231,64 @@ remove(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player
     s        = core::UpgradeSlot{};
     backpack->clearTransient(ctx.hookOwner());
     backpack->markDirty();
+    return out;
+}
+} // namespace
+
+bool install(
+    std::shared_ptr<game::Backpack> const& backpack,
+    int                                    slot,
+    core::ItemStackData const&             item,
+    Player*                                player,
+    std::string*                           reason
+) {
+    if (!canInstall(backpack, slot, item, player, reason)) return false;
+    installUnchecked(backpack, slot, item, player);
+    backpack->rebuildHooks();
+    return true;
+}
+
+std::optional<core::ItemStackData>
+remove(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player, std::string* reason) {
+    auto& slots = backpack->data().upgrades;
+    if (slot < 0 || slot >= static_cast<int>(slots.size())) return std::nullopt;
+    auto& s = slots[static_cast<std::size_t>(slot)];
+    if (s.empty()) return std::nullopt;
+    if (auto* type = upgradeFor(s.item)) {
+        std::string dummy;
+        if (!type->canRemove(UpgradeContext(backpack, slot, player), reason ? *reason : dummy)) return std::nullopt;
+    }
+    auto out = removeUnchecked(backpack, slot, player);
+    backpack->rebuildHooks();
+    return out;
+}
+
+std::optional<core::ItemStackData> replace(
+    std::shared_ptr<game::Backpack> const& backpack,
+    int                                    slot,
+    core::ItemStackData const&             item,
+    Player*                                player,
+    std::string*                           reason
+) {
+    auto& slots = backpack->data().upgrades;
+    if (slot < 0 || slot >= static_cast<int>(slots.size())) return std::nullopt;
+    auto& s = slots[static_cast<std::size_t>(slot)];
+    if (s.empty()) return std::nullopt;
+    auto newItem = item.withCount(1);
+    if (auto* type = upgradeFor(s.item)) {
+        std::string dummy;
+        if (!type->canReplaceWith(UpgradeContext(backpack, slot, player), newItem, reason ? *reason : dummy)) {
+            return std::nullopt;
+        }
+    }
+    // Check the new one as if the slot were free; put the old state back untouched on failure.
+    auto saved = std::move(s);
+    s          = core::UpgradeSlot{};
+    bool ok    = canInstall(backpack, slot, newItem, player, reason);
+    s          = std::move(saved);
+    if (!ok) return std::nullopt;
+    auto out = removeUnchecked(backpack, slot, player);
+    installUnchecked(backpack, slot, newItem, player);
     backpack->rebuildHooks();
     return out;
 }

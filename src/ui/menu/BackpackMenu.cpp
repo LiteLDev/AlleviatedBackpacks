@@ -6,7 +6,9 @@
 #include "ll/api/event/player/PlayerUseItemEvent.h"
 #include "ll/api/form/SimpleForm.h"
 
+#include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/player/Player.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "game/BackpackItem.h"
@@ -63,6 +65,50 @@ public:
         }
         game::ItemConv::setDisplay(stack, type ? "§r" + upgrade::displayName(*type, &player) : std::string{}, lore);
         return stack;
+    }
+
+    /// Clicking an occupied upgrade slot with an item on the cursor: either the installed upgrade
+    /// uses the item (`IUpgrade::useItemOn`, e.g. a conversion item) or the two are swapped in one
+    /// step (`upgrade::replace`). Other interactions use take()/accept().
+    bool click(ClickContext const& c) override {
+        if ((c.type != ClickType::Swap && c.type != ClickType::Place) || c.offered.isNull()) return false;
+        auto const& s = mBackpack->data().upgrades[static_cast<std::size_t>(mIndex)];
+        if (s.empty()) return false;
+        ItemStack cursor = c.player.mPlayerUIContainer->getItem(0);
+        // Only when the offered stack is exactly the cursor (the usual chest-screen click).
+        if (cursor.isNull() || !cursor.matchesItem(c.offered) || cursor.mCount != c.offered.mCount) return false;
+        auto offered = game::ItemConv::toData(c.offered);
+        auto setCursor = [&](ItemStack item) {
+            c.player.setPlayerUIItem(PlayerUISlot::CursorSelected, item, false);
+        };
+        if (auto* type = upgrade::upgradeFor(s.item)) {
+            auto used = type->useItemOn(c.player, upgrade::UpgradeContext(mBackpack, mIndex, &c.player), offered);
+            if (used) {
+                if (*used > 0) {
+                    int left = std::max(0, static_cast<int>(cursor.mCount) - *used);
+                    if (left == 0) cursor = ItemStack{};
+                    else cursor.set(left);
+                    setCursor(cursor);
+                }
+                return true;
+            }
+        }
+        if (c.type != ClickType::Swap) return false;
+        std::string reason;
+        auto        old = upgrade::replace(mBackpack, mIndex, offered, &c.player, &reason);
+        if (!old) {
+            if (!reason.empty()) c.player.sendMessage(reason);
+            return true;
+        }
+        auto oldStack = game::ItemConv::toStack(*old, 1);
+        if (cursor.mCount <= 1) {
+            setCursor(oldStack);
+        } else {
+            cursor.set(cursor.mCount - 1);
+            setCursor(cursor);
+            if (!c.player.add(oldStack)) c.player.drop(oldStack, false);
+        }
+        return true;
     }
 
     ItemStack take(Player& player, int) override {
