@@ -1,0 +1,22 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:auto_blasting_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "RHR",
+      "GUG",
+      "RHR"
+    ],
+    "key": {
+      "R": { "item": "minecraft:redstone" },
+      "H": { "item": "minecraft:hopper" },
+      "G": { "item": "minecraft:gold_ingot" },
+      "U": { "item": "alleviatedbackpacks:blasting_upgrade" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:blasting_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:auto_blasting_upgrade" }
+  }
+}

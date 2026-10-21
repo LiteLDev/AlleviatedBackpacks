@@ -1,0 +1,20 @@
+{
+  "abp_smelting_upgrade": {
+    "textures": "textures/items/smelting_upgrade"
+  },
+  "abp_smoking_upgrade": {
+    "textures": "textures/items/smoking_upgrade"
+  },
+  "abp_blasting_upgrade": {
+    "textures": "textures/items/blasting_upgrade"
+  },
+  "abp_auto_smelting_upgrade": {
+    "textures": "textures/items/auto_smelting_upgrade"
+  },
+  "abp_auto_smoking_upgrade": {
+    "textures": "textures/items/auto_smoking_upgrade"
+  },
+  "abp_auto_blasting_upgrade": {
+    "textures": "textures/items/auto_blasting_upgrade"
+  }
+}
