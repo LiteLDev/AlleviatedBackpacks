@@ -146,6 +146,7 @@ private:
     int                                            mGuard = 0; ///< > 0 while we change blocks ourselves
     std::int64_t                                   mNow   = 0;
     int                                            mTicks = 0;
+    int                                            mJukeboxTicks = 0; ///< ticks since the last jukebox report
 
     friend class PlacedGuard;
 };

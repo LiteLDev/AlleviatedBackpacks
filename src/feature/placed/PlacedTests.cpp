@@ -18,6 +18,7 @@
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/jukebox/Jukebox.h"
 
 namespace abp::placed::test {
 namespace {
@@ -159,6 +160,28 @@ ABP_REGISTER_SELFTEST("placed.deposit_wins_on_containers", [](Context& ctx) -> l
     useOn(sp, chest, 1);
     ctx.check(PlacedBackpacks::isBackpackBlock(site.region().getBlock(above)), "a plain backpack is placed on the chest");
     sp.simulateStopSneaking();
+});
+
+ABP_REGISTER_SELFTEST("placed.jukebox_plays_at_block", [](Context& ctx) -> ll::coro::CoroTask<> {
+    namespace jb = upgrade::jukebox;
+    auto& sp = ctx.spawnPlayer();
+    co_await toGround(ctx, sp);
+    Site site(sp);
+    auto pos = site.at(0, 1);
+    site.set(pos, "minecraft:air");
+    auto bp   = ctx.createBackpack(Tier::Leather);
+    int  slot = ctx.installUpgrade(bp, std::string(jb::kBasicId));
+    upgrade::UpgradeContext uctx(bp, slot, &sp);
+    jb::setDisc(uctx, 0, data("minecraft:music_disc_cat", 1));
+    placeAt(ctx, site, *bp, pos);
+    auto& svc = jb::Service::get();
+    PlacedBackpacks::get().tickPlaced(1000); // reports the placed backpack to the jukebox service
+    std::string reason;
+    ctx.require(svc.play(uctx, &sp, std::nullopt, &reason), "play at the placed backpack: " + reason);
+    co_await ctx.ticks(50); // > the service's 2 s "not reported" timeout
+    ctx.check(svc.playing(bp->uuid(), slot), "keeps playing while placed (reported by the placed ticker)");
+    (void)PlacedBackpacks::get().take(site.region(), pos);
+    ctx.check(!svc.playing(bp->uuid(), slot), "stops when picked up");
 });
 
 ABP_REGISTER_SELFTEST("placed.viewers_closed", [](Context& ctx) -> ll::coro::CoroTask<> {

@@ -45,6 +45,7 @@
 #include "mod/Module.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/jukebox/Jukebox.h"
 
 ABP_REGISTER_CONFIG("placed", abp::placed::PlacedConfig);
 
@@ -283,6 +284,8 @@ void PlacedBackpacks::erase(BlockLocation const& loc) {
     auto it = mEntries.find(loc);
     if (it == mEntries.end()) return;
     if (auto u = mByUuid.find(it->second.uuid); u != mByUuid.end() && u->second == loc) mByUuid.erase(u);
+    // Its jukeboxes stop playing at the block (picked up, broken, dropped).
+    upgrade::jukebox::Service::get().stopAll(it->second.uuid);
     mEntries.erase(it);
 }
 
@@ -538,6 +541,10 @@ void PlacedBackpacks::tickPlaced(int interval) {
     std::vector<BlockLocation> keys;
     keys.reserve(mEntries.size());
     for (auto const& [loc, _] : mEntries) keys.push_back(loc);
+    // Jukebox upgrades play at the block; their service wants a call at least once a second.
+    mJukeboxTicks += interval;
+    bool jukeboxDue = mJukeboxTicks >= 10;
+    if (jukeboxDue) mJukeboxTicks = 0;
     for (auto const& loc : keys) {
         auto it = mEntries.find(loc); // upgrades / drops may change the map while we iterate
         if (it == mEntries.end()) continue;
@@ -563,6 +570,9 @@ void PlacedBackpacks::tickPlaced(int interval) {
         mMismatches.erase(e.loc);
         auto bp = storage.find(e.uuid);
         if (!bp) continue;
+        if (jukeboxDue && upgrade::hasActive(*bp, "jukebox")) {
+            upgrade::jukebox::Service::get().tickPlaced(bp, e.loc.dim, pos.center());
+        }
         upgrade::forEachInstalled(bp, true, [&](upgrade::IUpgrade& u, upgrade::UpgradeContext const& ctx) {
             try {
                 u.onPlacedTick(upgrade::PlacedTickContext{ctx, region, e.loc.dim, e.loc.x, e.loc.y, e.loc.z, e.facing, interval});
