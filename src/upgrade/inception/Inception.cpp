@@ -13,10 +13,10 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
+#include "feature/admin/Admin.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/Storage.h"
-#include "feature/admin/Admin.h"
 #include "mod/Config.h"
 #include "mod/GeneralConfig.h"
 #include "mod/I18n.h"
@@ -99,12 +99,37 @@ Chain chainFor(ui::Menu const* menu, game::Backpack const& parent) {
     return c;
 }
 
+/// Runs `open` once the current chest menu (if any) is gone. Replacing a shown chest menu with
+/// another one directly doesn't reliably show the new screen on a real client (the old screen's
+/// close races the new open), so close first, like the forms do.
+void switchMenu(Player& player, std::function<void(Player&)> open) {
+    auto& mm = ui::MenuManager::get();
+    if (mm.current(player)) mm.closeThen(player, std::move(open));
+    else open(player);
+}
+
+void reopenNow(
+    Player&                                player,
+    Chain const&                           chain,
+    std::shared_ptr<game::Backpack> const& bp,
+    ui::BackpackMenu::View                 view
+);
+
 /// Opens `bp` again the way it was shown (`chain.ancestors.back()` is `bp`).
 void reopen(
     Player&                                player,
     Chain const&                           chain,
     std::shared_ptr<game::Backpack> const& bp,
     ui::BackpackMenu::View                 view = ui::BackpackMenu::View::Storage
+) {
+    switchMenu(player, [chain, bp, view](Player& p) { reopenNow(p, chain, bp, view); });
+}
+
+void reopenNow(
+    Player&                                player,
+    Chain const&                           chain,
+    std::shared_ptr<game::Backpack> const& bp,
+    ui::BackpackMenu::View                 view
 ) {
     if (chain.ancestors.size() <= 1) {
         if (view == ui::BackpackMenu::View::Storage && chain.root && ui::BackpackMenu::openFor(player, *chain.root))
@@ -128,10 +153,14 @@ bool openVia(Player& player, Chain chain, std::shared_ptr<game::Backpack> const&
     // Never open a backpack that is already part of the chain (defensive; cycles are refused on insert).
     if (std::find(chain.ancestors.begin(), chain.ancestors.end(), child->uuid()) != chain.ancestors.end()) return false;
     auto title = storedName(player, parent->inventory().at(index));
-    return ui::MenuManager::get().open(
-        player,
-        std::make_shared<NestedBackpackMenu>(std::move(child), chain.root, std::move(chain.ancestors), std::move(title))
+    auto menu  = std::make_shared<NestedBackpackMenu>(
+        std::move(child),
+        chain.root,
+        std::move(chain.ancestors),
+        std::move(title)
     );
+    switchMenu(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
+    return true;
 }
 } // namespace
 
@@ -426,7 +455,10 @@ public:
                 ui::icon("minecraft:arrow", trFor(player, "abp.menu.back_generic", "Back")),
                 [bp = mCtx.backpackPtr(), from = mFrom](ui::ClickContext const& c) {
                     if (from) reopen(c.player, *from, bp, ui::BackpackMenu::View::Upgrades);
-                    else ui::BackpackMenu::openBackpack(c.player, bp, {}, ui::BackpackMenu::View::Upgrades);
+                    else
+                        switchMenu(c.player, [bp](Player& p) {
+                            ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
+                        });
                 }
             )
         );

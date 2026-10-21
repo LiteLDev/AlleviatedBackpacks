@@ -32,7 +32,7 @@ function Click-Slot($pos) { Click $pos[0] $pos[1] -Relative; Start-Sleep -Millis
 $mark = Get-LogMark
 Click 0.5 0.5 -Relative -Right
 Wait-LogLine 'menu shown: Iron Backpack \(54 slots\)' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 1500
 Click-Slot (Menu-Slot 52)
 Shift-Click (Hotbar 1)
 Shift-Click (Hotbar 3)
@@ -59,14 +59,14 @@ else {
     Click-Slot (Menu-Slot 48)
     Wait-LogLine 'menu shown: Leather Backpack \(54 slots\)' 10 -Since $mark | Out-Null
 }
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 1500
 Save-Screenshot 'nested-open' | Out-Null
 
 # 4. Back button (slot 46) returns to the iron backpack.
 $mark = Get-LogMark
 Click-Slot (Menu-Slot 46)
 Wait-LogLine 'menu shown: Iron Backpack \(54 slots\)' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 1500
 Save-Screenshot 'back-to-outer' | Out-Null
 Close-Screen
 
