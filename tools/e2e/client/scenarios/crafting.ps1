@@ -52,7 +52,13 @@ Click-At (Hotbar-Pos 2); Click-At (Slot-Pos 1)
 Start-Sleep -Milliseconds 600
 Save-Screenshot 'upgrades-installed' | Out-Null
 
-# 2. Settings button of the crafting upgrade -> the crafting tab.
+# 2. Settings button of the crafting upgrade -> the crafting tab. (The upgrades page only adds
+#    the settings buttons when it is rebuilt: go to storage and back first.)
+Click-Menu 45
+Start-Sleep -Milliseconds 500
+Save-Screenshot 'storage-with-crafting-button' | Out-Null
+Click-Menu 52
+Start-Sleep -Milliseconds 600
 Click-Menu 18 'Crafting'
 Save-Screenshot 'crafting-empty' | Out-Null
 
