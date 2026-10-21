@@ -148,7 +148,7 @@ public:
             [this, &svc](Player&) { svc.previous(mCtx); }
         ));
         setSlot(50, button(
-            [](Player& p) { return ui::icon("minecraft:spectral_arrow", trFor(p, "abp.jukebox.next", "Next disc")); },
+            [](Player& p) { return ui::icon("minecraft:arrow", trFor(p, "abp.jukebox.next", "Next disc")); },
             [this, &svc](Player&) { svc.next(mCtx); }
         ));
         setSlot(52, button(
