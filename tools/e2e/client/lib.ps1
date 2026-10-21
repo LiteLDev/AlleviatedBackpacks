@@ -413,7 +413,34 @@ function Start-LogSession {
     $script:LogPos = if (Test-Path $script:LogFile) { (Get-Item $script:LogFile).Length } else { 0L }
 }
 
+# Remote modes: the BDS console log (tools/e2e/server/out/client-host/server.log) is merged into
+# the session log (lines prefixed "[host] "), so scenarios wait for server-side lines the same
+# way in every mode.
+$script:HostLog    = $null
+$script:HostLogPos = 0L
+$script:HostTail   = ''
+
+function Update-HostLog {
+    if (-not $script:HostLog -or -not (Test-Path $script:HostLog)) { return }
+    $fs = [System.IO.File]::Open($script:HostLog, 'Open', 'Read', 'ReadWrite')
+    try {
+        if ($fs.Length -lt $script:HostLogPos) { $script:HostLogPos = 0L }
+        if ($fs.Length -eq $script:HostLogPos) { return }
+        $fs.Position = $script:HostLogPos
+        $buf = New-Object byte[] ($fs.Length - $script:HostLogPos)
+        $n = $fs.Read($buf, 0, $buf.Length)
+        $script:HostLogPos += $n
+    } finally { $fs.Dispose() }
+    $parts = ($script:HostTail + [Text.Encoding]::UTF8.GetString($buf, 0, $n)) -split "`n"
+    $script:HostTail = $parts[-1]
+    for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+        $l = $parts[$i].TrimEnd("`r")
+        if ($l -ne '') { $script:LogLines.Add("[host] $l") }
+    }
+}
+
 function Update-LeviLog {
+    Update-HostLog
     if (-not (Test-Path $script:LogFile)) { return }
     # The game keeps the file open for writing: read with FileShare.ReadWrite.
     $fs = [System.IO.File]::Open($script:LogFile, 'Open', 'Read', 'ReadWrite')
@@ -479,10 +506,14 @@ function Assert-NoErrors {
 # ---------------------------------------------------------------------------------------
 # Menu navigation (calibrated for a 1600x900 client area; coordinates are fractions)
 # ---------------------------------------------------------------------------------------
-function Wait-GameReady([int]$TimeoutSeconds = 180) {
+function Wait-GameReady([int]$TimeoutSeconds = 180, [switch]$WithoutMod) {
     Set-GameWindowSize
-    $hit = Wait-LogLine "$script:ModName enabled|Failed to (load|enable) mod $script:ModName" $TimeoutSeconds
-    if ($hit -notmatch "$script:ModName enabled") { throw "LeviLamina failed to load $($script:ModName): $hit" }
+    if ($WithoutMod) {
+        Wait-LogLine '\[LeviLamina\] \d+ mod\(s\) enabled' $TimeoutSeconds | Out-Null
+    } else {
+        $hit = Wait-LogLine "$script:ModName enabled|Failed to (load|enable) mod $script:ModName" $TimeoutSeconds
+        if ($hit -notmatch "$script:ModName enabled") { throw "LeviLamina failed to load $($script:ModName): $hit" }
+    }
     # The title screen takes a while after mods are enabled.
     Start-Sleep -Seconds 15
     Focus-Game
@@ -517,6 +548,78 @@ function Enter-TestWorld([int]$LoadSeconds = 10, [int]$Attempts = 3) {
         }
     }
 }
+
+# ---------------------------------------------------------------------------------------
+# Remote modes: join a BDS (tools/e2e/server, scenario client-host) instead of the local world
+# ---------------------------------------------------------------------------------------
+$script:ExternalServerName = 'ABP-E2E'
+
+# The external server list of the signed-in user (games\com.mojang\minecraftpe\external_servers.txt).
+function Get-ExternalServersFile {
+    $worlds = Get-WorldsDir
+    if (-not $worlds) { throw "game data not found under $(Get-GameDataDir)" }
+    return Join-Path (Split-Path (Split-Path $worlds)) 'minecraftpe\external_servers.txt'
+}
+
+# Puts our server first in the Servers tab (the file is restored afterwards).
+function Set-ExternalServer([int]$Port) {
+    $file = Get-ExternalServersFile
+    New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+    $script:ExternalServersBackup = if (Test-Path $file) { Get-Content $file -Raw } else { $null }
+    $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Set-Content -Path $file -Value "1:$($script:ExternalServerName):127.0.0.1:$($Port):$stamp" -Encoding UTF8
+    Write-Step "external server $script:ExternalServerName -> 127.0.0.1:$Port ($file)"
+}
+
+function Restore-ExternalServers {
+    if (-not (Get-Variable -Name ExternalServersBackup -Scope Script -ErrorAction SilentlyContinue)) { return }
+    $file = Get-ExternalServersFile
+    if ($null -eq $script:ExternalServersBackup) { Remove-Item $file -ErrorAction SilentlyContinue }
+    else { Set-Content -Path $file -Value $script:ExternalServersBackup -NoNewline -Encoding UTF8 }
+    Remove-Variable -Name ExternalServersBackup -Scope Script
+}
+
+# Play -> Servers -> our server (first additional server) -> Join; waits for the BDS to log the
+# spawn. Coordinates are fractions of the 1600x900 client area (calibrated on 1.26.51).
+function Enter-RemoteServer([int]$Attempts = 3) {
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        Focus-Game
+        $mark = Get-LogMark
+        Click 0.498 0.474 -Relative      # Play
+        Start-Sleep -Seconds 4
+        Save-Screenshot "join-1-play-$attempt" | Out-Null
+        Click $script:ServersTab[0] $script:ServersTab[1] -Relative
+        Start-Sleep -Seconds 3
+        Save-Screenshot "join-2-servers-$attempt" | Out-Null
+        Click $script:ServerEntry[0] $script:ServerEntry[1] -Relative
+        Start-Sleep -Seconds 3
+        Save-Screenshot "join-3-entry-$attempt" | Out-Null
+        Click $script:JoinButton[0] $script:JoinButton[1] -Relative
+        try {
+            Wait-LogLine '\[host\].*Player Spawned' 90 -Since $mark | Out-Null
+            Start-Sleep -Seconds 4
+            Focus-Game
+            Write-Step "joined the remote server"
+            return
+        } catch {
+            if ($attempt -eq $Attempts) { throw }
+            Write-Step "remote join failed (attempt $attempt): $_; retrying"
+            Save-Screenshot "join-failed-$attempt" | Out-Null
+            Press-Key ESC; Start-Sleep -Seconds 2; Press-Key ESC; Start-Sleep -Seconds 2
+        }
+    }
+}
+$script:ServersTab  = @(0.62, 0.155)
+$script:ServerEntry = @(0.30, 0.55)
+$script:JoinButton  = @(0.30, 0.55)
+
+# Runs a console command on the remote host (remote modes).
+function Send-HostConsole([string]$Command) {
+    if (-not $script:HostDir) { throw 'Send-HostConsole needs a remote mode' }
+    $name = 'cmd-{0:D6}.txt' -f (++$script:HostCmd)
+    Set-Content -Path (Join-Path $script:HostDir $name) -Value $Command -Encoding UTF8
+}
+$script:HostCmd = 0
 
 # Open the survival inventory (E) and wait for it to render.
 function Open-Inventory { Focus-Game; Press-Key E; Start-Sleep -Milliseconds 1200 }

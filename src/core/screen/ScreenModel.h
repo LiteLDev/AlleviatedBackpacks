@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "nlohmann/json.hpp"
@@ -15,6 +16,9 @@ namespace abp::core::screen {
 /// Version of the companion protocol (net packets and the models below). Bump it when a
 /// packet or model changes incompatibly; peers with a different major version ignore each other.
 inline constexpr int kProtocolVersion = 1;
+
+/// Item id the server sends for decoration slots of a menu (gray panes): drawn as nothing.
+inline constexpr std::string_view kFillerId = "abp:filler";
 
 /// One upgrade slot as the native backpack screen shows it.
 struct UpgradeView {
@@ -38,6 +42,12 @@ struct UpgradeView {
 /// Everything the client needs to draw Sophisticated Backpacks' backpack screen. Sent once when
 /// the screen opens and then patched (`makePatch` / `applyPatch`).
 struct BackpackScreenModel {
+    /// "backpack": Sophisticated Backpacks' storage screen. "menu": any other server menu (filter
+    /// editors, crafting, slot pickers, ...) until it has its own native screen: `menuRows` x 9
+    /// `menuSlots` shown in SB style above the player inventory, clicks go to the menu's slots.
+    std::string   kind        = "backpack";
+    int           menuRows    = 0;
+    std::vector<ItemStackData> menuSlots;
     std::uint32_t session     = 0;  ///< server-side id of this open screen
     int           containerId = -1; ///< id of the (hidden) container screen underneath
     std::string   uuid;

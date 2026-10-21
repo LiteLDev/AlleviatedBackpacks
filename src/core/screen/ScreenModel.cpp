@@ -108,6 +108,9 @@ UpgradeView UpgradeView::fromJson(json const& j) {
 
 json BackpackScreenModel::toJson() const {
     return json{
+        {"kind", kind},
+        {"menuRows", menuRows},
+        {"menuSlots", itemsJson(menuSlots)},
         {"session", session},
         {"cid", containerId},
         {"uuid", uuid},
@@ -134,6 +137,9 @@ json BackpackScreenModel::toJson() const {
 BackpackScreenModel BackpackScreenModel::fromJson(json const& j) {
     BackpackScreenModel m;
     if (!j.is_object()) return m;
+    m.kind         = value<std::string>(j, "kind", "backpack");
+    m.menuRows     = std::max(0, value<int>(j, "menuRows", 0));
+    m.menuSlots    = itemsFrom(j.value("menuSlots", json::array()));
     m.session      = value<std::uint32_t>(j, "session", 0);
     m.containerId  = value<int>(j, "cid", -1);
     m.uuid         = value<std::string>(j, "uuid", {});
@@ -178,6 +184,17 @@ json makePatch(BackpackScreenModel const& a, BackpackScreenModel const& b) {
         }
         if (!slots.empty()) p["slotsDiff"] = std::move(slots);
         if (!lims.empty()) p["limDiff"] = std::move(lims);
+    }
+    if (a.kind != b.kind || a.menuRows != b.menuRows || a.menuSlots.size() != b.menuSlots.size()) {
+        p["kind"]      = b.kind;
+        p["menuRows"]  = b.menuRows;
+        p["menuSlots"] = itemsJson(b.menuSlots);
+    } else {
+        json ms = json::object();
+        for (std::size_t i = 0; i < b.menuSlots.size(); ++i) {
+            if (!sameItems(a.menuSlots[i], b.menuSlots[i])) ms[std::to_string(i)] = itemJson(b.menuSlots[i]);
+        }
+        if (!ms.empty()) p["menuSlotsDiff"] = std::move(ms);
     }
     if (a.upgrades != b.upgrades) p["upgrades"] = upgradesJson(b.upgrades);
     {
@@ -224,6 +241,16 @@ bool applyPatch(BackpackScreenModel& m, json const& p) {
                 auto i = static_cast<std::size_t>(std::stoul(key));
                 if (i >= m.slotLimits.size()) return false;
                 m.slotLimits[i] = lim.get<int>();
+            }
+        }
+        if (auto it = p.find("kind"); it != p.end()) m.kind = it->get<std::string>();
+        if (auto it = p.find("menuRows"); it != p.end()) m.menuRows = it->get<int>();
+        if (auto it = p.find("menuSlots"); it != p.end()) m.menuSlots = itemsFrom(*it);
+        if (auto it = p.find("menuSlotsDiff"); it != p.end()) {
+            for (auto const& [key, item] : it->items()) {
+                auto i = static_cast<std::size_t>(std::stoul(key));
+                if (i >= m.menuSlots.size()) return false;
+                m.menuSlots[i] = itemFrom(item);
             }
         }
         if (auto it = p.find("upgrades"); it != p.end()) m.upgrades = upgradesFrom(*it);

@@ -17,6 +17,7 @@
 //   {"action":"double","area":"storage|inventory","index":n}        collect matching items on the cursor
 //   {"action":"drop","area":"storage|inventory","index":n,"all":b}  Q / Ctrl+Q over a slot
 //   {"action":"hotbar","area":"storage|inventory","index":n,"hotbar":0..8}  number keys
+//   {"action":"dropCursor","all":b}                           click outside the screen with an item
 //   {"action":"sort"} | {"action":"sortBy"} | {"action":"transfer","to":"storage|inventory","matching":b}
 //   {"action":"toggleUpgrade","slot":n} | {"action":"settings"} | {"action":"upgradeSettings","slot":n}
 //   {"action":"tab","slot":n,"data":{..}}  (upgrade native tab -> `ABP_REGISTER_TAB_ACTION`)

@@ -18,6 +18,9 @@ reference only). Textures are original pixel art drawn by `tools/textures/*.ps1`
 | `src/ui/menu/` | Fake-chest GUI framework: `Slot.h`, `Menu.h`, `MenuManager.h`, `BackpackMenu.h` (main GUI + button/setting registries), `FilterMenu.h`. |
 | `src/selftest/` | `SelfTest.h` (in-game test framework) + `FoundationTests.cpp`. |
 | `src/pack/` | `PackDeployer` (BDS: puts the resource pack on the world). |
+| `src/core/screen/` | Pure SB screen logic: `StorageLayout` (StorageScreenBase geometry), `SearchFilter`, `CountFormat`, `ScreenModel` (screen / contents / render-info models + patches). |
+| `src/net/` | Companion protocol (both builds): `Packets.h`, `Companion` (handshake, `hasCompanion`, presentation gate), `NativeScreens` (server side of native screens, Tab data/actions, settings screen), `Contents`, `KeyActions`. |
+| `src/client/` | Client companion (client build only, files wrapped in `#ifdef ABP_CLIENT`): `ui/` (Painter, UiRoot, widgets, `screen/BackpackScreen`, Tab API `screen/Tabs.h`), `input/` (router, key bindings), `net/ClientNet`, `tooltip/ContentsTooltip`, `render/RenderHooks`. |
 | `src/mod/` | Entry (`Main.cpp`), `Log.h`, `Module.h`, `Config.h`, `GeneralConfig.h`, `I18n.h`, `Commands.h`, `Registry.h`. |
 | `assets/lang/<locale>/<unit>.json` | Mod (server-side) translations, merged into `lang/<locale>.json`. |
 | `assets/pack/bp/` | Behavior pack: `items/*.json`, `recipes/*.json`, `manifest.json`. |
@@ -93,6 +96,29 @@ Registrations live in .cpp files linked directly into the DLL, so they are never
   `ctx.backpackItem(bp)`, `ctx.give(player, item, slot)`, `ctx.installUpgrade(bp, "id")`,
   `co_await ctx.ticks(n)`, `ctx.check/require/fail/info`. Menus can be driven without a client with
   `MenuManager::simulate(player, {ActionType, src, dst, amount})` + `forceShown` + `shownItem`.
+
+## Client companion (native SB UI) — required
+
+Players must run the client build: it is the **only** backpack UI. The server never shows a fake
+chest to a companion (`MenuManager` "virtual" presentation, gate in `net/NativeScreens.cpp`) and
+refuses menus to players without the client mod (localized "needs its client mod" message);
+simulated players (selftests) still get chest sessions.
+
+- Every `ui::Menu` opened for a companion becomes a native screen: `BackpackMenu` -> SB's storage
+  screen (`kind: "backpack"`), anything else -> a generic SB-style slot screen (`kind: "menu"`)
+  until it gets its own native screen. Item actions come back as `ScreenActionPacket`s and run
+  through `MenuManager::simulate/simulateOn` (same rules as chest clicks). Never trust client data.
+- **Upgrade tabs**: `ABP_REGISTER_NATIVE_TAB("<upgrade id>", factory)` (client, `client/ui/screen/Tabs.h`)
+  + server data `ABP_REGISTER_TAB_DATA` / actions `ABP_REGISTER_TAB_ACTION` (`net/NativeScreens.h`).
+  Without a native tab, an upgrade's `createSettingsMenu()` is shown as a slot grid inside its tab.
+- Widgets matching SC controls: `client/ui/widgets/Widgets.h` (Button 18/12, ToggleButton,
+  UpgradeSwitch, ProgressBar, SlotGrid, ScrollList, ItemPreview, TextField, Label); SB look and
+  icons: `widgets/SbStyle.h` (procedural original pixel art). Layout values: `core/screen/StorageLayout.h`.
+- Contents tooltip lines from other units: `ABP_REGISTER_CONTENTS_LINES`. Render hooks
+  (`client/render/RenderHooks.h`): icon hooks, carrier hooks, placed hooks.
+- Client threads: render/network/posted input on the client thread; raw input on the window
+  thread (`client/input/InputRouter.h`). Client-only .cpp files start with `#ifdef ABP_CLIENT`.
+- E2E: `tools/e2e/client/run.ps1 -Mode local|remote-mod|remote-vanilla` (see tools/e2e/README.md).
 
 ## Build, test, run
 

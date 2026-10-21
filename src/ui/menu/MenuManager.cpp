@@ -173,6 +173,7 @@ struct MenuManager::Session {
     Phase                                      phase = Phase::AwaitClose;
     int                                        wait  = 0;
     bool                                       clientOpened = false; ///< ContainerOpen sent (not just forceShown)
+    bool                                       virtualScreen = false; ///< Presentation::Virtual: no chest, no packets
     std::int64_t                               openedAt = 0; ///< tick of the last ContainerOpen
     int                                        retries  = 0; ///< ContainerOpens re-sent after a rejection
     bool                                       needFull = true;
@@ -211,6 +212,9 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
         return false;
     }
 
+    auto presentation = mGate ? mGate(player, *menu) : Presentation::Chest;
+    if (presentation == Presentation::Refuse) return false;
+
     auto key = keyOf(player);
     // Replacing a menu: close it first (a shown one gets a server-initiated ContainerClose that
     // the client answers; see `handleClosePacket`).
@@ -220,6 +224,23 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
     s->key  = key;
     s->menu = std::move(menu);
     s->dim  = static_cast<int>(player.getDimensionId());
+    if (presentation == Presentation::Virtual) {
+        // No fake chest, no container screen: shown on the next tick through the observers.
+        s->virtualScreen = true;
+        s->id            = mNextVirtualId++;
+        if (mNextVirtualId > 1'000'000'000) mNextVirtualId = 1000;
+        s->phase = Session::Phase::Placed;
+        s->wait  = 1;
+        auto& session  = *s;
+        mSessions[key] = std::move(s);
+        session.menu->invalidate();
+        try {
+            session.menu->onOpen(player);
+        } catch (std::exception const& e) {
+            log().error("menu onOpen failed: {}", e.what());
+        }
+        return true;
+    }
     // Next container id, the way vanilla counts (1..99), written back so vanilla won't reuse it.
     int next = static_cast<int>(static_cast<schar>(sp->mContainerCounter)) + 1;
     if (next < static_cast<int>(ContainerID::First) || next >= static_cast<int>(ContainerID::Last)) {
@@ -386,7 +407,7 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose) {
     mSessions.erase(it);
     if (player) {
         bool awaitAnswer = false;
-        if (sendClose && s->shown()) {
+        if (sendClose && s->shown() && !s->virtualScreen) {
             auto  pkt                = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
             auto& c                  = static_cast<ContainerClosePacket&>(*pkt);
             c.mContainerId           = static_cast<ContainerID>(s->id);
@@ -475,6 +496,11 @@ void MenuManager::removeObserver(int id) {
     std::erase_if(mObservers, [id](auto const& e) { return e.first == id; });
 }
 
+bool MenuManager::isVirtual(Player const& player) const {
+    auto it = mSessions.find(keyOf(player));
+    return it != mSessions.end() && it->second->virtualScreen;
+}
+
 int MenuManager::containerIdOf(Player const& player) const {
     auto it = mSessions.find(keyOf(player));
     return it == mSessions.end() ? -1 : it->second->id;
@@ -522,6 +548,7 @@ void MenuManager::sync(Player& player, Session& s, bool full) {
         }
         menuDebugLog("sync id={}{}", s.id, list);
     }
+    if (s.virtualScreen) return; // shown by an observer: no container on the client
     if (sendAll || changed.size() > 8) {
         InventoryContentPacket pkt{InventoryContentPacketPayload{
             static_cast<ContainerID>(s.id),
@@ -549,8 +576,9 @@ ItemStack MenuManager::shownItem(Player const& player, int slot) const {
 void MenuManager::forceShown(Player& player) {
     auto it = mSessions.find(keyOf(player));
     if (it == mSessions.end() || it->second->shown()) return;
-    if (it->second->phase == Session::Phase::AwaitClose) place(player, *it->second);
+    if (it->second->phase == Session::Phase::AwaitClose && !it->second->virtualScreen) place(player, *it->second);
     it->second->phase = Session::Phase::Shown;
+    if (it->second->virtualScreen) it->second->menu->ensureBuilt(player);
     notifyBeforeShow(player, *it->second);
     sync(player, *it->second, true);
 }
@@ -627,6 +655,13 @@ void MenuManager::tick() {
         if (s.phase == Session::Phase::Placed) {
             if (--s.wait > 0) continue;
             s.phase = Session::Phase::Shown;
+            if (s.virtualScreen) {
+                s.menu->ensureBuilt(*player);
+                notifyBeforeShow(*player, s);
+                // notifyBeforeShow must not close/replace menus; look the session up anyway.
+                if (auto again = mSessions.find(key); again != mSessions.end() && again->second.get() == &s) sync(*player, s, true);
+                continue;
+            }
             notifyBeforeShow(*player, s);
             auto  pkt         = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerOpen);
             auto& o           = static_cast<ContainerOpenPacket&>(*pkt);
@@ -1072,7 +1107,7 @@ void MenuManager::resyncPlayer(Player& player) {
 
 bool MenuManager::handleRequestPacket(Player& player, void const* raw) {
     auto it = mSessions.find(keyOf(player));
-    if (it == mSessions.end() || !it->second->shown()) return false;
+    if (it == mSessions.end() || !it->second->shown() || it->second->virtualScreen) return false;
     auto& packet  = *static_cast<ItemStackRequestPacket const*>(raw);
     auto& session = *it->second;
     auto  menu    = session.menu; // keep alive even if a callback replaces it
@@ -1151,7 +1186,7 @@ bool MenuManager::handleRequestPacket(Player& player, void const* raw) {
 bool MenuManager::handleClosePacket(Player& player, int containerId, int containerType) {
     auto key  = keyOf(player);
     auto it   = mSessions.find(key);
-    bool ours = it != mSessions.end() && it->second->id == containerId && it->second->shown();
+    bool ours = it != mSessions.end() && it->second->id == containerId && it->second->shown() && !it->second->virtualScreen;
     // Confirms a client's close. The client waits for this before it opens any other screen
     // (another chest, but also chat), so every close of one of our screens is answered: the
     // player's own close, and the close the client sends back after a server-initiated one.
@@ -1182,7 +1217,7 @@ bool MenuManager::handleClosePacket(Player& player, int containerId, int contain
     }
     // The client rejected our ContainerOpen because another screen was still up (chat after a
     // command): vanilla answers this close as usual; we send the open again a bit later.
-    if (containerId == -1 && it != mSessions.end() && it->second->shown() && it->second->clientOpened
+    if (containerId == -1 && it != mSessions.end() && it->second->shown() && it->second->clientOpened && !it->second->virtualScreen
         && mTick - it->second->openedAt <= kRejectWindow && it->second->retries < kMaxOpenRetries) {
         auto& s = *it->second;
         menuDebugLog("client rejected ContainerOpen id={}; opening again in {} ticks", s.id, kRetryDelay);

@@ -95,6 +95,20 @@ public:
     /// Container id of the player's open menu (-1 if none).
     [[nodiscard]] int containerIdOf(Player const& player) const;
 
+    // ---- presentation (additive hook: the client companion) ----------------------------------
+    /// How a menu is shown to a player, decided when it opens.
+    enum class Presentation {
+        Chest,   ///< fake chest block + container screen (default; selftests' simulated players)
+        Virtual, ///< no fake chest and no container screen: an observer (the client companion's
+                 ///< native screens) shows the menu; actions come in through `simulate*`
+        Refuse,  ///< the player can't see menus: `open` returns false (the gate tells them why)
+    };
+    using PresentationGate = std::function<Presentation(Player&, Menu&)>;
+    /// Installs the gate (nullptr: every menu is a chest).
+    void setPresentationGate(PresentationGate gate) { mGate = std::move(gate); }
+    /// The player's open menu is virtual (shown by an observer, no container screen).
+    [[nodiscard]] bool isVirtual(Player const& player) const;
+
     // ---- observers (additive hook: native renderers such as the client companion) ------------
     struct Observer {
         /// Right before the client is told to open `menu` (`containerId` = the screen's id). Also
@@ -151,6 +165,8 @@ private:
     std::vector<Delayed>                                       mDelayed;
     bool                                                       mBusy = false;
     std::vector<std::pair<int, Observer>>                      mObservers;
+    PresentationGate                                           mGate;
+    int                                                        mNextVirtualId = 1000;
     int                                                        mNextObserver = 1;
 
     void notifyBeforeShow(Player& player, Session& s);

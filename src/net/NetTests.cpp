@@ -30,6 +30,7 @@
 #include "ui/menu/MenuManager.h"
 #include "upgrade/IUpgrade.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/deposit/TestSupport.h"
 
 namespace abp::net {
 namespace {
@@ -313,6 +314,16 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
                 break;
             }
         }
+        // The deposit upgrade puts cobblestone into containers (C on a chest).
+        for (int s = 0; s < static_cast<int>(bp->data().upgrades.size()); ++s) {
+            auto const& st = bp->data().upgrades[static_cast<std::size_t>(s)];
+            if (auto* type = st.empty() ? nullptr : upgrade::upgradeFor(st.item); type && type->info().id == "deposit") {
+                upgrade::transfer::test::setFilter(upgrade::UpgradeContext(bp, s, &player), false, {"minecraft:cobblestone"}, core::FilterMode::Allow);
+            }
+        }
+        // Dyed (blue / yellow) so the client's render-hook tint is visible on this backpack.
+        bp->data().mainColor   = 0xFF3C44AA;
+        bp->data().accentColor = 0xFFFED83D;
         bp->markDirty();
         game::Storage::get().save(*bp, true);
         auto stack = game::makeBackpackItem(core::Tier::Netherite, bp->uuid());

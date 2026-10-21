@@ -5,8 +5,12 @@ mod. It brings the gameplay of the Java mod *Sophisticated Backpacks* to Bedrock
 dedicated servers (BDS) and in single-player / local worlds on the client.
 
 - Minecraft **1.26.51**, LeviLamina **26.51.7**, Windows x64.
-- Players on a server need **no client mod**: the server sends the resource pack, and the backpack
-  GUI is a regular chest screen driven by the server.
+- Players need the **client mod** (the `client` build, [download](https://github.com/LiteLDev/AlleviatedBackpacks/releases)):
+  it draws Sophisticated Backpacks' own screens (storage with scroll bar and search, upgrade column
+  with switches, upgrade tabs, settings screen), adds the key bindings and the Shift contents
+  tooltip. Every item move is still done by the server. A player without the client mod can join
+  and carry backpacks (upgrades keep working), but opening a backpack screen shows
+  "AlleviatedBackpacks needs its client mod" with the download link.
 
 ## Features
 
@@ -21,9 +25,17 @@ dedicated servers (BDS) and in single-player / local worlds on the client.
   | Diamond | 108 | 5 |
   | Netherite | 120 | 7 |
 
-- **Right-click a backpack to open it.** The GUI shows 45 slots per page with page buttons, an
-  upgrades page and a settings button. Large stacks (from stack upgrades) show their real count
-  in the item tooltip.
+- **Right-click a backpack (or press B) to open it**: Sophisticated Backpacks' screen — 9 or 12
+  columns, a scroll bar when the rows don't fit, the upgrade column with on/off switches, upgrade
+  tabs on the right, the search box (`@mod`, `#tooltip`, name), sort / sort-by and transfer buttons,
+  abbreviated counts for large stacks, memory and no-sort slots. The settings tab opens the
+  backpack settings screen (memory, no-sort, context and main options).
+- **Key bindings** (Settings > Keyboard & Mouse): Open Backpack `B` (also over a backpack in any
+  inventory, and over a nested backpack), Inventory Interaction `C` (Deposit / Restock on the
+  container you look at), Tool Swap (unbound), Toggle Upgrade 1/2 `Alt+Z` / `Alt+X` (3-5 unbound),
+  Sort (middle mouse), Transfer to Storage / Inventory `[` / `]` (Shift: everything).
+- **Shift over a backpack item** shows its contents: stack multiplier, tanks, upgrades with their
+  on/off state and the items, most first.
 - **Contents belong to the backpack, not to the player**: drop it, give it away, put it in a chest —
   the items stay inside. Data is stored in the world itself, so it moves with the world folder.
 - **Upgrades** go into the backpack's upgrade slots and can be switched on and off individually;
@@ -57,7 +69,7 @@ Commands (alias `/abp`):
    `worlds/<level-name>/world_resource_packs.json` and asks clients to download it. The behavior pack
    (items and recipes) is loaded automatically.
 
-### Client / single player (LeviLauncher)
+### Client (LeviLauncher) — required to use backpacks, also for single player
 
 1. Install the 1.26.51 game version with LeviLamina in LeviLauncher.
 2. Copy the `client` build folder `AlleviatedBackpacks/` into

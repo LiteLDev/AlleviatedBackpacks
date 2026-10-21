@@ -84,6 +84,7 @@ bool interact(Player& player) {
         auto result = upgrade::transfer::interact(bp, player, *container, static_cast<int>(hit.mFacing));
         if (!result.handled) continue;
         if (!result.message.empty()) upgrade::transfer::sendTip(player, result.message);
+        log().info("key action: {} ran inventory interaction ({} stacks deposited, {} restocked)", player.getRealName(), result.deposited.stacks, result.restocked.stacks);
         return true;
     }
     return false;
@@ -131,6 +132,7 @@ bool toggleUpgrade(Player& player, int slot) {
     bool on = !st.enabled;
     upgrade::setEnabled(bp, slot, on);
     auto name = upgrade::displayName(*type, &player);
+    log().info("key action: {} switched upgrade {} ({}) {}", player.getRealName(), slot + 1, type->info().id, on ? "on" : "off");
     upgrade::transfer::sendTip(
         player,
         on ? trFor(player, "abp.companion.status.upgrade_on", "{} Switched On", name)
@@ -145,6 +147,7 @@ bool handleKeyAction(Player& player, nlohmann::json const& body) {
     auto action = body.value("action", std::string{});
     if (action == "open") {
         if (ui::MenuManager::get().current(player)) return false;
+        log().info("key action: {} opens the carried backpack", player.getRealName());
         return ui::BackpackMenu::openCarried(player);
     }
     if (action == "openAt") return openAt(player, body);

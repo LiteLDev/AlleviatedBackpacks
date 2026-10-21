@@ -1,6 +1,7 @@
 #include "net/NativeScreens.h"
 
 #include <algorithm>
+#include <chrono>
 #include <optional>
 #include <unordered_map>
 
@@ -9,6 +10,7 @@
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/Level.h"
 
+#include "core/Appearance.h"
 #include "core/Sorting.h"
 #include "feature/gui/Gui.h"
 #include "game/Backpack.h"
@@ -77,14 +79,45 @@ void setError(NativeSession& s, std::string message, std::vector<int> upgradeSlo
     s.dirty             = true;
 }
 
+void forgetTabMenus(Player const& p);
+
+/// A filler / decoration icon (gray glass pane named " "): the native screen draws nothing there.
+bool isFiller(ItemStack const& s) {
+    if (s.isNull() || s.getTypeName() != "minecraft:gray_stained_glass_pane") return false;
+    auto name = s.getCustomName();
+    return name.empty() || name == " " || name == "\xC2\xA7r " || name == "\xC2\xA7r";
+}
+
+/// Model of a menu without its own native screen ("menu" kind).
+BackpackScreenModel buildMenuModel(Player& player, ui::Menu& menu) {
+    BackpackScreenModel m;
+    m.kind     = "menu";
+    m.title    = menu.title();
+    m.menuRows = static_cast<int>(menu.rows());
+    menu.ensureBuilt(player);
+    for (int i = 0; i < menu.size(); ++i) {
+        auto* slot = menu.slot(i);
+        auto  shown = slot ? slot->display(player) : ItemStack{};
+        if (isFiller(shown)) m.menuSlots.push_back(core::ItemStackData::of(std::string(core::screen::kFillerId), 1));
+        else m.menuSlots.push_back(game::ItemConv::toData(shown));
+    }
+    m.lockedSlot = menu.lockedInventorySlot.value_or(-1);
+    return m;
+}
+
+BackpackScreenModel buildFor(Player& player, ui::Menu& menu) {
+    if (auto* bm = backpackMenuOf(menu)) return buildScreenModel(player, *bm);
+    return buildMenuModel(player, menu);
+}
+
 /// Sends the patch from the last sent model to the current one (if anything changed).
-void pushUpdate(Player& player, ui::BackpackMenu& menu, NativeSession& s, bool force = false) {
-    auto model        = buildScreenModel(player, menu);
+void pushUpdate(Player& player, ui::Menu& menu, NativeSession& s, bool force = false) {
+    auto model        = buildFor(player, menu);
     model.session     = s.id;
     model.containerId = s.containerId;
     applyError(model, s);
     auto patch = core::screen::makePatch(s.sent, model);
-    s.revision   = menu.backpack()->revision();
+    if (auto* bm = backpackMenuOf(menu)) s.revision = bm->backpack()->revision();
     s.sinceBuild = 0;
     s.dirty      = false;
     if (patch.empty() && !force) return;
@@ -93,16 +126,15 @@ void pushUpdate(Player& player, ui::BackpackMenu& menu, NativeSession& s, bool f
 }
 
 void onBeforeShow(Player& player, ui::Menu& menu, int containerId) {
-    auto* bm = backpackMenuOf(menu);
-    if (!bm || uiModeFor(player) != UiMode::Native) return;
+    if (!MenuManager::get().isVirtual(player)) return;
     NativeSession s;
-    s.id          = gNextSession++;
-    s.menu        = &menu;
-    s.containerId = containerId;
-    s.sent        = buildScreenModel(player, *bm);
+    s.id               = gNextSession++;
+    s.menu             = &menu;
+    s.containerId      = containerId;
+    s.sent             = buildFor(player, menu);
     s.sent.session     = s.id;
     s.sent.containerId = containerId;
-    s.revision         = bm->backpack()->revision();
+    if (auto* bm = backpackMenuOf(menu)) s.revision = bm->backpack()->revision();
     send(player, ScreenOpenPacket{s.sent.toJson()});
     gSessions[keyOf(player)] = std::move(s);
 }
@@ -110,24 +142,28 @@ void onBeforeShow(Player& player, ui::Menu& menu, int containerId) {
 void onAfterTick(Player& player, ui::Menu& menu) {
     auto it = gSessions.find(keyOf(player));
     if (it == gSessions.end() || it->second.menu != &menu) return;
-    auto* bm = backpackMenuOf(menu);
-    if (!bm) return;
     auto& s = it->second;
     if (s.errorTicks > 0 && --s.errorTicks == 0) setError(s, {}, {});
-    bool changed = bm->backpack()->revision() != s.revision || s.dirty;
-    if (!changed && ++s.sinceBuild < kRebuildEvery) return;
-    pushUpdate(player, *bm, s);
+    if (auto* bm = backpackMenuOf(menu)) {
+        bool changed = bm->backpack()->revision() != s.revision || s.dirty;
+        if (!changed && ++s.sinceBuild < kRebuildEvery) return;
+    } else if (!s.dirty && !menu.needsBuild() && ++s.sinceBuild < 2) {
+        return; // generic menus: diff every 2 ticks like the chest sync
+    }
+    pushUpdate(player, menu, s);
 }
 
 void onClosed(Player* player, ui::Menu& menu) {
     for (auto it = gSessions.begin(); it != gSessions.end(); ++it) {
         if (it->second.menu != &menu) continue;
-        if (player) send(*player, ScreenClosePacket{nlohmann::json{{"session", it->second.id}}});
+        if (player) {
+            send(*player, ScreenClosePacket{nlohmann::json{{"session", it->second.id}}});
+            forgetTabMenus(*player);
+        }
         gSessions.erase(it);
         return;
     }
 }
-
 // ---- clicks ---------------------------------------------------------------------------------------
 
 enum class Area { Storage, Inventory, Upgrade, Invalid };
@@ -240,7 +276,8 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
     return mm.simulateOn(p, act(ActionType::Swap, here, cur, 0), slot);
 }
 
-bool clickInventory(Player& p, ui::BackpackMenu& menu, int index, int button, bool shift) {
+bool clickInventory(Player& p, ui::Menu& base, int index, int button, bool shift) {
+    (void)base;
     if (index < 0 || index >= kInventory) return false;
     auto&     mm     = MenuManager::get();
     ItemStack item   = p.getInventory().getItem(index);
@@ -249,10 +286,8 @@ bool clickInventory(Player& p, ui::BackpackMenu& menu, int index, int button, bo
     MenuManager::SlotAddress cur{Where::Cursor, 0};
     if (shift) {
         if (item.isNull()) return false;
-        // Into the backpack (menu quick move: filters, memory slots, quick-move handlers).
-        auto slot = menu.storageSlot(0);
-        if (!slot) return false;
-        return mm.simulateOn(p, act(ActionType::Place, here, {Where::Menu, 0}, item.mCount), slot);
+        // Into the menu (quick move: backpack filters, memory slots, quick-move handlers).
+        return mm.simulate(p, act(ActionType::Place, here, {Where::Menu, 0}, item.mCount));
     }
     if (cursor.isNull()) {
         if (item.isNull()) return false;
@@ -292,16 +327,261 @@ bool collectToCursor(Player& p, ui::BackpackMenu& menu) {
     return any;
 }
 
-ui::BackpackMenu* currentMenu(Player& p, std::uint32_t session, NativeSession*& out) {
+ui::Menu* currentMenu(Player& p, std::uint32_t session, NativeSession*& out) {
     auto it = gSessions.find(keyOf(p));
     if (it == gSessions.end() || it->second.id != session || session == 0) return nullptr;
     auto menu = MenuManager::get().current(p);
     if (!menu || menu.get() != it->second.menu) return nullptr;
     out = &it->second;
-    return backpackMenuOf(*menu);
+    return menu.get();
+}
+
+/// A click on a slot of a generic menu (filter editors, crafting grids, buttons, ...).
+bool clickGenericSlot(Player& p, ui::Menu& menu, int index, int button, bool shift) {
+    auto& mm   = MenuManager::get();
+    auto* slot = menu.slot(index);
+    if (!slot) return false;
+    ItemStack shown  = slot->display(p);
+    ItemStack cursor = cursorOf(p);
+    MenuManager::SlotAddress here{Where::Menu, index};
+    MenuManager::SlotAddress cur{Where::Cursor, 0};
+    if (shift) {
+        auto data   = game::ItemConv::toData(shown);
+        int  target = data.empty() ? 9 : quickMoveTarget(p, data, menu.lockedInventorySlot);
+        if (target < 0) return false;
+        return mm.simulate(p, act(ActionType::Take, here, {Where::Inventory, target}, std::max(1, static_cast<int>(shown.mCount))));
+    }
+    if (cursor.isNull()) {
+        int have   = shown.isNull() ? 1 : static_cast<int>(shown.mCount);
+        int amount = button == 1 ? (have + 1) / 2 : have;
+        return mm.simulate(p, act(ActionType::Take, here, cur, amount));
+    }
+    if (shown.isNull() || shown.matchesItem(cursor)) {
+        return mm.simulate(p, act(ActionType::Place, cur, here, button == 1 ? 1 : static_cast<int>(cursor.mCount)));
+    }
+    return mm.simulate(p, act(ActionType::Swap, here, cur, 0));
 }
 
 std::string translatedUpgradeName(Player& p, upgrade::IUpgrade const& type) { return upgrade::displayName(type, &p); }
+
+// ---- native settings screen (SC SettingsScreen: main / no sort / memory tabs) ----------------------
+
+/// SC MainSettingsContainer context: edits go to the player's global settings or this backpack.
+std::unordered_map<std::int64_t, std::string> gSettingsContext;
+
+std::string contextOf(Player const& p) {
+    auto it = gSettingsContext.find(keyOf(p));
+    return it == gSettingsContext.end() ? std::string("backpack") : it->second;
+}
+
+/// Main settings keys as SB names them -> our option keys and defaults.
+struct MainOption {
+    char const* name;
+    char const* key;
+    bool        def;
+};
+constexpr MainOption kMainOptions[] = {
+    {"shiftClickIntoOpenTab", feature::gui::kOpenTabFirst, true},
+    {"keepTabOpen", "keepTabOpen", true},
+    {"keepSearchPhrase", "keepSearchPhrase", false},
+};
+
+bool optionValue(Player& p, game::Backpack const& bp, MainOption const& o, std::string const& context) {
+    auto const bpj = feature::gui::backpackOverrides(bp);
+    auto const pj  = feature::gui::playerOverrides(p);
+    if (context == "backpack" && bpj.contains(o.key) && bpj[o.key].is_boolean()) return bpj[o.key].get<bool>();
+    if (pj.contains(o.key) && pj[o.key].is_boolean()) return pj[o.key].get<bool>();
+    if (std::string_view(o.key) == feature::gui::kOpenTabFirst) return feature::gui::effective(&p, bp).openTabFirst;
+    return o.def;
+}
+
+constexpr char const* kNoSortColorKey     = "noSortColor";
+constexpr char const* kMemoryMatchNbtKey  = "memoryMatchNbt";
+constexpr int         kDefaultNoSortColor = static_cast<int>(core::DyeColor::Lime);
+
+int noSortDye(game::Backpack const& bp) {
+    auto j = feature::gui::backpackOverrides(bp);
+    if (j.contains(kNoSortColorKey) && j[kNoSortColorKey].is_number_integer()) {
+        int v = j[kNoSortColorKey].get<int>();
+        if (v >= 0 && v < static_cast<int>(core::kDyes.size())) return v;
+    }
+    return kDefaultNoSortColor;
+}
+
+nlohmann::json settingsJson(Player& p, game::Backpack& bp) {
+    auto           context = contextOf(p);
+    nlohmann::json j{{"context", context}};
+    for (auto const& o : kMainOptions) j[o.name] = optionValue(p, bp, o, context);
+    j["noSortColor"]    = noSortDye(bp);
+    auto bpj            = feature::gui::backpackOverrides(bp);
+    j["memoryMatchNbt"] = bpj.value(kMemoryMatchNbtKey, false);
+    return j;
+}
+
+// ---- upgrade tabs bridged from the upgrades' settings menus ------------------------------------------
+// Until an upgrade has its own native tab, its settings menu (`IUpgrade::createSettingsMenu`, e.g.
+// a filter editor) is shown inside its SB tab: the menu object lives here (never opened as a chest),
+// its slots are sent as tab data and tab clicks run against them through `simulateOn`.
+
+struct TabMenuKey {
+    std::int64_t player;
+    std::string  uuid;
+    int          slot;
+    bool         operator==(TabMenuKey const&) const = default;
+};
+struct TabMenuKeyHash {
+    std::size_t operator()(TabMenuKey const& k) const noexcept {
+        return std::hash<std::string>{}(k.uuid) ^ (static_cast<std::size_t>(k.player) * 31u) ^ static_cast<std::size_t>(k.slot);
+    }
+};
+struct TabMenu {
+    std::string               itemId;
+    std::shared_ptr<ui::Menu> menu;
+};
+std::unordered_map<TabMenuKey, TabMenu, TabMenuKeyHash> gTabMenus;
+
+std::shared_ptr<ui::Menu> tabMenuFor(Player& p, upgrade::IUpgrade& type, upgrade::UpgradeContext const& ctx) {
+    TabMenuKey key{keyOf(p), ctx.backpack().uuid(), ctx.slot()};
+    auto const& itemId = ctx.state().item.id;
+    auto        it     = gTabMenus.find(key);
+    if (it != gTabMenus.end() && it->second.itemId == itemId) return it->second.menu;
+    auto menu = type.createSettingsMenu(p, ctx);
+    if (!menu) return nullptr;
+    gTabMenus[key] = TabMenu{itemId, menu};
+    return menu;
+}
+
+void forgetTabMenus(Player const& p) {
+    std::erase_if(gTabMenus, [k = keyOf(p)](auto const& e) { return e.first.player == k; });
+}
+
+nlohmann::json tabMenuJson(Player& p, ui::Menu& menu) {
+    menu.ensureBuilt(p);
+    nlohmann::json slots = nlohmann::json::array();
+    for (int i = 0; i < menu.size(); ++i) {
+        auto* slot  = menu.slot(i);
+        auto  shown = slot ? slot->display(p) : ItemStack{};
+        if (isFiller(shown)) slots.push_back(core::ItemStackData::of(std::string(core::screen::kFillerId), 1).toJson());
+        else if (shown.isNull()) slots.push_back(nullptr);
+        else slots.push_back(game::ItemConv::toData(shown).toJson());
+    }
+    return nlohmann::json{{"rows", static_cast<int>(menu.rows())}, {"title", menu.title()}, {"slots", std::move(slots)}};
+}
+
+/// One click on a slot object that isn't part of the open menu (tab menus).
+bool clickSlotObject(Player& p, std::shared_ptr<ui::Slot> slot, int button, bool shift, std::optional<int> locked) {
+    auto& mm = MenuManager::get();
+    if (!slot) return false;
+    ItemStack shown  = slot->display(p);
+    ItemStack cursor = cursorOf(p);
+    MenuManager::SlotAddress here{Where::Menu, 0};
+    MenuManager::SlotAddress cur{Where::Cursor, 0};
+    if (shift) {
+        auto data   = game::ItemConv::toData(shown);
+        int  target = data.empty() ? 9 : quickMoveTarget(p, data, locked);
+        if (target < 0) return false;
+        return mm.simulateOn(p, act(ActionType::Take, here, {Where::Inventory, target}, std::max(1, static_cast<int>(shown.mCount))), slot);
+    }
+    if (cursor.isNull()) {
+        int have = shown.isNull() ? 1 : static_cast<int>(shown.mCount);
+        return mm.simulateOn(p, act(ActionType::Take, here, cur, button == 1 ? (have + 1) / 2 : have), slot);
+    }
+    if (shown.isNull() || shown.matchesItem(cursor)) {
+        return mm.simulateOn(p, act(ActionType::Place, cur, here, button == 1 ? 1 : static_cast<int>(cursor.mCount)), slot);
+    }
+    return mm.simulateOn(p, act(ActionType::Swap, here, cur, 0), slot);
+}
+
+bool handleSettingsAction(Player& player, ui::BackpackMenu& menu, NativeSession& s, std::string const& action, nlohmann::json const& body) {
+    auto bp = menu.backpack();
+    if (action == "settings") return true; // the settings screen is a client view of this session
+    int slot = body.value("slot", -1);
+    if (action == "upgradeSettings" || action == "tab") {
+        if (slot < 0 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
+        auto const& st   = bp->data().upgrades[static_cast<std::size_t>(slot)];
+        auto*       type = st.empty() ? nullptr : upgrade::upgradeFor(st.item);
+        if (!type) return false;
+        upgrade::UpgradeContext ctx(bp, slot, &player);
+        if (action == "upgradeSettings") {
+            if (!type->info().hasSettings) return false;
+            type->openSettings(player, ctx);
+            return true;
+        }
+        auto data = body.value("data", nlohmann::json::object());
+        if (data.contains("menuClick")) {
+            auto tabMenu = tabMenuFor(player, *type, ctx);
+            int  i       = data.value("menuClick", -1);
+            if (!tabMenu || i < 0 || i >= tabMenu->size()) return false;
+            tabMenu->ensureBuilt(player);
+            std::shared_ptr<ui::Slot> target(tabMenu, tabMenu->slot(i)); // aliasing: keeps the menu alive
+            bool ok = clickSlotObject(player, target, data.value("button", 0), data.value("shift", false), menu.lockedInventorySlot);
+            MenuManager::get().resyncPlayer(player);
+            s.dirty = true;
+            return ok;
+        }
+        for (auto const& h : TabActionRegistry::entries()) {
+            if (h.handle && matchesUpgrade(h.upgrade, *type) && h.handle(player, ctx, data)) return true;
+        }
+        return false;
+    }
+    // "setting": the native settings screen.
+    auto what = body.value("what", std::string{});
+    auto op   = body.value("op", std::string{});
+    int  idx  = body.value("index", -1);
+    auto& inv = bp->inventory();
+    s.dirty   = true;
+    if (what == "context") {
+        gSettingsContext[keyOf(player)] = contextOf(player) == "backpack" ? "player" : "backpack";
+        return true;
+    }
+    if (what == "option") {
+        auto name = body.value("name", std::string{});
+        for (auto const& o : kMainOptions) {
+            if (name != o.name) continue;
+            auto context = contextOf(player);
+            bool next    = !optionValue(player, *bp, o, context);
+            if (context == "player") feature::gui::setPlayerOption(player, o.key, nlohmann::json(next));
+            else feature::gui::setBackpackOption(*bp, o.key, nlohmann::json(next));
+            return true;
+        }
+        return false;
+    }
+    if (what == "memory") {
+        if (op == "selectAll") feature::gui::memorizeAll(*bp);
+        else if (op == "unselectAll") feature::gui::clearMemory(*bp);
+        else if (idx < 0 || idx >= inv.size()) return false;
+        else if (op == "select") {
+            if (inv.at(idx).empty()) return false; // SC: only slots with an item can be memorized
+            feature::gui::setMemory(*bp, idx, inv.at(idx));
+        } else if (op == "unselect") {
+            feature::gui::setMemory(*bp, idx, {});
+        } else {
+            return false;
+        }
+        return true;
+    }
+    if (what == "noSort") {
+        if (op == "selectAll") feature::gui::setNoSortAll(*bp, true);
+        else if (op == "unselectAll") feature::gui::setNoSortAll(*bp, false);
+        else if (idx < 0 || idx >= inv.size()) return false;
+        else if (op == "select") feature::gui::setNoSort(*bp, idx, true);
+        else if (op == "unselect") feature::gui::setNoSort(*bp, idx, false);
+        else return false;
+        return true;
+    }
+    if (what == "noSortColor") {
+        int n    = static_cast<int>(core::kDyes.size());
+        int next = (noSortDye(*bp) + (body.value("dir", 1) >= 0 ? 1 : n - 1)) % n;
+        feature::gui::setBackpackOption(*bp, kNoSortColorKey, nlohmann::json(next));
+        return true;
+    }
+    if (what == "memoryMatchNbt") {
+        auto j = feature::gui::backpackOverrides(*bp);
+        feature::gui::setBackpackOption(*bp, kMemoryMatchNbtKey, nlohmann::json(!j.value(kMemoryMatchNbtKey, false)));
+        return true;
+    }
+    return false;
+}
 } // namespace
 
 // ---- model ----------------------------------------------------------------------------------------
@@ -335,6 +615,9 @@ BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu) {
             v.runnable    = upgrade::typeAllowed(*type);
             v.hasSettings = type->info().hasSettings;
             v.lore        = type->describe(player, ctx);
+            if (type->info().hasSettings) {
+                if (auto tabMenu = tabMenuFor(player, *type, ctx)) v.tab["menu"] = tabMenuJson(player, *tabMenu);
+            }
             for (auto const& p : TabDataRegistry::entries()) {
                 if (p.data && matchesUpgrade(p.upgrade, *type)) {
                     auto data = p.data(player, ctx);
@@ -352,6 +635,8 @@ BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu) {
     m.stackMultiplier = upgrade::stack::totalMultiplier(bp);
     m.mainColor       = bp.data().mainColor;
     m.accentColor     = bp.data().accentColor;
+    m.noSortColor     = core::kDyes[static_cast<std::size_t>(noSortDye(bp))].argb & 0xFFFFFF;
+    m.extra["settings"] = settingsJson(player, bp);
     return m;
 }
 
@@ -369,125 +654,130 @@ BackpackScreenModel const* sentModel(Player const& player) {
 
 bool handleScreenAction(Player& player, nlohmann::json const& body) {
     if (!body.is_object()) return false;
-    NativeSession* s    = nullptr;
-    auto*          menu = currentMenu(player, body.value("session", 0u), s);
-    if (!menu || !s) return false;
-    auto action = body.value("action", std::string{});
-    auto bp     = menu->backpack();
-    bool ok     = false;
-    bool items  = false; // the player's inventory/cursor may have changed
+    NativeSession* s       = nullptr;
+    auto           session = body.value("session", 0u);
+    auto*          base    = currentMenu(player, session, s);
+    if (!base || !s) return false;
+    auto* menu   = backpackMenuOf(*base);
+    auto  action = body.value("action", std::string{});
+    auto& mm     = MenuManager::get();
+    bool  ok     = false;
+    bool  items  = false; // the player's inventory/cursor may have changed
+    bool  silent = action == "click" || action == "menuClick" || action == "double" || action == "drop" || action == "hotbar";
 
-    if (action == "click" || action == "double" || action == "drop" || action == "hotbar") {
-        items     = true;
-        auto area = areaOf(body);
-        int  idx  = body.value("index", -1);
+    if (action == "close") {
+        mm.close(player);
+        log().info("native screen action: close by {}", player.getRealName());
+        return true;
+    }
+    if (action == "resync") {
+        s->sent = {}; // forces a full patch
+        pushUpdate(player, *base, *s, true);
+        return true;
+    }
+
+    auto area = areaOf(body);
+    int  idx  = body.value("index", -1);
+    if (action == "dropCursor") {
+        items       = true;
+        auto cursor = cursorOf(player);
+        if (cursor.isNull()) return false;
+        int n = body.value("all", true) ? static_cast<int>(cursor.mCount) : 1;
+        ok    = mm.simulate(player, act(ActionType::Drop, {Where::Cursor, 0}, {}, n));
+    } else if (action == "menuClick") {
+        // A slot of a menu without its own native screen: exactly like a click in its chest.
+        items = true;
+        if (menu || idx < 0 || idx >= base->size()) return false;
+        ok = clickGenericSlot(player, *base, idx, body.value("button", 0), body.value("shift", false));
+    } else if ((action == "click" || action == "drop" || action == "hotbar") && area == Area::Inventory) {
+        items = true;
+        if (idx < 0 || idx >= kInventory) return false;
+        if (!s->errorMessage.empty()) setError(*s, {}, {});
+        if (action == "click") {
+            ok = clickInventory(player, *base, idx, body.value("button", 0), body.value("shift", false));
+        } else if (action == "drop") {
+            ok = mm.simulate(player, act(ActionType::Drop, {Where::Inventory, idx}, {}, body.value("all", false) ? 255 : 1));
+        } else {
+            int hb = body.value("hotbar", -1);
+            if (hb < 0 || hb > 8 || idx == hb) return false;
+            ok = mm.simulate(player, act(ActionType::Swap, {Where::Inventory, idx}, {Where::Inventory, hb}, 0));
+        }
+    } else if (!menu) {
+        return false; // the remaining actions belong to the backpack screen
+    } else if (action == "click" || action == "double" || action == "drop" || action == "hotbar") {
+        auto bp = menu->backpack();
+        items   = true;
         bool inRange = (area == Area::Storage && idx >= 0 && idx < bp->inventory().size())
-                    || (area == Area::Inventory && idx >= 0 && idx < kInventory)
                     || (area == Area::Upgrade && idx >= 0 && idx < static_cast<int>(bp->data().upgrades.size()));
-        if (!inRange) return false;
+        if (!inRange && action != "double") return false;
         if (!s->errorMessage.empty()) setError(*s, {}, {}); // SB clears the overlay on the next click
-        auto& mm = MenuManager::get();
         if (action == "click") {
             int  button = body.value("button", 0);
             bool shift  = body.value("shift", false);
             bool ctrl   = body.value("ctrl", false);
-            ok = area == Area::Inventory ? clickInventory(player, *menu, idx, button, shift)
-                                         : clickMenuSlot(player, *menu, *s, area, idx, button, shift, ctrl);
+            ok          = clickMenuSlot(player, *menu, *s, area, idx, button, shift, ctrl);
         } else if (action == "double") {
             ok = collectToCursor(player, *menu);
         } else if (action == "drop") {
+            if (area != Area::Storage) return false;
             bool all = body.value("all", false);
-            if (area == Area::Storage) {
-                int n = all ? std::clamp(bp->inventory().at(idx).maxStack, 1, 255) : 1;
-                ok    = mm.simulateOn(player, act(ActionType::Drop, {Where::Menu, idx}, {}, n), menu->storageSlot(idx));
-            } else if (area == Area::Inventory) {
-                int n = all ? 255 : 1;
-                ok    = mm.simulate(player, act(ActionType::Drop, {Where::Inventory, idx}, {}, n));
-            }
+            int  n   = all ? std::clamp(bp->inventory().at(idx).maxStack, 1, 255) : 1;
+            ok       = mm.simulateOn(player, act(ActionType::Drop, {Where::Menu, idx}, {}, n), menu->storageSlot(idx));
         } else { // hotbar
             int hb = body.value("hotbar", -1);
-            if (hb < 0 || hb > 8) return false;
-            if (area == Area::Storage) {
-                ok = mm.simulateOn(player, act(ActionType::Swap, {Where::Menu, idx}, {Where::Inventory, hb}, 0), menu->storageSlot(idx));
-            } else if (area == Area::Inventory && idx != hb) {
-                ok = mm.simulate(player, act(ActionType::Swap, {Where::Inventory, idx}, {Where::Inventory, hb}, 0));
-            }
+            if (hb < 0 || hb > 8 || area != Area::Storage) return false;
+            ok = mm.simulateOn(player, act(ActionType::Swap, {Where::Menu, idx}, {Where::Inventory, hb}, 0), menu->storageSlot(idx));
         }
-    } else if (action == "sort") {
-        ok = feature::gui::sortBackpack(*bp, feature::gui::effective(&player, *bp).sortBy);
-    } else if (action == "sortBy") {
-        auto next = core::nextSortBy(feature::gui::effective(&player, *bp).sortBy);
-        feature::gui::setBackpackOption(*bp, feature::gui::kSortBy, std::string(core::toString(next)));
-        ok = true;
-    } else if (action == "transfer") {
-        items = true;
-        feature::gui::TransferOptions opt;
-        opt.matchingOnly = body.value("matching", true);
-        opt.keepHotbar   = feature::gui::effective(&player, *bp).keepHotbar;
-        opt.lockedSlot   = menu->lockedInventorySlot;
-        int moved        = body.value("to", std::string{}) == "inventory" ? feature::gui::transferToPlayer(player, *bp, opt)
-                                                                          : feature::gui::transferToBackpack(player, *bp, opt);
-        ok = moved > 0;
-    } else if (action == "toggleUpgrade") {
-        int slot = body.value("slot", -1);
-        if (slot < 0 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
-        auto const& st   = bp->data().upgrades[static_cast<std::size_t>(slot)];
-        auto*       type = st.empty() ? nullptr : upgrade::upgradeFor(st.item);
-        if (!type || !type->info().toggleable) return false;
-        upgrade::setEnabled(bp, slot, !st.enabled);
-        ok = true;
-    } else if (action == "settings") {
-        menu->showSettings(player);
-        return true;
-    } else if (action == "upgradeSettings") {
-        int slot = body.value("slot", -1);
-        if (slot < 0 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
-        auto const& st   = bp->data().upgrades[static_cast<std::size_t>(slot)];
-        auto*       type = st.empty() ? nullptr : upgrade::upgradeFor(st.item);
-        if (!type || !type->info().hasSettings) return false;
-        type->openSettings(player, upgrade::UpgradeContext(bp, slot, &player));
-        return true;
-    } else if (action == "tab") {
-        int slot = body.value("slot", -1);
-        if (slot < 0 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
-        auto const& st   = bp->data().upgrades[static_cast<std::size_t>(slot)];
-        auto*       type = st.empty() ? nullptr : upgrade::upgradeFor(st.item);
-        if (!type) return false;
-        auto data = body.value("data", nlohmann::json::object());
-        for (auto const& h : TabActionRegistry::entries()) {
-            if (h.handle && matchesUpgrade(h.upgrade, *type) && h.handle(player, upgrade::UpgradeContext(bp, slot, &player), data)) {
-                ok = true;
-                break;
-            }
-        }
-    } else if (action == "openNested") {
-        int idx = body.value("index", -1);
-        if (idx < 0 || idx >= bp->inventory().size()) return false;
-        if (bp->inventory().at(idx).count != 1) return false; // SB: only a single backpack item
-        return upgrade::inception::openNested(player, menu, bp, idx);
-    } else if (action == "back") {
-        auto* nested = dynamic_cast<upgrade::inception::NestedBackpackMenu*>(menu);
-        if (!nested) return false;
-        nested->goBack(player);
-        return true;
-    } else if (action == "close") {
-        MenuManager::get().close(player);
-        return true;
-    } else if (action == "resync") {
-        s->sent = {}; // forces a full patch
-        pushUpdate(player, *menu, *s, true);
-        return true;
     } else {
-        return false;
+        auto bp = menu->backpack();
+        if (action == "sort") {
+            ok = feature::gui::sortBackpack(*bp, feature::gui::effective(&player, *bp).sortBy);
+        } else if (action == "sortBy") {
+            auto next = core::nextSortBy(feature::gui::effective(&player, *bp).sortBy);
+            feature::gui::setBackpackOption(*bp, feature::gui::kSortBy, std::string(core::toString(next)));
+            ok = true;
+        } else if (action == "transfer") {
+            items = true;
+            feature::gui::TransferOptions opt;
+            opt.matchingOnly = body.value("matching", true);
+            opt.keepHotbar   = feature::gui::effective(&player, *bp).keepHotbar;
+            opt.lockedSlot   = menu->lockedInventorySlot;
+            int moved        = body.value("to", std::string{}) == "inventory" ? feature::gui::transferToPlayer(player, *bp, opt)
+                                                                              : feature::gui::transferToBackpack(player, *bp, opt);
+            ok = moved > 0;
+        } else if (action == "toggleUpgrade") {
+            int slot = body.value("slot", -1);
+            if (slot < 0 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
+            auto const& st   = bp->data().upgrades[static_cast<std::size_t>(slot)];
+            auto*       type = st.empty() ? nullptr : upgrade::upgradeFor(st.item);
+            if (!type || !type->info().toggleable) return false;
+            upgrade::setEnabled(bp, slot, !st.enabled);
+            ok = true;
+        } else if (action == "settings" || action == "upgradeSettings" || action == "tab" || action == "setting") {
+            ok = handleSettingsAction(player, *menu, *s, action, body);
+        } else if (action == "openNested") {
+            if (idx < 0 || idx >= bp->inventory().size()) return false;
+            if (bp->inventory().at(idx).count != 1) return false; // SB: only a single backpack item
+            log().info("native screen action: openNested by {}", player.getRealName());
+            return upgrade::inception::openNested(player, menu, bp, idx);
+        } else if (action == "back") {
+            auto* nested = dynamic_cast<upgrade::inception::NestedBackpackMenu*>(menu);
+            if (!nested) return false;
+            log().info("native screen action: back by {}", player.getRealName());
+            nested->goBack(player);
+            return true;
+        } else {
+            return false;
+        }
     }
 
-    if (items) MenuManager::get().resyncPlayer(player);
+    if (!silent) log().info("native screen action: {} by {} ({})", action, player.getRealName(), ok ? "ok" : "nothing to do");
+    if (items) mm.resyncPlayer(player);
     // The menu may have been replaced by a callback (e.g. Inception's storage click handler).
     NativeSession* again = nullptr;
-    if (auto* still = currentMenu(player, body.value("session", 0u), again); still && again) pushUpdate(player, *still, *again);
+    if (auto* still = currentMenu(player, session, again); still && again) pushUpdate(player, *still, *again);
     return ok;
 }
-
 // ---- packet handler + module ------------------------------------------------------------------------
 
 class ScreenActionHandler : public ll::network::PacketHandlerBase<ScreenActionHandler, ScreenActionPacket> {
@@ -503,9 +793,34 @@ public:
     }
 };
 
+/// Link shown to players without the client mod (also in README.md).
+constexpr std::string_view kClientModUrl = "https://github.com/LiteLDev/AlleviatedBackpacks/releases";
+
+/// Backpack screens need the client mod: companions get native screens, simulated players
+/// (selftests) the chest, everybody else a message.
+ui::MenuManager::Presentation presentationFor(Player& player, ui::Menu&) {
+    if (hasCompanion(player)) return ui::MenuManager::Presentation::Virtual;
+    if (player.isSimulatedPlayer()) return ui::MenuManager::Presentation::Chest;
+    static std::unordered_map<std::int64_t, std::chrono::steady_clock::time_point> lastTold;
+    auto  now  = std::chrono::steady_clock::now();
+    auto& last = lastTold[keyOf(player)];
+    if (now - last > std::chrono::seconds(3)) {
+        last = now;
+        player.sendMessage(trFor(
+            player,
+            "abp.companion.required",
+            "§cAlleviatedBackpacks needs its client mod to show backpack screens. §7Download it here: §b{}",
+            kClientModUrl
+        ));
+        log().info("companion: {} has no client mod; backpack screen refused", player.getRealName());
+    }
+    return ui::MenuManager::Presentation::Refuse;
+}
+
 class NativeScreens {
 public:
     void install() {
+        ui::MenuManager::get().setPresentationGate(presentationFor);
         ui::MenuManager::Observer o;
         o.beforeShow = onBeforeShow;
         o.afterTick  = onAfterTick;
@@ -514,7 +829,10 @@ public:
     }
     void uninstall() {
         ui::MenuManager::get().removeObserver(mObserver);
+        ui::MenuManager::get().setPresentationGate(nullptr);
         gSessions.clear();
+        gTabMenus.clear();
+        gSettingsContext.clear();
     }
 
 private:

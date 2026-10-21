@@ -266,6 +266,27 @@ TEST(ScreenModel, PatchHandlesResize) {
     EXPECT_FALSE(applyPatch(c, nlohmann::json::parse(R"({"slotsDiff":{"99":null}})")));
 }
 
+TEST(ScreenModel, GenericMenuModelPatches) {
+    BackpackScreenModel a;
+    a.kind      = "menu";
+    a.menuRows  = 3;
+    a.menuSlots.resize(27);
+    a.menuSlots[4] = ItemStackData::of("minecraft:hopper", 1);
+    auto back      = BackpackScreenModel::fromJson(a.toJson());
+    EXPECT_EQ(back.kind, "menu");
+    EXPECT_EQ(back.menuRows, 3);
+    ASSERT_EQ(back.menuSlots.size(), 27u);
+    EXPECT_EQ(back.menuSlots[4].id, "minecraft:hopper");
+    auto b         = a;
+    b.menuSlots[4] = {};
+    b.menuSlots[5] = ItemStackData::of("minecraft:paper", 2);
+    auto patch     = makePatch(a, b);
+    EXPECT_TRUE(patch.contains("menuSlotsDiff"));
+    ASSERT_TRUE(applyPatch(back, patch));
+    EXPECT_TRUE(back.menuSlots[4].empty());
+    EXPECT_EQ(back.menuSlots[5].count, 2);
+}
+
 TEST(ScreenModel, ContentsAndRenderInfoRoundTrip) {
     ContentsModel cm;
     cm.uuid  = "x";

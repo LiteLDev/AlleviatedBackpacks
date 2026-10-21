@@ -21,6 +21,35 @@ pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario smoke     # [-Build] [-
 pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario full
 ```
 
+### Client modes (`-Mode`)
+
+| Mode | World | Client mod | What it proves |
+|---|---|---|---|
+| `local` (default) | the `ABP-Test` local world; the integrated server runs the mod too | deployed | everything in one process |
+| `remote-mod` | a BDS slot started through the server harness (scenario `client-host`, server build), joined through Play > Servers | deployed | companion protocol over the network (handshake, native screens, key actions, contents tooltip) |
+| `remote-vanilla` | the same BDS | **moved aside** (only LeviLamina; the BDS resource pack is downloaded on join) | a client without the mod is refused backpack screens gracefully (message, no chest, no crash) |
+
+```powershell
+pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario companion                        # local
+pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario companion -Mode remote-mod
+pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario vanilla-refused -Mode remote-vanilla
+```
+
+How the remote modes work: `run.ps1` starts `server/run.ps1 -Scenario client-host` in the
+background with `$env:ABP_E2E_HOST_DIR` (`client/out/<scenario>/host/`). The host writes
+`ready.json` with its UDP port, runs console commands dropped as `cmd-*.txt`
+(`Send-HostConsole 'cmd'`) and stops when `stop` appears. The client writes the server into the
+user's `games/com.mojang/minecraftpe/external_servers.txt` (restored afterwards) and joins it
+from the Servers tab (screenshots `join-*.png`). The BDS console log is merged into the session
+log as `[host] ...` lines, so `Wait-LogLine` / `Get-LeviLog` see client and server lines in every
+mode; ERR/FTL lines from the host fail the run too, and so does a failing host harness. The BDS
+uses `default-player-permission-level=operator`, so chat commands work in remote modes.
+
+Since the client mod is required and draws every backpack screen natively, the older client
+scenarios that click the phase-1 fake chest (`menus`, `gui`, ...) no longer see a chest: they are
+superseded by `companion` (the server-side behaviour they covered stays in their selftests, run by
+the server harness).
+
 ## Prerequisites
 
 - **Server:** [lip](https://github.com/futrime/lip) on `PATH`. The first `run.ps1` calls `server/install.ps1`. It runs `lip install github.com/LiteLDev/LeviLamina@26.51.7` in an empty folder, which brings in BDS 1.26.51, CrashLogger, PreLoader and PeEditor, and installs everything into `%LOCALAPPDATA%\abp-e2e\bds-base`. This takes about 1–3 minutes, once per machine. `install.ps1 -Force` reinstalls. Set `$env:ABP_E2E_HOME` to use a different folder.
