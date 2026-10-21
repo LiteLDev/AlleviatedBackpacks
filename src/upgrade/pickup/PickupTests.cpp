@@ -187,6 +187,41 @@ ABP_REGISTER_SELFTEST("pickup.not_carried", [](Context& ctx) {
     ctx.check(stored(*bp, "minecraft:apple") == 0, "nothing stored");
 });
 
+ABP_REGISTER_SELFTEST("pickup.with_void", [](Context& ctx) {
+    // Void and Pickup compose in either slot order: matching void filter destroys picked-up
+    // items, the Pickup filter decides what is stored, the rest goes to the player.
+    for (bool voidFirst : {false, true}) {
+        auto& p  = ctx.player();
+        auto  bp = ctx.createBackpack(Tier::Iron); // 2 upgrade slots
+        int   vs = -1, ps = -1;
+        if (voidFirst) vs = ctx.installUpgrade(bp, "void");
+        ps = ctx.installUpgrade(bp, "pickup");
+        if (!voidFirst) vs = ctx.installUpgrade(bp, "void");
+        auto& vset = UpgradeContext(bp, vs).settings();
+        if (!vset.is_object()) vset = nlohmann::json::object();
+        {
+            core::Filter vf(9);
+            vf.setGhost(0, data("minecraft:dirt", 1));
+            vset["filter"] = vf.toJson();
+            UpgradeContext(bp, vs).saveSettings(true);
+        }
+        core::Filter pf(filtering::kBasicSlots);
+        pf.setGhost(0, data("minecraft:apple", 1));
+        setFilter(bp, ps, UpgradeTier::Basic, pf);
+        int give = ctx.give(p, ctx.backpackItem(*bp), voidFirst ? 1 : 0);
+        ctx.require(give >= 0, "give backpack");
+        std::string order = voidFirst ? " (void first)" : " (pickup first)";
+        auto        dirt  = data("minecraft:dirt", 8);
+        ctx.check(dispatchPickup(p, dirt) == 8 && dirt.count == 0, "dirt voided" + order);
+        ctx.check(stored(*bp, "minecraft:dirt") == 0, "dirt not stored" + order);
+        ctx.check(pickup(p, "minecraft:apple", 4) == 4, "apples picked up" + order);
+        ctx.check(stored(*bp, "minecraft:apple") == 4, "apples stored" + order);
+        auto stone = data("minecraft:stone", 3);
+        ctx.check(dispatchPickup(p, stone) == 0 && stone.count == 3, "stone left for the inventory" + order);
+        p.getInventory().setItem(give, ItemStack::EMPTY_ITEM());
+    }
+});
+
 // ---- advanced ------------------------------------------------------------------------------------
 
 ABP_REGISTER_SELFTEST("pickup.advanced_match_options", [](Context& ctx) {
