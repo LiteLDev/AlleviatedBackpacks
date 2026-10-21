@@ -184,7 +184,13 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
 
     auto key      = keyOf(player);
     bool replaced = mSessions.contains(key);
-    if (replaced) finish(&player, key, true);
+    // Fake chest positions of the menu being replaced: the new menu must not reuse them, or the
+    // client keeps the old chest's pairing (e.g. double -> single chest) and never shows the new one.
+    std::vector<BlockPos> oldFake;
+    if (replaced) {
+        oldFake = mSessions[key]->fake;
+        finish(&player, key, true);
+    }
 
     auto s  = std::make_unique<Session>();
     s->key  = key;
@@ -204,6 +210,12 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
     auto  base   = player.getFeetBlockPos();
     base.y += 3;
     if (base.y >= region.getMaxHeight()) base.y = std::max<int>(player.getFeetBlockPos().y - 3, region.getMinHeight());
+    auto overlapsOld = [&](BlockPos const& b) {
+        return std::any_of(oldFake.begin(), oldFake.end(), [&](BlockPos const& o) {
+            return o == b || o == BlockPos{b.x + 1, b.y, b.z};
+        });
+    };
+    if (overlapsOld(base)) base.z += 2;
     s->fake.push_back(base);
     if (s->menu->rows() == Menu::Rows::Six) s->fake.push_back(BlockPos{base.x + 1, base.y, base.z});
 
