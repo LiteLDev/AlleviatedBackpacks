@@ -3,7 +3,7 @@
 function Press-F5 { Assert-GameForeground; [AbpE2E.Native]::Key(0x74, $false); Start-Sleep -Milliseconds 60; [AbpE2E.Native]::Key(0x74, $true); Start-Sleep -Milliseconds 600 }
 
 $r = Invoke-SelfTest 'wearable.*'
-if ($r.Fail -gt 0 -or $r.Pass -lt 9) { throw "wearable selftests: pass=$($r.Pass) fail=$($r.Fail)" }
+if ($r.Fail -gt 0 -or $r.Pass -lt 11) { throw "wearable selftests: pass=$($r.Pass) fail=$($r.Fail)" }
 
 Invoke-Chat '/gamemode creative'
 Invoke-Chat '/clear @s'

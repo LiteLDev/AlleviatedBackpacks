@@ -8,7 +8,9 @@
 #include "mc/deps/shared_types/legacy/Difficulty.h"
 #include "mc/deps/shared_types/legacy/actor/ActorDamageCause.h"
 #include "mc/deps/shared_types/legacy/actor/ArmorSlot.h"
+#include "mc/deps/core/math/Color.h"
 #include "mc/server/SimulatedPlayer.h"
+#include "mc/world/item/Item.h"
 #include "mc/util/LootTableUtils.h"
 #include "mc/util/Random.h"
 #include "mc/world/actor/ActorDamageByActorSource.h"
@@ -202,6 +204,42 @@ ABP_REGISTER_SELFTEST("wearable.worn_ticks_and_gui", [](Context& ctx) -> ll::cor
     co_await ctx.ticks(3);
     ctx.check(mm.current(player) == nullptr, "menu closed when the backpack is taken off");
     ctx.check(!openWorn(player), "nothing to open without a worn backpack");
+});
+
+ABP_REGISTER_SELFTEST("wearable.worn_survives_refresh", [](Context& ctx) -> ll::coro::CoroTask<> {
+    // Other units periodically rewrite carried backpack items (lore, tint); the worn backpack must
+    // stay worn and a mob backpack's pending loot must survive until it is opened.
+    auto& player = ctx.player();
+    auto  item   = makeMobBackpack(Tier::Gold, PendingLoot{.table = "chests/simple_dungeon"});
+    player.setArmor(ArmorSlot::Torso, item);
+    co_await ctx.ticks(30);
+    auto const& worn = player.getArmor(ArmorSlot::Torso);
+    ctx.check(game::backpackTierOf(worn) == Tier::Gold, "still wearing the backpack");
+    ctx.check(pendingLoot(worn).has_value(), "pending loot kept while worn");
+    ctx.check(!game::backpackUuid(worn), "no storage created before the first open");
+    ctx.require(openWorn(player), "open");
+    auto uuid = game::backpackUuid(player.getArmor(ArmorSlot::Torso));
+    ctx.check(uuid.has_value() && !pendingLoot(player.getArmor(ArmorSlot::Torso)), "opened: bound and loot generated");
+    ui::MenuManager::get().close(player);
+    player.setArmor(ArmorSlot::Torso, ItemStack::EMPTY_ITEM());
+    if (uuid) game::Storage::get().erase(*uuid);
+});
+
+ABP_REGISTER_SELFTEST("wearable.dyed_worn", [](Context& ctx) -> ll::coro::CoroTask<> {
+    // A dyed backpack (dyeable item colour) is the same item id, so it renders through the same
+    // attachable; wearing it must not lose the dye.
+    auto& player = ctx.player();
+    auto  bp     = ctx.createBackpack(Tier::Iron);
+    auto  item   = ctx.backpackItem(*bp);
+    ctx.require(item.mItem.get() != nullptr, "item");
+    item.mItem.get()->setColor(item, mce::Color(0xB02E26u));
+    ctx.require(item.mItem.get()->hasCustomColor(item), "backpack is dyeable");
+    player.setArmor(ArmorSlot::Torso, item);
+    co_await ctx.ticks(30);
+    auto const& worn = player.getArmor(ArmorSlot::Torso);
+    ctx.check(game::backpackUuid(worn) == bp->uuid(), "dyed backpack still worn");
+    ctx.check(worn.mItem.get() && worn.mItem.get()->hasCustomColor(worn), "dye kept while worn");
+    player.setArmor(ArmorSlot::Torso, ItemStack::EMPTY_ITEM());
 });
 
 ABP_REGISTER_SELFTEST("wearable.use_opens_not_equips", [](Context& ctx) -> ll::coro::CoroTask<> {
