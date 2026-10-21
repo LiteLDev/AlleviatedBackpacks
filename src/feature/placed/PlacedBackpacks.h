@@ -144,7 +144,7 @@ private:
     std::map<BlockLocation, int>                   mMismatches;   ///< consecutive checks without our block
     /// A sneak-use to place / pick up, run on the next tick (outside the item-use transaction).
     struct PendingAction {
-        enum class Kind { Place, PickUp };
+        enum class Kind { Place, PickUp, Open };
         std::int64_t player; ///< ActorUniqueID
         Kind         kind;
         BlockPos     pos;

@@ -111,6 +111,7 @@ ABP_REGISTER_SELFTEST("placed.open_gui", [](Context& ctx) -> ll::coro::CoroTask<
     placeAt(ctx, site, *bp, pos);
     auto& mm = ui::MenuManager::get();
     useOn(sp, pos, 1); // empty hand, not sneaking
+    co_await ctx.ticks(2); // opening runs on the next tick
     auto menu = std::dynamic_pointer_cast<ui::BackpackMenu>(mm.current(sp));
     ctx.require(menu != nullptr, "use opens the backpack GUI");
     ctx.check(menu->backpack()->uuid() == bp->uuid(), "the placed backpack is shown");

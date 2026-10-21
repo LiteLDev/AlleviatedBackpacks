@@ -595,7 +595,8 @@ void PlacedBackpacks::runActions() {
         auto* player = level->getPlayer(id);
         if (!player || !player->isAlive()) continue;
         if (a.kind == PendingAction::Kind::Place) placeFromHand(*player, a.pos, a.face);
-        else pickUp(*player, a.pos);
+        else if (a.kind == PendingAction::Kind::PickUp) pickUp(*player, a.pos);
+        else if (!ui::MenuManager::get().current(*player)) open(*player, a.pos);
     }
 }
 
@@ -669,7 +670,8 @@ void PlacedBackpacks::install() {
         }
         if (ours && !sneak) {
             ev.cancel();
-            if (!ui::MenuManager::get().current(player)) open(player, pos);
+            if (!ui::MenuManager::get().current(player)) mActions.push_back({key, PendingAction::Kind::Open, pos, 0});
+            mCooldowns[key] = mNow;
             return;
         }
         // Placing / picking up runs on the next tick, outside the item-use transaction: a
