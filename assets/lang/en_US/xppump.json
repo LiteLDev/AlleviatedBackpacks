@@ -1,0 +1,23 @@
+{
+  "abp.xppump.name": "XP Pump Upgrade",
+  "abp.xppump.stored": "§aStored: §f{} XP §7(level {})",
+  "abp.xppump.you": "§7You: level {} ({} XP)",
+  "abp.xppump.store_all": "Store all levels",
+  "abp.xppump.store_n": "Store {} levels",
+  "abp.xppump.store_one": "Store 1 level",
+  "abp.xppump.take_all": "Take everything",
+  "abp.xppump.take_n": "Take {} levels",
+  "abp.xppump.take_one": "Take 1 level",
+  "abp.xppump.keep": "Target level: {}",
+  "abp.xppump.keep.help": "§7Click: ±1, shift-click: ±10",
+  "abp.xppump.keep.info": "§7Used by the automatic mode.",
+  "abp.xppump.keep.minus": "Lower target level",
+  "abp.xppump.keep.plus": "Raise target level",
+  "abp.xppump.mode.off": "Automatic: off",
+  "abp.xppump.mode.store": "Automatic: store levels above the target",
+  "abp.xppump.mode.give": "Automatic: refill up to the target",
+  "abp.xppump.mode.both": "Automatic: keep the target level",
+  "abp.xppump.mode.help": "§7Click to cycle",
+  "abp.xppump.mending": "Mending: {}",
+  "abp.xppump.mending.help": "§7Repairs held / worn Mending items with stored XP."
+}

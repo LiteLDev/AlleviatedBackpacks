@@ -1,0 +1,16 @@
+{
+  "abp.refill.name": "Refill Upgrade",
+  "abp.refill.advanced_name": "Advanced Refill Upgrade",
+  "abp.refill.describe.items": "§7Refilling {} item type(s)",
+  "abp.refill.describe.pick": "§7Pick block takes items from the backpack",
+  "abp.refill.help_title": "Refill",
+  "abp.refill.help1": "§7Put items into the slots above.",
+  "abp.refill.help2": "§7When you run low on them, they are refilled from the backpack.",
+  "abp.refill.help3": "§7The button below each slot picks where the item goes.",
+  "abp.refill.help4": "§7Pick block (middle click) also takes blocks from the backpack.",
+  "abp.refill.target.click": "§7Click to change the target slot",
+  "abp.refill.target.any": "Target: any slot",
+  "abp.refill.target.main_hand": "Target: main hand",
+  "abp.refill.target.offhand": "Target: offhand",
+  "abp.refill.target.hotbar": "Target: hotbar slot {}"
+}

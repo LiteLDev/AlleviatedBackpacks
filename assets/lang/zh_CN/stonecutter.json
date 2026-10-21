@@ -1,0 +1,14 @@
+{
+  "abp.stonecutter.name": "切石机升级",
+  "abp.stonecutter.title": "切石机",
+  "abp.stonecutter.button": "切石机",
+  "abp.stonecutter.selected": "§a» 已选择",
+  "abp.stonecutter.select": "§7点击选择",
+  "abp.stonecutter.help_input": "§7把方块放入下方的格子",
+  "abp.stonecutter.help_select": "§7在右侧选择产物",
+  "abp.stonecutter.help_click": "§7点击产物切割一次",
+  "abp.stonecutter.help_shift": "§7Shift 点击产物尽可能多地切割",
+  "abp.stonecutter.next_page_hint": "§7点击翻到下一页",
+  "abp.stonecutter.page": "产物第 {} 页，共 {} 页",
+  "abp.stonecutter.describe_selected": "§7产物：{}"
+}

@@ -1,0 +1,32 @@
+{
+  "abp.tiers.name.leather": "皮革",
+  "abp.tiers.name.copper": "铜",
+  "abp.tiers.name.iron": "铁",
+  "abp.tiers.name.gold": "金",
+  "abp.tiers.name.diamond": "钻石",
+  "abp.tiers.name.netherite": "下界合金",
+
+  "abp.tiers.lore.tier": "§7等级：§f{}",
+  "abp.tiers.lore.storage": "§7存储：§f{}/{} 格 §8（已用 {}%）",
+  "abp.tiers.lore.upgrades": "§7升级：§f{}/{}",
+  "abp.tiers.lore.upgrade_on": "§8 - §a{}",
+  "abp.tiers.lore.upgrade_off": "§8 - §7{} §8（已关闭）",
+  "abp.tiers.lore.colors": "§7颜色：§f{} §7/ §f{}",
+
+  "abp.tiers.color.white": "白色",
+  "abp.tiers.color.orange": "橙色",
+  "abp.tiers.color.magenta": "品红色",
+  "abp.tiers.color.light_blue": "淡蓝色",
+  "abp.tiers.color.yellow": "黄色",
+  "abp.tiers.color.lime": "黄绿色",
+  "abp.tiers.color.pink": "粉红色",
+  "abp.tiers.color.gray": "灰色",
+  "abp.tiers.color.light_gray": "淡灰色",
+  "abp.tiers.color.cyan": "青色",
+  "abp.tiers.color.purple": "紫色",
+  "abp.tiers.color.blue": "蓝色",
+  "abp.tiers.color.brown": "棕色",
+  "abp.tiers.color.green": "绿色",
+  "abp.tiers.color.red": "红色",
+  "abp.tiers.color.black": "黑色"
+}

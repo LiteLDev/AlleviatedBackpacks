@@ -1,0 +1,16 @@
+{
+  "abp.refill.name": "补充升级",
+  "abp.refill.advanced_name": "高级补充升级",
+  "abp.refill.describe.items": "§7正在补充 {} 种物品",
+  "abp.refill.describe.pick": "§7选取方块时会从背包中取出物品",
+  "abp.refill.help_title": "补充",
+  "abp.refill.help1": "§7把物品放进上方的格子。",
+  "abp.refill.help2": "§7当你身上的这些物品不足时，会从背包中补充。",
+  "abp.refill.help3": "§7每个格子下方的按钮用于选择补充到哪个栏位。",
+  "abp.refill.help4": "§7选取方块（鼠标中键）也会从背包中取出方块。",
+  "abp.refill.target.click": "§7点击切换目标栏位",
+  "abp.refill.target.any": "目标：任意栏位",
+  "abp.refill.target.main_hand": "目标：主手",
+  "abp.refill.target.offhand": "目标：副手",
+  "abp.refill.target.hotbar": "目标：快捷栏第 {} 格"
+}
