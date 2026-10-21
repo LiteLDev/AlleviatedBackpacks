@@ -1,0 +1,11 @@
+{
+  "abp.api.fluid.water": "Water",
+  "abp.api.fluid.lava": "Lava",
+  "abp.api.fluid.milk": "Milk",
+  "abp.api.fluid.powder_snow": "Powder Snow",
+  "abp.api.fluid.honey": "Honey",
+  "abp.api.fluid.potion": "Potion",
+  "abp.api.fluid.splash_potion": "Splash Potion",
+  "abp.api.fluid.lingering_potion": "Lingering Potion",
+  "abp.api.fluid.experience": "Liquid Experience"
+}

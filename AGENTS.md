@@ -15,6 +15,7 @@ reference only). Textures are original pixel art drawn by `tools/textures/*.ps1`
 | `src/core/` | Pure C++ (no `mc/`/`ll/` includes): `Tier`, `ItemStackData`, `BackpackInventory`, `Filter`, `BackpackData`, `Codec`, `Format`. Static lib `abp-core`, unit-tested in `tests/`. |
 | `src/game/` | Game adapters: `ItemConv` (ItemStack <-> core), `BackpackItem` (item ids, uuid NBT), `Backpack` + `Storage` (per-world persistence), `PlayerScan`, `PlayerTicker`. |
 | `src/upgrade/` | `IUpgrade.h` (upgrade contract + registry), `UpgradeManager.h` (install/remove/toggle/pickup dispatch). |
+| `src/api/` | Capability API: public headers `abp/{Energy,Fluid,Xp,Capabilities}.h` for other mods, `CapabilityService.cpp`, `BackpackCapabilities.h` (upgrade integration). See `docs/API.md`. |
 | `src/ui/menu/` | Fake-chest GUI framework: `Slot.h`, `Menu.h`, `MenuManager.h`, `BackpackMenu.h` (main GUI + button/setting registries), `FilterMenu.h`. |
 | `src/selftest/` | `SelfTest.h` (in-game test framework) + `FoundationTests.cpp`. |
 | `src/pack/` | `PackDeployer` (BDS: puts the resource pack on the world). |
@@ -86,6 +87,15 @@ Registrations live in .cpp files linked directly into the DLL, so they are never
   `GhostSlot`, `ButtonSlot`, `StaticSlot`, `CallbackSlot`; `ui::icon(id, name, lore)`.
   `MenuManager::get().open/close/closeThen/reopen`. Use `closeThen` before showing a form.
   `FilterMenu::forUpgrade(player, ctx, "filter", 9)` + `core::Filter::fromJson(ctx.settings()["filter"], 9)`.
+- **Energy / fluids** (`src/api/`, docs in `docs/API.md`): FE and mB; `abp::api::CapabilityService`
+  is registered with LL's `ServiceManager` (`abp::api::capabilities()`; in-mod: `api::service()`).
+  Item / block / backpack energy and fluid capabilities, a fluid registry (`minecraft:water`, ...,
+  `abp:experience` tagged `c:experience`; potions carry `{"potion":<aux>}` nbt) and swap containers
+  (`api::fluidRegistry()`). Upgrades contribute tanks / batteries with
+  `ABP_REGISTER_BACKPACK_TANK("<id>", factory)` / `ABP_REGISTER_BACKPACK_BATTERY` (combined in slot
+  order, SB rules). SB sizing: `core/Capacity.h`; XP maths: `abp/Xp.h`. Public headers in
+  `src/api/abp/` are header-only and append-only (ABI). Phase-1 tank ids ("water", "potion:7") map
+  to API stacks via `core::toApi/fromApi`.
 - **Strings**: `abp::tr("abp.key", "English fallback", args...)` / `abp::trFor(player, ...)` with
   `{}`/`{0}` placeholders. Keys start with `abp.<unit>.`. Item names come from RP `texts.d`.
 - **Logging**: `abp::log()` (`mod/Log.h`). No per-tick logging.
