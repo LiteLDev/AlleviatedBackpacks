@@ -569,14 +569,17 @@ void MenuManager::tick() {
             continue;
         }
         // Validity: alive, same dimension, still near the fake chest.
+        // (Only for real clients: the reach limit is the client's. Selftest players have no screen
+        // and may still be falling from an unresolved spawn height.)
         bool tooFar = false;
-        if (!s.fake.empty()) {
+        if (!s.fake.empty() && !player->isSimulatedPlayer()) {
             auto const& pos  = player->getPosition();
             auto const& fake = s.fake.front();
             float dx = pos.x - (fake.x + 0.5f), dy = pos.y - (fake.y + 0.5f), dz = pos.z - (fake.z + 0.5f);
             tooFar   = std::sqrt(dx * dx + dy * dy + dz * dz) > kMaxDistance;
         }
         if (!player->isAlive() || static_cast<int>(player->getDimensionId()) != s.dim || tooFar) {
+            menuDebugLog("menu id={} closed: alive={} tooFar={}", s.id, player->isAlive(), tooFar);
             finish(player, key, true);
             continue;
         }
