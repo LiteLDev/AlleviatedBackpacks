@@ -309,7 +309,10 @@ void CookingMenu::build(Player& player) {
         std::make_shared<ui::ButtonSlot>(
             ui::icon("minecraft:arrow", trFor(player, "abp.menu.back_generic", "Back")),
             [bp = mCtx.backpackPtr()](ui::ClickContext const& c) {
-                ui::BackpackMenu::openBackpack(c.player, bp, {}, ui::BackpackMenu::View::Upgrades);
+                // Close first (single -> double chest switch, see CookingUpgrade::openSettings).
+                ui::MenuManager::get().closeThen(c.player, [bp](Player& p) {
+                    ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
+                });
             }
         )
     );

@@ -23,6 +23,7 @@
 #include "mod/Config.h"
 #include "mod/I18n.h"
 #include "mod/Log.h"
+#include "ui/menu/MenuManager.h"
 
 ABP_REGISTER_CONFIG("cooking", abp::upgrade::cooking::CookingConfig);
 
@@ -318,6 +319,17 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
 }
 
 void CookingUpgrade::onTick(TickContext const& tick) { advance(tick.ctx, &tick.player, std::max(1, tick.interval)); }
+
+void CookingUpgrade::openSettings(Player& player, UpgradeContext const& ctx) {
+    auto menu = createSettingsMenu(player, ctx);
+    if (!menu) return;
+    auto& mm = ui::MenuManager::get();
+    if (!mm.current(player)) {
+        mm.open(player, std::move(menu));
+        return;
+    }
+    mm.closeThen(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
+}
 
 std::shared_ptr<ui::Menu> CookingUpgrade::createSettingsMenu(Player& player, UpgradeContext const& ctx) {
     return makeMenu(player, *this, ctx);
