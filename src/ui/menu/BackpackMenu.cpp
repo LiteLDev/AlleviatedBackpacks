@@ -6,7 +6,9 @@
 #include "ll/api/event/player/PlayerUseItemEvent.h"
 #include "ll/api/form/SimpleForm.h"
 
+#include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/player/Player.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "game/BackpackItem.h"
@@ -57,12 +59,59 @@ public:
             s.enabled ? trFor(player, "abp.menu.upgrade.enabled", "§aEnabled")
                       : trFor(player, "abp.menu.upgrade.disabled", "§cDisabled")
         );
+        if (type && !upgrade::typeAllowed(*type)) {
+            lore.push_back(trFor(player, "abp.admin.upgrade_disabled_lore", "§cDisabled on this server"));
+        }
         if (type) {
             auto extra = type->describe(player, upgrade::UpgradeContext(mBackpack, mIndex, &player));
             lore.insert(lore.end(), extra.begin(), extra.end());
         }
         game::ItemConv::setDisplay(stack, type ? "§r" + upgrade::displayName(*type, &player) : std::string{}, lore);
         return stack;
+    }
+
+    /// Clicking an occupied upgrade slot with an item on the cursor: either the installed upgrade
+    /// uses the item (`IUpgrade::useItemOn`, e.g. a conversion item) or the two are swapped in one
+    /// step (`upgrade::replace`). Other interactions use take()/accept().
+    bool click(ClickContext const& c) override {
+        if ((c.type != ClickType::Swap && c.type != ClickType::Place) || c.offered.isNull()) return false;
+        auto const& s = mBackpack->data().upgrades[static_cast<std::size_t>(mIndex)];
+        if (s.empty()) return false;
+        ItemStack cursor = c.player.mPlayerUIContainer->getItem(0);
+        // Only when the offered stack is exactly the cursor (the usual chest-screen click).
+        if (cursor.isNull() || !cursor.matchesItem(c.offered) || cursor.mCount != c.offered.mCount) return false;
+        auto offered = game::ItemConv::toData(c.offered);
+        auto setCursor = [&](ItemStack item) {
+            c.player.setPlayerUIItem(PlayerUISlot::CursorSelected, item, false);
+        };
+        if (auto* type = upgrade::upgradeFor(s.item)) {
+            auto used = type->useItemOn(c.player, upgrade::UpgradeContext(mBackpack, mIndex, &c.player), offered);
+            if (used) {
+                if (*used > 0) {
+                    int left = std::max(0, static_cast<int>(cursor.mCount) - *used);
+                    if (left == 0) cursor = ItemStack{};
+                    else cursor.set(left);
+                    setCursor(cursor);
+                }
+                return true;
+            }
+        }
+        if (c.type != ClickType::Swap) return false;
+        std::string reason;
+        auto        old = upgrade::replace(mBackpack, mIndex, offered, &c.player, &reason);
+        if (!old) {
+            if (!reason.empty()) c.player.sendMessage(reason);
+            return true;
+        }
+        auto oldStack = game::ItemConv::toStack(*old, 1);
+        if (cursor.mCount <= 1) {
+            setCursor(oldStack);
+        } else {
+            cursor.set(cursor.mCount - 1);
+            setCursor(cursor);
+            if (!c.player.add(oldStack)) c.player.drop(oldStack, false);
+        }
+        return true;
     }
 
     ItemStack take(Player& player, int) override {
@@ -88,6 +137,39 @@ public:
 private:
     std::shared_ptr<game::Backpack> mBackpack;
     int                             mIndex;
+};
+/// A storage slot whose display runs through the registered `BackpackSlotDecorator`s.
+class DecoratedStorageSlot : public StorageSlot {
+public:
+    using Decorators = std::vector<BackpackSlotDecorator const*>;
+
+    DecoratedStorageSlot(std::shared_ptr<game::Backpack> bp, int index, BackpackMenu* menu, std::shared_ptr<Decorators const> decorators)
+    : StorageSlot(bp, index),
+      mBackpack(std::move(bp)),
+      mMenu(menu),
+      mDecorators(std::move(decorators)) {}
+
+    /// The registered decorators in `order` (computed once per page build).
+    static std::shared_ptr<Decorators const> sorted() {
+        auto out = std::make_shared<Decorators>();
+        for (auto const& d : BackpackSlotDecoratorRegistry::entries()) {
+            if (d.decorate) out->push_back(&d);
+        }
+        std::stable_sort(out->begin(), out->end(), [](auto* a, auto* b) { return a->order < b->order; });
+        return out;
+    }
+
+    [[nodiscard]] ItemStack display(Player& player) const override {
+        auto                shown = StorageSlot::display(player);
+        BackpackMenuContext ctx{player, *mMenu, mBackpack};
+        for (auto const* d : *mDecorators) d->decorate(ctx, index(), shown);
+        return shown;
+    }
+
+private:
+    std::shared_ptr<game::Backpack>   mBackpack;
+    BackpackMenu*                     mMenu; ///< owns this slot
+    std::shared_ptr<Decorators const> mDecorators;
 };
 } // namespace
 
@@ -124,10 +206,13 @@ void BackpackMenu::build(Player& player) {
 }
 
 void BackpackMenu::buildStorage(Player&) {
-    int size = mBackpack->inventory().size();
+    int  size       = mBackpack->inventory().size();
+    auto decorators = DecoratedStorageSlot::sorted();
+    bool decorated  = !decorators->empty();
     for (int i = 0; i < kPageSlots; ++i) {
         int index = mPage * kPageSlots + i;
-        if (index < size) setSlot(i, std::make_shared<StorageSlot>(mBackpack, index));
+        if (index < size && decorated) setSlot(i, std::make_shared<DecoratedStorageSlot>(mBackpack, index, this, decorators));
+        else if (index < size) setSlot(i, std::make_shared<StorageSlot>(mBackpack, index));
         else setSlot(i, filler());
     }
 }
@@ -205,17 +290,46 @@ void BackpackMenu::buildControls(Player& player) {
                 showPage(mPage + 1);
             }));
         }
-        // Feature buttons: slots 48..51.
-        auto buttons = sortedButtons(ctx);
-        for (int i = 0; i < 4 && i < static_cast<int>(buttons.size()); ++i) {
-            auto const* b = buttons[static_cast<std::size_t>(i)];
+        // Feature buttons: slots 48..51. With more than 4, show 3 per page + a "More" pager in 51.
+        auto buttons  = sortedButtons(ctx);
+        int  total    = static_cast<int>(buttons.size());
+        bool paged    = total > 4;
+        int  perPage  = paged ? 3 : 4;
+        int  btnPages = std::max(1, (total + perPage - 1) / perPage);
+        if (mButtonPage >= btnPages) mButtonPage = 0;
+        int first = paged ? mButtonPage * perPage : 0;
+        for (int i = 0; i < perPage && first + i < total; ++i) {
+            auto const* b     = buttons[static_cast<std::size_t>(first + i)];
             auto        shown = b->icon ? b->icon(ctx) : icon("minecraft:stone_button", b->id);
             setSlot(48 + i, std::make_shared<ButtonSlot>(shown, [this, b, bp = mBackpack](ClickContext const& c) {
                 if (b->onClick) b->onClick(BackpackMenuContext{c.player, *this, bp}, c);
             }));
         }
-        if (buttons.size() > 4) {
-            log().warn("more than 4 backpack buttons registered; only the first 4 are shown");
+        if (paged) {
+            std::vector<std::string> lore;
+            for (int i = 0; i < total; ++i) {
+                if (i >= first && i < first + perPage) continue;
+                auto const* b = buttons[static_cast<std::size_t>(i)];
+                std::string name;
+                if (b->label) name = b->label(ctx);
+                else if (b->icon) name = b->icon(ctx).getCustomName();
+                lore.push_back("§7- " + (name.empty() ? b->id : name));
+            }
+            setSlot(
+                51,
+                std::make_shared<ButtonSlot>(
+                    icon(
+                        "minecraft:hopper_minecart",
+                        trFor(player, "abp.gui.more_buttons", "More buttons ({}/{})", mButtonPage + 1, btnPages),
+                        lore
+                    ),
+                    [this, btnPages](ClickContext const&) {
+                        mButtonPage = (mButtonPage + 1) % btnPages;
+                        ++mLayout;
+                        invalidate();
+                    }
+                )
+            );
         }
     }
     int installed = 0;
@@ -268,21 +382,44 @@ void BackpackMenu::onDestroyed() { game::Storage::get().save(*mBackpack); }
 
 int BackpackMenu::quickMoveIn(Player& player, ItemStack const& stack) {
     if (stack.isNull()) return 0;
-    if (mView == View::Upgrades) {
-        auto data = game::ItemConv::toData(stack).withCount(1);
-        for (int i = 0; i < static_cast<int>(mBackpack->data().upgrades.size()); ++i) {
-            if (!mBackpack->data().upgrades[static_cast<std::size_t>(i)].empty()) continue;
-            if (upgrade::canInstall(mBackpack, i, data, &player)) {
-                std::string reason;
-                if (upgrade::install(mBackpack, i, data, &player, &reason)) {
-                    invalidate();
-                    return 1;
-                }
+    auto const& handlers = BackpackQuickMoveRegistry::entries();
+    if (!handlers.empty()) {
+        std::vector<BackpackQuickMoveHandler const*> sorted;
+        for (auto const& h : handlers) {
+            if (h.handle) sorted.push_back(&h);
+        }
+        std::stable_sort(sorted.begin(), sorted.end(), [](auto* a, auto* b) { return a->order < b->order; });
+        BackpackMenuContext ctx{player, *this, mBackpack};
+        for (auto const* h : sorted) {
+            if (auto n = h->handle(ctx, stack)) return *n;
+        }
+    }
+    return quickMoveDefault(player, stack);
+}
+
+int BackpackMenu::quickMoveDefault(Player& player, ItemStack const& stack) {
+    return mView == View::Upgrades ? quickMoveToUpgrades(player, stack) : quickMoveToStorage(player, stack);
+}
+
+int BackpackMenu::quickMoveToUpgrades(Player& player, ItemStack const& stack) {
+    if (stack.isNull()) return 0;
+    auto data = game::ItemConv::toData(stack).withCount(1);
+    for (int i = 0; i < static_cast<int>(mBackpack->data().upgrades.size()); ++i) {
+        if (!mBackpack->data().upgrades[static_cast<std::size_t>(i)].empty()) continue;
+        if (upgrade::canInstall(mBackpack, i, data, &player)) {
+            std::string reason;
+            if (upgrade::install(mBackpack, i, data, &player, &reason)) {
+                invalidate();
+                return 1;
             }
         }
-        return 0;
     }
-    auto r = mBackpack->inventory().insert(game::ItemConv::toData(stack), core::AccessContext{core::Source::Player, &player});
+    return 0;
+}
+
+int BackpackMenu::quickMoveToStorage(Player& player, ItemStack const& stack) {
+    if (stack.isNull()) return 0;
+    auto r =mBackpack->inventory().insert(game::ItemConv::toData(stack), core::AccessContext{core::Source::Player, &player});
     return r.inserted + r.voided;
 }
 
@@ -300,6 +437,27 @@ bool BackpackMenu::openBackpack(Player& player, std::shared_ptr<game::Backpack> 
     auto menu = std::make_shared<BackpackMenu>(std::move(backpack), source, std::move(title));
     if (view != View::Storage) menu->showView(view);
     return MenuManager::get().open(player, std::move(menu));
+}
+
+bool BackpackMenu::openCarried(Player& player) {
+    using Kind = game::ItemLocation::Kind;
+    auto carried = game::scanBackpacks(player);
+    auto rank    = [sel = game::selectedSlot(player)](game::ItemLocation const& w) {
+        switch (w.kind) {
+        case Kind::Armor:
+            return 0;
+        case Kind::Offhand:
+            return 1;
+        case Kind::Inventory:
+            return w == sel ? 2 : 3;
+        }
+        return 4;
+    };
+    std::stable_sort(carried.begin(), carried.end(), [&](auto const& a, auto const& b) { return rank(a.where) < rank(b.where); });
+    for (auto const& c : carried) {
+        if (openFor(player, c.where)) return true;
+    }
+    return false;
 }
 
 bool BackpackMenu::openFor(Player& player, game::ItemLocation where) {
@@ -323,7 +481,7 @@ public:
         mListener = ll::event::EventBus::getInstance().emplaceListener<ll::event::PlayerUseItemEvent>(
             [](ll::event::PlayerUseItemEvent& ev) {
                 auto& player = ev.self();
-                if (player.isClientSide() || !game::isBackpack(ev.item())) return;
+                if (player.isClientSide() || ev.isCancelled() || !game::isBackpack(ev.item())) return;
                 ev.cancel();
                 if (MenuManager::get().current(player)) return;
                 BackpackMenu::openFor(player, game::selectedSlot(player));

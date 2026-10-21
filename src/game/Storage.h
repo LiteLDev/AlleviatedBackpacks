@@ -1,8 +1,10 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "ll/api/event/ListenerBase.h"
 
@@ -54,6 +56,11 @@ public:
     void unload(std::string const& uuid);
 
     [[nodiscard]] std::size_t loadedCount() const { return mCache.size(); }
+
+    /// Uuids of every backpack stored in the world (loaded or not), in DB key order.
+    [[nodiscard]] std::vector<std::string> storedUuids() const;
+    /// Calls `fn` for every currently loaded (cached) backpack.
+    void forEachLoaded(std::function<void(std::shared_ptr<Backpack> const&)> const& fn) const;
 
     /// Drops cached backpacks nobody else references and nobody looked up for a while (after
     /// saving them). Carried backpacks are looked up by the ticker, so they stay loaded.

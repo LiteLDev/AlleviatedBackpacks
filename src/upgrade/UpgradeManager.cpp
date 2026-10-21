@@ -58,6 +58,16 @@ core::ItemStackData embedSettings(core::ItemStackData const& item, nlohmann::jso
     return out;
 }
 
+TypeGate& typeGate() {
+    static TypeGate gate;
+    return gate;
+}
+
+std::vector<std::pair<std::string, RuleBuilder>>& ruleBuilders() {
+    static std::vector<std::pair<std::string, RuleBuilder>> builders;
+    return builders;
+}
+
 bool sameGroupOrId(IUpgrade const& u, std::string_view name) { return u.info().id == name || u.info().groupOrId() == name; }
 
 /// True if backpack `from` contains (at any depth) a backpack item bound to `target`.
@@ -98,11 +108,18 @@ void buildHooks(game::Backpack& bp) {
         }
         return core::InsertVerdict::Allow;
     });
+    for (auto const& [id, fn] : ruleBuilders()) {
+        try {
+            fn(bp);
+        } catch (std::exception const& e) {
+            log().error("backpack rule {} failed: {}", id, e.what());
+        }
+    }
     auto const& slots = bp.data().upgrades;
     for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
         auto const& s = slots[static_cast<std::size_t>(i)];
         if (s.empty() || !s.enabled) continue;
-        if (auto* u = byItemId(s.item.id)) {
+        if (auto* u = byItemId(s.item.id); u && typeAllowed(*u)) {
             try {
                 u->attach(UpgradeContext(self, i), inv);
             } catch (std::exception const& e) {
@@ -139,6 +156,24 @@ void IUpgrade::openSettings(Player& player, UpgradeContext const& ctx) {
     if (auto menu = createSettingsMenu(player, ctx)) ui::MenuManager::get().open(player, std::move(menu));
 }
 
+// ---- server rules ------------------------------------------------------------------------------
+
+void setTypeGate(TypeGate gate) { typeGate() = std::move(gate); }
+
+bool typeAllowed(IUpgrade const& upgrade) {
+    auto const& gate = typeGate();
+    return !gate || gate(upgrade);
+}
+
+void addRuleBuilder(std::string id, RuleBuilder fn) {
+    removeRuleBuilder(id);
+    ruleBuilders().emplace_back(std::move(id), std::move(fn));
+}
+
+void removeRuleBuilder(std::string const& id) {
+    std::erase_if(ruleBuilders(), [&](auto const& e) { return e.first == id; });
+}
+
 // ---- manager -----------------------------------------------------------------------------------
 
 IUpgrade* upgradeFor(core::ItemStackData const& item) { return item.empty() ? nullptr : byItemId(item.id); }
@@ -166,6 +201,10 @@ bool canInstall(
     auto* type = upgradeFor(item);
     if (!type) {
         why = message(player, "abp.upgrade.error.not_upgrade", "Only upgrades can go into upgrade slots.");
+        return false;
+    }
+    if (!typeAllowed(*type)) {
+        why = message(player, "abp.admin.upgrade_disabled", "This upgrade is disabled on this server.");
         return false;
     }
     auto const& info  = type->info();
@@ -197,14 +236,9 @@ bool canInstall(
     return type->canInstall(UpgradeContext(backpack, slot, player), why);
 }
 
-bool install(
-    std::shared_ptr<game::Backpack> const& backpack,
-    int                                    slot,
-    core::ItemStackData const&             item,
-    Player*                                player,
-    std::string*                           reason
-) {
-    if (!canInstall(backpack, slot, item, player, reason)) return false;
+namespace {
+/// Puts `item` into the (free) slot and runs onInstall. No checks, no hook rebuild.
+void installUnchecked(std::shared_ptr<game::Backpack> const& backpack, int slot, core::ItemStackData const& item, Player* player) {
     auto [clean, settings] = extractSettings(item.withCount(1));
     auto& s                = backpack->data().upgrades[static_cast<std::size_t>(slot)];
     s.item                 = clean;
@@ -218,20 +252,14 @@ bool install(
     } catch (std::exception const& e) {
         log().error("upgrade {} onInstall failed: {}", type->info().id, e.what());
     }
-    backpack->rebuildHooks();
-    return true;
 }
 
-std::optional<core::ItemStackData>
-remove(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player, std::string* reason) {
-    auto& slots = backpack->data().upgrades;
-    if (slot < 0 || slot >= static_cast<int>(slots.size())) return std::nullopt;
-    auto& s = slots[static_cast<std::size_t>(slot)];
-    if (s.empty()) return std::nullopt;
+/// Runs onRemove and empties the (occupied) slot. Returns the item with its settings embedded.
+/// No checks, no hook rebuild.
+core::ItemStackData removeUnchecked(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player) {
+    auto&          s = backpack->data().upgrades[static_cast<std::size_t>(slot)];
     UpgradeContext ctx(backpack, slot, player);
     if (auto* type = upgradeFor(s.item)) {
-        std::string dummy;
-        if (!type->canRemove(ctx, reason ? *reason : dummy)) return std::nullopt;
         try {
             type->onRemove(ctx);
         } catch (std::exception const& e) {
@@ -242,6 +270,64 @@ remove(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player
     s        = core::UpgradeSlot{};
     backpack->clearTransient(ctx.hookOwner());
     backpack->markDirty();
+    return out;
+}
+} // namespace
+
+bool install(
+    std::shared_ptr<game::Backpack> const& backpack,
+    int                                    slot,
+    core::ItemStackData const&             item,
+    Player*                                player,
+    std::string*                           reason
+) {
+    if (!canInstall(backpack, slot, item, player, reason)) return false;
+    installUnchecked(backpack, slot, item, player);
+    backpack->rebuildHooks();
+    return true;
+}
+
+std::optional<core::ItemStackData>
+remove(std::shared_ptr<game::Backpack> const& backpack, int slot, Player* player, std::string* reason) {
+    auto& slots = backpack->data().upgrades;
+    if (slot < 0 || slot >= static_cast<int>(slots.size())) return std::nullopt;
+    auto& s = slots[static_cast<std::size_t>(slot)];
+    if (s.empty()) return std::nullopt;
+    if (auto* type = upgradeFor(s.item)) {
+        std::string dummy;
+        if (!type->canRemove(UpgradeContext(backpack, slot, player), reason ? *reason : dummy)) return std::nullopt;
+    }
+    auto out = removeUnchecked(backpack, slot, player);
+    backpack->rebuildHooks();
+    return out;
+}
+
+std::optional<core::ItemStackData> replace(
+    std::shared_ptr<game::Backpack> const& backpack,
+    int                                    slot,
+    core::ItemStackData const&             item,
+    Player*                                player,
+    std::string*                           reason
+) {
+    auto& slots = backpack->data().upgrades;
+    if (slot < 0 || slot >= static_cast<int>(slots.size())) return std::nullopt;
+    auto& s = slots[static_cast<std::size_t>(slot)];
+    if (s.empty()) return std::nullopt;
+    auto newItem = item.withCount(1);
+    if (auto* type = upgradeFor(s.item)) {
+        std::string dummy;
+        if (!type->canReplaceWith(UpgradeContext(backpack, slot, player), newItem, reason ? *reason : dummy)) {
+            return std::nullopt;
+        }
+    }
+    // Check the new one as if the slot were free; put the old state back untouched on failure.
+    auto saved = std::move(s);
+    s          = core::UpgradeSlot{};
+    bool ok    = canInstall(backpack, slot, newItem, player, reason);
+    s          = std::move(saved);
+    if (!ok) return std::nullopt;
+    auto out = removeUnchecked(backpack, slot, player);
+    installUnchecked(backpack, slot, newItem, player);
     backpack->rebuildHooks();
     return out;
 }
@@ -265,14 +351,15 @@ void forEachInstalled(
     for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
         auto const& s = slots[static_cast<std::size_t>(i)];
         if (s.empty() || (activeOnly && !s.enabled)) continue;
-        if (auto* u = upgradeFor(s.item)) fn(*u, UpgradeContext(backpack, i));
+        auto* u = upgradeFor(s.item);
+        if (u && (!activeOnly || typeAllowed(*u))) fn(*u, UpgradeContext(backpack, i));
     }
 }
 
 bool hasActive(game::Backpack const& backpack, std::string_view idOrGroup) {
     for (auto const& s : backpack.data().upgrades) {
         if (s.empty() || !s.enabled) continue;
-        if (auto* u = upgradeFor(s.item); u && sameGroupOrId(*u, idOrGroup)) return true;
+        if (auto* u = upgradeFor(s.item); u && typeAllowed(*u) && sameGroupOrId(*u, idOrGroup)) return true;
     }
     return false;
 }

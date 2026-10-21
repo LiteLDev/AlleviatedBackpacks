@@ -1,0 +1,59 @@
+{
+  "abp_stack_starter_upgrade": {
+    "textures": "textures/items/stack_starter_upgrade"
+  },
+  "abp_stack_tier_1_upgrade": {
+    "textures": "textures/items/stack_tier_1_upgrade"
+  },
+  "abp_stack_tier_2_upgrade": {
+    "textures": "textures/items/stack_tier_2_upgrade"
+  },
+  "abp_stack_tier_3_upgrade": {
+    "textures": "textures/items/stack_tier_3_upgrade"
+  },
+  "abp_stack_tier_4_upgrade": {
+    "textures": "textures/items/stack_tier_4_upgrade"
+  },
+  "abp_stack_omega_upgrade": {
+    "textures": "textures/items/stack_omega_upgrade"
+  },
+  "abp_stack_downgrade_tier_1_upgrade": {
+    "textures": "textures/items/stack_downgrade_tier_1_upgrade"
+  },
+  "abp_stack_downgrade_tier_2_upgrade": {
+    "textures": "textures/items/stack_downgrade_tier_2_upgrade"
+  },
+  "abp_stack_downgrade_tier_3_upgrade": {
+    "textures": "textures/items/stack_downgrade_tier_3_upgrade"
+  },
+  "abp_stack_conversion_starter_to_tier_1": {
+    "textures": "textures/items/stack_conversion_starter_to_tier_1"
+  },
+  "abp_stack_conversion_starter_to_tier_2": {
+    "textures": "textures/items/stack_conversion_starter_to_tier_2"
+  },
+  "abp_stack_conversion_starter_to_tier_3": {
+    "textures": "textures/items/stack_conversion_starter_to_tier_3"
+  },
+  "abp_stack_conversion_starter_to_tier_4": {
+    "textures": "textures/items/stack_conversion_starter_to_tier_4"
+  },
+  "abp_stack_conversion_tier_1_to_tier_2": {
+    "textures": "textures/items/stack_conversion_tier_1_to_tier_2"
+  },
+  "abp_stack_conversion_tier_1_to_tier_3": {
+    "textures": "textures/items/stack_conversion_tier_1_to_tier_3"
+  },
+  "abp_stack_conversion_tier_1_to_tier_4": {
+    "textures": "textures/items/stack_conversion_tier_1_to_tier_4"
+  },
+  "abp_stack_conversion_tier_2_to_tier_3": {
+    "textures": "textures/items/stack_conversion_tier_2_to_tier_3"
+  },
+  "abp_stack_conversion_tier_2_to_tier_4": {
+    "textures": "textures/items/stack_conversion_tier_2_to_tier_4"
+  },
+  "abp_stack_conversion_tier_3_to_tier_4": {
+    "textures": "textures/items/stack_conversion_tier_3_to_tier_4"
+  }
+}

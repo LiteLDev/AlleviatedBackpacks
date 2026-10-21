@@ -16,14 +16,21 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
 Push-Location $root
 try {
-    # Fresh shells may not have the tools on PATH yet.
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+    # Fresh shells may not have the tools on PATH yet. Append (never prepend) the registry PATH so
+    # the caller's PATH wins: on CI, setup-llvm puts LLVM 22 on PATH, and the runner's preinstalled
+    # C:\Program Files\LLVM (listed in the machine PATH) must not shadow it.
+    $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ($env:LLVM_PATH -and (Test-Path (Join-Path $env:LLVM_PATH 'bin\clang-cl.exe'))) {
+        $env:Path = (Join-Path $env:LLVM_PATH 'bin') + ";$env:Path"
+    }
     if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
         foreach ($dir in "$env:ProgramFiles\LLVM\bin", "${env:ProgramFiles(x86)}\LLVM\bin") {
             if (Test-Path (Join-Path $dir 'clang-cl.exe')) { $env:Path = "$dir;$env:Path"; break }
         }
     }
     if (-not (Get-Command xmake -ErrorAction SilentlyContinue)) { throw 'xmake not found on PATH' }
+    $clang = Get-Command clang-cl -ErrorAction SilentlyContinue
+    if ($clang) { Write-Host "==> using $($clang.Source) ($((& $clang.Source --version | Select-Object -First 1)))" }
     git config --global core.longpaths true | Out-Null
 
     # xmake needs to be told about Visual Studio 18 (2026) explicitly.
