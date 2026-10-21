@@ -4,6 +4,8 @@
 #include <cmath>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "ll/api/service/Bedrock.h"
 
@@ -31,6 +33,7 @@ namespace {
 constexpr char const* kStateKey       = "state";
 constexpr char const* kInputFilterKey = "inputFilter";
 constexpr char const* kFuelFilterKey  = "fuelFilter";
+constexpr char const* kProductsKey    = "products";
 
 /// Per-world caches of recipe results and fuel values (cleared when the level changes).
 struct Caches {
@@ -83,6 +86,25 @@ core::Filter filterAt(UpgradeContext const& ctx, char const* key, int slots) {
 }
 
 int filterSlots(int configured) { return std::clamp(configured, 1, 9); }
+
+/// Ids of items this Auto upgrade has produced (not cooked again unless explicitly filtered).
+std::unordered_set<std::string> productIds(UpgradeContext const& ctx) {
+    std::unordered_set<std::string> out;
+    auto const&                     s  = ctx.settings();
+    auto                            it = s.find(kProductsKey);
+    if (it == s.end() || !it->is_array()) return out;
+    for (auto const& v : *it)
+        if (v.is_string()) out.insert(v.get<std::string>());
+    return out;
+}
+
+void setProductIds(UpgradeContext const& ctx, std::unordered_set<std::string> const& ids) {
+    std::vector<std::string> sorted(ids.begin(), ids.end());
+    std::sort(sorted.begin(), sorted.end());
+    if (sorted.size() > 256) sorted.resize(256);
+    ctx.settings()[kProductsKey] = sorted;
+    ctx.saveSettings(false);
+}
 
 } // namespace
 
@@ -168,7 +190,14 @@ CookEnv makeEnv(Kind kind) {
         int base = vanillaBurnTicks(kind, f);
         return base <= 0 ? 0 : std::max(1, static_cast<int>(std::lround(base * fuel / speed)));
     };
+    // The game's own fuel consumption: one item less, or its leftover (lava bucket -> bucket).
     env.afterBurn = [](core::ItemStackData const& f) -> core::ItemStackData {
+        auto stack = game::ItemConv::toStack(f, f.count);
+        if (!stack.isNull()) {
+            stack.useAsFuel();
+            auto left = game::ItemConv::toData(stack);
+            if (!(left.sameItem(f) && left.count == f.count)) return left;
+        }
         if (f.id == "minecraft:lava_bucket" && f.count <= 1) {
             return game::ItemConv::toData(game::ItemConv::make("minecraft:bucket", 1));
         }
@@ -234,19 +263,24 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
     if (!installedAt(ctx) || ticks <= 0) return false;
     auto st      = state(ctx);
     auto env     = makeEnv(mKind);
-    int  xpItems = 0;
-    core::ItemStackData lastResult;
     bool changed = false;
     if (!mAuto) {
         for (int i = 0; i < ticks; ++i) changed |= step(st, env);
     } else {
-        env.onProduce = [&](core::ItemStackData const& r) {
-            xpItems    += r.count;
-            lastResult  = r;
+        // Experience per result kind (stored results give their XP to the carrier right away).
+        std::unordered_map<std::string, std::pair<core::ItemStackData, int>> produced;
+        auto products = productIds(ctx);
+        bool newProduct = false;
+        env.onProduce   = [&](core::ItemStackData const& r) {
+            auto& e = produced[r.id];
+            e.first = r;
+            e.second += r.count;
+            if (products.insert(r.id).second) newProduct = true;
         };
         auto    inFilter   = inputFilter(ctx);
         auto    fuelFilter = CookingUpgrade::fuelFilter(ctx);
         AutoEnv a{ctx.backpack().inventory(), inFilter, fuelFilter, &game::ItemConv::tags(), {core::Source::Upgrade, carrier}};
+        a.isProduct = [&products](core::ItemStackData const& item) { return products.contains(item.id); };
         changed |= autoExchange(st, env, a);
         // A storage scan that found nothing is not repeated within this call.
         bool outFailed   = !st.output.empty();
@@ -272,9 +306,12 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
             changed |= step(st, env);
         }
         if (!outFailed) changed |= pushOutput(st, a);
-        if (xpItems > 0 && carrier) {
-            if (int xp = xpFor(lastResult, xpItems); xp > 0) carrier->addExperience(xp);
+        if (carrier) {
+            int xp = 0;
+            for (auto const& [id, e] : produced) xp += xpFor(e.first, e.second);
+            if (xp > 0) carrier->addExperience(xp);
         }
+        if (newProduct) setProductIds(ctx, products);
     }
     if (changed) setState(ctx, st);
     return changed;
@@ -291,7 +328,7 @@ std::vector<std::string> CookingUpgrade::describe(Player& player, UpgradeContext
     auto                     st = state(ctx);
     std::vector<std::string> out;
     out.push_back(trFor(player, "abp.cooking.describe.slots", "§7Input {} · Fuel {} · Output {}", st.input.count, st.fuel.count, st.output.count));
-    if (st.burning()) {
+    if (st.cook > 0) {
         out.push_back(trFor(player, "abp.cooking.describe.cooking", "§6Cooking {}%", st.cookPercent()));
     }
     return out;

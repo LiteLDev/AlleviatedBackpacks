@@ -10,6 +10,7 @@
 // B back, F/G ghost filter slots.
 
 #include <algorithm>
+#include <array>
 
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
@@ -66,6 +67,10 @@ private:
 
     CookingUpgrade& mUpgrade;
     UpgradeContext  mCtx;
+    /// Per item slot: what was taken out recently (may be put back by a rolled-back move).
+    std::array<core::ItemStackData, 3> mTaken;
+    int                                mTakenCook = 0; ///< cook progress when the input was emptied
+    int                                mXpCredit  = 0; ///< results put back whose XP was already paid
 };
 
 ItemStack filler(char const* id = "minecraft:gray_stained_glass_pane") { return ui::icon(id, " "); }
@@ -98,27 +103,46 @@ std::shared_ptr<ui::Slot> CookingMenu::itemSlot(int which) {
         int  n   = std::min({amount, d.count, std::max(d.maxStack, 1), 255});
         auto got = d.withCount(n);
         d        = d.withCount(d.count - n);
-        if (which == 0 && d.empty()) st.cook = 0;
+        if (which == 0 && d.empty()) {
+            mTakenCook = st.cook;
+            st.cook    = 0;
+        }
         CookingUpgrade::setState(mCtx, st);
-        // Like a furnace's result slot: taking the results awards their experience.
+        auto& taken = mTaken[static_cast<std::size_t>(which)];
+        if (!taken.empty() && taken.sameItem(got)) taken.count += n;
+        else taken = got;
+        // Like a furnace's result slot: taking the results awards their experience (once: items
+        // put back by a failed move keep the experience already paid in `mXpCredit`).
         if (which == 2 && !mUpgrade.automatic()) {
-            if (int xp = xpFor(got, n); xp > 0) p.addExperience(xp);
+            int paid = std::min(n, mXpCredit);
+            mXpCredit -= paid;
+            if (int xp = xpFor(got, n - paid); xp > 0) p.addExperience(xp);
         }
         return game::ItemConv::toStack(got, n);
     };
     slot->onAccept = [this, field, which](Player&, ItemStack const& stack) -> int {
-        if (!alive() || stack.isNull() || which == 2) return 0;
-        auto offered = game::ItemConv::toData(stack);
-        if (!acceptsItem(mUpgrade, which, offered)) return 0;
+        if (!alive() || stack.isNull()) return 0;
+        auto  offered = game::ItemConv::toData(stack);
+        auto& taken   = mTaken[static_cast<std::size_t>(which)];
+        // Items just taken from this slot always fit back: the menu framework rolls failed moves
+        // back through accept(), and that must never lose items (results, the lava bucket).
+        bool restoring = !taken.empty() && taken.sameItem(offered) && offered.count <= taken.count;
+        if (!restoring && (which == 2 || !acceptsItem(mUpgrade, which, offered))) return 0;
         auto  st = CookingUpgrade::state(mCtx);
         auto& d  = field(st);
         if (!d.empty() && !d.sameItem(offered)) return 0;
-        int room = std::max(offered.maxStack, 1) - (d.empty() ? 0 : d.count);
-        int n    = std::min(room, offered.count);
+        bool wasEmpty = d.empty();
+        int  have     = wasEmpty ? 0 : d.count;
+        int  room     = restoring ? offered.count : std::max(offered.maxStack, 1) - have;
+        int  n        = std::min(room, offered.count);
         if (n <= 0) return 0;
-        if (which == 0 && d.empty()) st.cook = 0;
-        d = offered.withCount((d.empty() ? 0 : d.count) + n);
+        d = offered.withCount(have + n);
+        if (which == 0 && wasEmpty) st.cook = restoring ? mTakenCook : 0;
         CookingUpgrade::setState(mCtx, st);
+        if (restoring) {
+            taken = taken.withCount(taken.count - n);
+            if (which == 2) mXpCredit += n;
+        }
         return n;
     };
     return slot;
@@ -259,7 +283,8 @@ void CookingMenu::build(Player& player) {
                 "minecraft:paper",
                 trFor(player, "abp.cooking.filter.label", "↑ Input filter · ↓ Fuel filter"),
                 {trFor(player, "abp.cooking.filter.help", "§7Place items to match; empty = anything"),
-                 trFor(player, "abp.cooking.filter.help_fuel", "§7With an empty fuel filter, cookable inputs are never burnt")}
+                 trFor(player, "abp.cooking.filter.help_fuel", "§7Cookable inputs are burnt only if the fuel allow list names them"),
+                 trFor(player, "abp.cooking.filter.help_products", "§7Its own results are not cooked again unless the input allow list names them")}
             ))
         );
         for (int i = 45; i < 54; ++i) setSlot(i, std::make_shared<ui::StaticSlot>(filler("minecraft:black_stained_glass_pane")));

@@ -195,7 +195,9 @@ ABP_REGISTER_SELFTEST("cooking.menu_slots_and_xp", [](Context& ctx) -> ll::coro:
     int xpAfter = player.getXpEarnedAtCurrentLevel();
     ctx.info("xp " + std::to_string(xpBefore) + " -> " + std::to_string(xpAfter));
     ctx.check(xpAfter > xpBefore, "taking results gives experience");
-    ctx.check(!mm.simulate(player, {Action::Place, {Where::Inventory, 9}, {Where::Menu, L.output}, 3}), "output slot refuses items");
+    ctx.check(mm.simulate(player, {Action::Take, {Where::Inventory, 7}, {Where::Cursor, 0}, 4}), "diamonds to cursor");
+    ctx.check(!mm.simulate(player, {Action::Place, {Where::Cursor, 0}, {Where::Menu, L.output}, 4}), "output slot refuses items");
+    ctx.check(CookingUpgrade::state(u).output.empty(), "output still empty");
     mm.close(player);
 });
 
@@ -303,6 +305,62 @@ ABP_REGISTER_SELFTEST("cooking.one_per_backpack", [](Context& ctx) {
             ctx.check(!game::ItemConv::make(id, 1).isNull(), id + " is registered");
         }
     }
+});
+
+ABP_REGISTER_SELFTEST("cooking.menu_rollback_keeps_items", [](Context& ctx) {
+    auto&                           mm     = ui::MenuManager::get();
+    auto&                           player = ctx.player();
+    std::shared_ptr<game::Backpack> bp;
+    auto                            u  = withUpgrade(ctx, bp, "smelting");
+    auto&                           up = upgradeOf(Kind::Smelting, false);
+    auto const&                     L  = layout(false);
+    CookState                       st;
+    st.input  = data("minecraft:raw_iron", 1);
+    st.fuel   = data("minecraft:lava_bucket", 1);
+    st.output = data("minecraft:iron_ingot", 5);
+    st.cook   = 150;
+    CookingUpgrade::setState(u, st);
+    up.advance(u, nullptr, 1); // lava ignites, the bucket stays in the fuel slot
+    ctx.require(CookingUpgrade::state(u).fuel.id == "minecraft:bucket", "bucket in the fuel slot");
+    ctx.require(ctx.give(player, game::ItemConv::make("minecraft:dirt", 1), 3) == 3, "give dirt");
+    auto menu = up.createSettingsMenu(player, u);
+    ctx.require(menu != nullptr && mm.open(player, menu), "open");
+    mm.forceShown(player);
+    // Swapping with an item the slot refuses rolls back without losing anything.
+    for (int slot : {L.output, L.fuel, L.input}) {
+        (void)mm.simulate(player, {Action::Swap, {Where::Menu, slot}, {Where::Inventory, 3}, 1});
+    }
+    auto s = CookingUpgrade::state(u);
+    ctx.check(s.output.count == 5, "results kept: " + str(s.output));
+    ctx.check(s.fuel.id == "minecraft:bucket", "bucket kept: " + str(s.fuel));
+    ctx.check(s.input.count == 1 && s.cook >= 150, "input and progress kept: " + str(s.input) + " cook " + std::to_string(s.cook));
+    ctx.check(inventoryCount(player, "minecraft:dirt") == 1, "dirt kept");
+    // Experience is paid once per result.
+    int xp0 = player.getXpEarnedAtCurrentLevel();
+    ctx.check(mm.simulate(player, {Action::Take, {Where::Menu, L.output}, {Where::Inventory, 10}, 5}), "take results");
+    int xp1 = player.getXpEarnedAtCurrentLevel();
+    ctx.info("xp " + std::to_string(xp0) + " -> " + std::to_string(xp1));
+    ctx.check(xp1 - xp0 <= 4 && xp1 >= 3, "5 ingots pay about 3.5 xp in total");
+    ctx.check(mm.simulate(player, {Action::Take, {Where::Menu, L.fuel}, {Where::Inventory, 11}, 1}), "take the bucket");
+    ctx.check(inventoryCount(player, "minecraft:bucket") == 1, "bucket in the inventory");
+    mm.close(player);
+});
+
+ABP_REGISTER_SELFTEST("cooking.auto_no_recook_chain", [](Context& ctx) {
+    std::shared_ptr<game::Backpack> bp;
+    auto                            u = withUpgrade(ctx, bp, "auto_smelting");
+    core::AccessContext             internal{core::Source::Internal};
+    bp->inventory().insert(data("minecraft:cobblestone", 2), internal);
+    bp->inventory().insert(data("minecraft:coal", 1), internal);
+    for (int i = 0; i < 100; ++i) upgradeOf(Kind::Smelting, true).advance(u, nullptr, 10);
+    ctx.check(countOf(*bp, "minecraft:stone") == 2, "cobblestone -> stone: " + std::to_string(countOf(*bp, "minecraft:stone")));
+    ctx.check(countOf(*bp, "minecraft:smooth_stone") == 0, "stone is not cooked again into smooth stone");
+    // Naming stone in the input filter cooks it on purpose.
+    auto f = CookingUpgrade::inputFilter(u);
+    f.setGhost(0, data("minecraft:stone", 1));
+    CookingUpgrade::setInputFilter(u, f);
+    for (int i = 0; i < 50; ++i) upgradeOf(Kind::Smelting, true).advance(u, nullptr, 10);
+    ctx.check(countOf(*bp, "minecraft:smooth_stone") == 2, "explicit filter: smooth stone made");
 });
 
 } // namespace

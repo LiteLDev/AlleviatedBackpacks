@@ -208,3 +208,55 @@ TEST(CookingLogic, AutoOutputStaysWhenStorageFull) {
     EXPECT_FALSE(pushOutput(s, a));
     EXPECT_EQ(s.output.count, 4);
 }
+
+TEST(CookingLogic, AutoDenyFuelFilterStillSparesInputs) {
+    BackpackInventory inv(4);
+    inv.set(0, item("oak_log", 3));
+    inv.set(1, item("coal", 2));
+    Filter inFilter(9), fuelFilter(9);
+    fuelFilter.mode = FilterMode::Deny;
+    fuelFilter.setGhost(0, item("lava_bucket", 1, 1));
+    AutoEnv   a{inv, inFilter, fuelFilter};
+    CookState s;
+    auto      e = env();
+    autoExchange(s, e, a);
+    EXPECT_EQ(s.input.id, "oak_log");
+    EXPECT_EQ(s.fuel.id, "coal") << "logs are input, not fuel";
+}
+
+TEST(CookingLogic, AutoReplacesSpentLavaBucket) {
+    BackpackInventory inv(4);
+    inv.set(0, item("raw_iron", 5));
+    inv.set(1, item("coal", 2));
+    Filter    inFilter(9), fuelFilter(9);
+    AutoEnv   a{inv, inFilter, fuelFilter};
+    CookState s;
+    s.fuel = item("bucket", 1, 16);
+    auto e = env();
+    autoExchange(s, e, a);
+    EXPECT_EQ(s.fuel.id, "coal");
+    EXPECT_EQ(inv.count([](ItemStackData const& x) { return x.id == "bucket"; }), 1);
+}
+
+TEST(CookingLogic, AutoDoesNotRecookItsProducts) {
+    BackpackInventory inv(4);
+    inv.set(0, item("charcoal", 3)); // pretend charcoal smelts further and was produced here
+    inv.set(1, item("coal", 2));
+    Filter  inFilter(9), fuelFilter(9);
+    AutoEnv a{inv, inFilter, fuelFilter};
+    a.isProduct = [](ItemStackData const& x) { return x.id == "charcoal"; };
+    auto e      = env();
+    e.result    = [](ItemStackData const& in) -> std::optional<ItemStackData> {
+        if (in.id == "charcoal") return item("ash", 1);
+        return std::nullopt;
+    };
+    CookState s;
+    autoExchange(s, e, a);
+    EXPECT_TRUE(s.input.empty()) << "products are not cooked again by default";
+    Filter only(9);
+    only.setGhost(0, item("charcoal", 1));
+    AutoEnv b{inv, only, fuelFilter};
+    b.isProduct = a.isProduct;
+    autoExchange(s, e, b);
+    EXPECT_EQ(s.input.id, "charcoal") << "unless the input allow list names them";
+}

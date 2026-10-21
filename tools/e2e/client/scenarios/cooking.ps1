@@ -1,6 +1,6 @@
 # U13 cooking: selftests in a local world, then the Smelting upgrade GUI driven by real clicks.
 $r = Invoke-SelfTest 'cooking.*'
-if ($r.Fail -gt 0 -or $r.Pass -lt 11) { throw "cooking selftests: pass=$($r.Pass) fail=$($r.Fail)" }
+if ($r.Fail -gt 0 -or $r.Pass -lt 13) { throw "cooking selftests: pass=$($r.Pass) fail=$($r.Fail)" }
 
 Invoke-Chat '/clear @s'
 Invoke-Chat '/replaceitem entity @s slot.hotbar 0 alleviatedbackpacks:diamond_backpack'

@@ -140,26 +140,35 @@ inline bool step(CookState& s, CookEnv const& env) {
 
 /// Filters and storage access of the Auto variants.
 struct AutoEnv {
-    core::BackpackInventory&   inventory;
-    core::Filter const&        inputFilter;
-    core::Filter const&        fuelFilter;
-    core::ITagProvider const*  tags = nullptr;
-    core::AccessContext        access{core::Source::Upgrade};
+    core::BackpackInventory&  inventory;
+    core::Filter const&       inputFilter;
+    core::Filter const&       fuelFilter;
+    core::ITagProvider const* tags = nullptr;
+    core::AccessContext       access{core::Source::Upgrade};
+    /// True for items this upgrade has produced (e.g. stone from cobblestone). They are not cooked
+    /// again (stone -> smooth stone) unless the input filter names them explicitly.
+    std::function<bool(core::ItemStackData const&)> isProduct;
 };
+
+/// True if `filter` is a non-empty allow list that matches `item` (an explicit choice).
+[[nodiscard]] inline bool explicitlyAllowed(core::Filter const& filter, core::ItemStackData const& item, core::ITagProvider const* tags) {
+    return filter.mode == core::FilterMode::Allow && !filter.isEmpty() && filter.matches(item, tags);
+}
 
 /// Whether the Auto variant would pull `item` from the storage as input.
 [[nodiscard]] inline bool isAutoInput(core::ItemStackData const& item, CookEnv const& env, AutoEnv const& a) {
     if (item.empty() || !env.result || !a.inputFilter.passes(item, a.tags)) return false;
+    if (a.isProduct && a.isProduct(item) && !explicitlyAllowed(a.inputFilter, item, a.tags)) return false;
     auto r = env.result(item.withCount(1));
     return r && !r->empty();
 }
 
-/// Whether the Auto variant would pull `item` from the storage as fuel. With an empty (allow all)
-/// fuel filter, items that would be cooked as input are never burnt.
+/// Whether the Auto variant would pull `item` from the storage as fuel. Items that would be cooked
+/// as input are only burnt when the fuel filter is an allow list naming them.
 [[nodiscard]] inline bool isAutoFuel(core::ItemStackData const& item, CookEnv const& env, AutoEnv const& a) {
     if (item.empty() || !env.burnTicks || !a.fuelFilter.passes(item, a.tags)) return false;
     if (env.burnTicks(item.withCount(1)) <= 0) return false;
-    if (a.fuelFilter.isEmpty() && isAutoInput(item, env, a)) return false;
+    if (isAutoInput(item, env, a) && !explicitlyAllowed(a.fuelFilter, item, a.tags)) return false;
     return true;
 }
 
@@ -170,6 +179,21 @@ inline bool pushOutput(CookState& s, AutoEnv const& a) {
     int  moved = r.inserted + r.voided;
     if (moved <= 0) return false;
     s.output = s.output.withCount(s.output.count - moved);
+    return true;
+}
+
+/// True if the fuel slot holds something that doesn't burn (the bucket left by lava).
+[[nodiscard]] inline bool hasSpentFuel(CookState const& s, CookEnv const& env) {
+    return !s.fuel.empty() && (!env.burnTicks || env.burnTicks(s.fuel.withCount(1)) <= 0);
+}
+
+/// Auto variants: moves a non-burning leftover (empty bucket) from the fuel slot into the storage.
+inline bool pushSpentFuel(CookState& s, CookEnv const& env, AutoEnv const& a) {
+    if (!hasSpentFuel(s, env)) return false;
+    auto r     = a.inventory.insert(s.fuel, a.access);
+    int  moved = r.inserted + r.voided;
+    if (moved <= 0) return false;
+    s.fuel = s.fuel.withCount(s.fuel.count - moved);
     return true;
 }
 
@@ -194,15 +218,18 @@ inline bool pullInput(CookState& s, CookEnv const& env, AutoEnv const& a) {
     return true;
 }
 
-/// True when the next `step()` needs a new fuel item and the fuel slot is empty.
+/// True when the next `step()` needs a new fuel item and the fuel slot has none.
 [[nodiscard]] inline bool needsFuel(CookState const& s, CookEnv const& env) {
-    return s.fuel.empty() && s.burn <= 1 && cookable(s, env).has_value();
+    return (s.fuel.empty() || hasSpentFuel(s, env)) && s.burn <= 1 && cookable(s, env).has_value();
 }
 
-/// Auto variants: takes one fuel item from the storage when `needsFuel()`. Fuel is pulled one item
-/// at a time so the rest stays visible in the backpack. Returns true if anything moved.
+/// Auto variants: takes one fuel item from the storage when `needsFuel()` (after clearing a spent
+/// leftover). Fuel is pulled one item at a time so the rest stays visible in the backpack.
+/// Returns true if anything moved.
 inline bool pullFuel(CookState& s, CookEnv const& env, AutoEnv const& a) {
     if (!needsFuel(s, env)) return false;
+    bool changed = pushSpentFuel(s, env, a);
+    if (!s.fuel.empty()) return changed;
     for (int i = 0; i < a.inventory.size(); ++i) {
         if (!isAutoFuel(a.inventory.at(i), env, a)) continue;
         auto got = a.inventory.extract(i, 1, a.access);
@@ -210,7 +237,7 @@ inline bool pullFuel(CookState& s, CookEnv const& env, AutoEnv const& a) {
         s.fuel = got;
         return true;
     }
-    return false;
+    return changed;
 }
 
 /// One automatic exchange with the storage: push output, pull input, pull fuel.
