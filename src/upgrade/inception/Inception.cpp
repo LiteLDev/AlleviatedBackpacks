@@ -513,7 +513,7 @@ ABP_REGISTER_STORAGE_CLICK([](ui::ClickContext const& c, std::shared_ptr<game::B
 ABP_REGISTER_BACKPACK_BUTTON(
     ui::BackpackButton{
         .id    = "inception.open",
-        .order = 80,
+        .order = 5, // first: only shown when nested backpacks are inside
         .visible =
             [](ui::BackpackMenuContext const& c) {
                 return hasActive(*c.backpack, kId) && !backpackSlots(*c.backpack).empty();

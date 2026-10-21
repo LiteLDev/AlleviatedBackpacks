@@ -109,8 +109,6 @@ public:
 
     [[nodiscard]] std::shared_ptr<game::Backpack> const& backpack() const { return mBackpack; }
     [[nodiscard]] View                                   view() const { return mView; }
-    /// Where the viewed backpack item is on the player (nullopt: not bound to an item).
-    [[nodiscard]] std::optional<game::ItemLocation> const& source() const { return mSource; }
     [[nodiscard]] int                                    page() const { return mPage; }
     [[nodiscard]] int                                    pageCount() const;
     void                                                 showPage(int page);

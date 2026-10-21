@@ -108,6 +108,9 @@ ActorHurtResult notHurt() {
     return r;
 }
 
+// The hook macro defines an unused counter variable.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-variable"
 LL_TYPE_INSTANCE_HOOK(
     EverlastingHurtHook,
     ll::memory::HookPriority::Normal,
@@ -150,6 +153,7 @@ LL_TYPE_INSTANCE_HOOK(EverlastingOutOfWorldHook, ll::memory::HookPriority::Norma
     if (hasType(ActorType::ItemEntity) && rescueFromVoid(static_cast<ItemActor&>(static_cast<Actor&>(*this)))) return;
     origin();
 }
+#pragma clang diagnostic pop
 } // namespace
 
 // ---- the upgrade --------------------------------------------------------------------------------
