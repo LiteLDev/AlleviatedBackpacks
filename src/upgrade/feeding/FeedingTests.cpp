@@ -8,6 +8,7 @@
 #include "game/ItemConv.h"
 #include "game/Storage.h"
 #include "selftest/SelfTest.h"
+#include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/feeding/Feeding.h"
@@ -386,6 +387,24 @@ ABP_REGISTER_SELFTEST("feeding.settings_menu", [](Context& ctx) -> ll::coro::Cor
     ctx.check(filterOf(UpgradeContext(bp, basicSlot), false).ghosts.size() == kBasicFilterSlots, "9 basic ghost slots");
     mm.close(p);
     ctx.check(p.getInventory().getItem(4).mCount == 3 || countOnPlayer(p, "minecraft:apple") == 3, "apples returned");
+});
+
+ABP_REGISTER_SELFTEST("feeding.open_settings_from_backpack", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& mm   = ui::MenuManager::get();
+    auto& p    = ctx.player();
+    auto  bp   = ctx.createBackpack(Tier::Iron);
+    int   slot = ctx.installUpgrade(bp, "feeding");
+    ctx.require(ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades), "open backpack");
+    co_await ctx.ticks(8);
+    byId("feeding")->openSettings(p, UpgradeContext(bp, slot, &p));
+    bool opened = false;
+    for (int i = 0; i < 30 && !opened; ++i) {
+        co_await ctx.ticks(1);
+        auto cur = mm.current(p);
+        opened   = cur != nullptr && cur->size() == 27;
+    }
+    ctx.check(opened, "feeding settings open after the backpack closed");
+    mm.close(p);
 });
 
 ABP_REGISTER_SELFTEST("feeding.exclusive_group", [](Context& ctx) {

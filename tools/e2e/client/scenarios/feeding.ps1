@@ -1,7 +1,7 @@
 # U7 Feeding upgrade in a real local world: the selftests, then a real player installs an Advanced
 # Feeding upgrade through the GUI, edits its settings with real clicks and gets fed while hungry.
 $r = Invoke-SelfTest 'feeding.*'
-if ($r.Fail -gt 0 -or $r.Pass -lt 16) { throw "feeding selftests: pass=$($r.Pass) fail=$($r.Fail)" }
+if ($r.Fail -gt 0 -or $r.Pass -lt 17) { throw "feeding selftests: pass=$($r.Pass) fail=$($r.Fail)" }
 
 Invoke-Chat '/gamemode survival'
 Invoke-Chat '/difficulty easy'
@@ -63,11 +63,11 @@ $mark = Get-LogMark
 $s = Big 18
 Click $s[0] $s[1] -Relative
 Wait-LogLine 'menu shown: Advanced Feeding Upgrade \(27 slots\)' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 1500
 Save-Screenshot 'settings' | Out-Null
 
 # Single chest geometry: same columns, rows shifted down by half of the 3 missing rows.
-$sy0 = $y0 + 1.5 * $dy
+$sy0 = 0.325
 function Small([int]$slot) { @(($x0 + ($slot % 9) * $dx), ($sy0 + [math]::Floor($slot / 9) * $dy)) }
 # Hunger mode button (control row, slot 5): Half -> Full -> Always.
 $m = Small 23
