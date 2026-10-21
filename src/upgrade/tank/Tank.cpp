@@ -300,6 +300,8 @@ public:
         if (c.empty() || amount <= 0) return {};
         int n = std::min({amount, c.count, 255});
         auto out = game::ItemConv::toStack(c, n);
+        if (!mTaken.empty() && mTaken.sameItem(c)) mTaken.count += n;
+        else mTaken = c.withCount(n);
         c.count -= n;
         store(c);
         return out;
@@ -311,12 +313,18 @@ public:
     int offer(core::ItemStackData offered) {
         if (offered.empty() || !isTank(mCtx)) return 0;
         auto c = content();
-        // Same item as what's already there (e.g. the framework returning a rest): merge, no processing.
-        if (!c.empty() && c.sameItem(offered)) {
-            int n = std::min(offered.count, std::max(0, c.maxStack - c.count));
-            c.count += n;
-            if (n > 0) store(c);
-            return n;
+        // The framework handing back what it took (a rest that didn't fit, a failed swap): put it
+        // back unprocessed. Only what was taken out can come back, so the slots never become extra
+        // storage.
+        if (!mTaken.empty() && mTaken.sameItem(offered) && (c.empty() || c.sameItem(offered))) {
+            int room = std::max(0, std::max(1, offered.maxStack) - (c.empty() ? 0 : c.count));
+            int n    = std::min({offered.count, mTaken.count, room});
+            if (n > 0) {
+                mTaken.count -= n;
+                if (mTaken.count <= 0) mTaken.clear();
+                store(c.empty() ? offered.withCount(n) : c.withCount(c.count + n));
+                return n;
+            }
         }
         int done = 0;
         for (; done < offered.count; ++done) {
@@ -360,6 +368,7 @@ private:
 
     UpgradeContext mCtx;
     bool           mInput;
+    core::ItemStackData mTaken; ///< items taken out that may be handed back unprocessed
 };
 
 class TankMenu : public ui::Menu {
@@ -374,8 +383,8 @@ public:
         for (int i = 0; i < size(); ++i) setSlot(i, fluidui::filler());
         // Row 0: a gauge of 9 panes.
         for (int i = 0; i < 9; ++i) {
-            setSlot(i, fluidui::live([ctx = mCtx, i](Player& p) {
-                auto t = read(ctx);
+            setSlot(i, fluidui::live([this, i](Player& p) {
+                auto const& t = current();
                 int  filled = 0;
                 if (!t.empty() && t.capacity() > 0) {
                     filled = static_cast<int>(std::ceil(9.0 * std::min(t.amount(), t.capacity()) / t.capacity()));
@@ -395,8 +404,8 @@ public:
             ))
         );
         setSlot(kInputSlot, std::make_shared<ContainerSlot>(mCtx, true));
-        setSlot(kInfoSlot, fluidui::live([ctx = mCtx](Player& p) {
-            auto t = read(ctx);
+        setSlot(kInfoSlot, fluidui::live([this](Player& p) {
+            auto const& t = current();
             return fluidIcon(t.fluid(), t.empty() ? trFor(p, "abp.tank.name", "Tank Upgrade") : fluidName(&p, t.fluid()), {describe(&p, t)});
         }));
         setSlot(
@@ -418,7 +427,9 @@ public:
         if (!isTank(mCtx)) ui::MenuManager::get().close(player);
     }
 
-    std::optional<std::uint64_t> contentVersion() const override { return std::nullopt; }
+    /// Everything shown depends on the backpack only (tank settings, capacity): skip the per-tick
+    /// diff while it is unchanged.
+    std::optional<std::uint64_t> contentVersion() const override { return mCtx.backpack().revision(); }
 
     int quickMoveIn(Player&, ItemStack const& stack) override {
         if (stack.isNull()) return 0;
@@ -429,7 +440,19 @@ public:
     }
 
 private:
-    UpgradeContext mCtx;
+    /// The tank, read once per backpack revision (the gauge shows it in 10 slots).
+    fl::Tank const& current() {
+        auto rev = mCtx.backpack().revision();
+        if (!mCached || mCachedRevision != rev) {
+            mCached         = read(mCtx);
+            mCachedRevision = rev;
+        }
+        return *mCached;
+    }
+
+    UpgradeContext          mCtx;
+    std::optional<fl::Tank> mCached;
+    std::uint64_t           mCachedRevision = 0;
 };
 
 // ---- the upgrade --------------------------------------------------------------------------------
@@ -565,7 +588,26 @@ ABP_REGISTER_SELFTEST("tank.travels_with_item", [](Context& ctx) {
     ctx.check(read(UpgradeContext(b, 0)).contents() == FluidStack{"lava", 3000}, "contents kept in the upgrade item");
 });
 
-ABP_REGISTER_SELFTEST("tank.menu", [](Context& ctx) -> ll::coro::CoroTask<> {
+ABP_REGISTER_SELFTEST("tank.slots_are_not_storage", [](Context& ctx) {
+    auto& player = ctx.player();
+    auto  bp     = ctx.createBackpack(core::Tier::Leather);
+    UpgradeContext t(bp, ctx.installUpgrade(bp, "tank"));
+    ContainerSlot  in(t, true);
+    ctx.check(in.offer(itemOf("minecraft:water_bucket")) == 1, "water bucket processed");
+    ctx.check(in.content().id == "minecraft:bucket", "empty bucket left in the slot");
+    ctx.check(in.offer(itemOf("minecraft:bucket")) == 0, "unrelated empty buckets are not stored");
+    ctx.check(in.offer(itemOf("minecraft:stone")) == 0, "other items are refused");
+    auto taken = in.take(player, 1);
+    ctx.check(game::ItemConv::idOf(taken) == "minecraft:bucket" && in.content().empty(), "bucket taken out");
+    ctx.check(in.offer(itemOf("minecraft:stone")) == 0, "still no stone");
+    ctx.check(in.offer(itemOf("minecraft:bucket")) == 1, "what was taken can be handed back (framework rollback)");
+    ctx.check(in.offer(itemOf("minecraft:bucket")) == 0, "but not more than that");
+    ContainerSlot out(t, false);
+    ctx.check(out.offer(itemOf("minecraft:bucket")) == 1 && out.content().id == "minecraft:water_bucket", "output fills a bucket");
+    ctx.check(out.offer(itemOf("minecraft:water_bucket")) == 0, "filled buckets are not stored in the output");
+});
+
+ABP_REGISTER_SELFTEST("tank.menu",[](Context& ctx) -> ll::coro::CoroTask<> {
     auto& mm     = ui::MenuManager::get();
     auto& player = ctx.player();
     auto  bp     = ctx.createBackpack(core::Tier::Leather);

@@ -6,7 +6,7 @@
   "abp.pump.mode.output": "模式：排空储罐",
   "abp.pump.mode.output.help": "§7液体从储罐流入桶 / 世界。",
   "abp.pump.hand": "与手持的桶交互：{}",
-  "abp.pump.hand.help": "§7倒空 / 装满你手中的桶。",
+  "abp.pump.hand.help": "§7倒空 / 装满你手中的单个桶。",
   "abp.pump.world": "与世界交互：{}",
   "abp.pump.world.help1": "§7注入：抽取你所站位置的液体源。",
   "abp.pump.world.help2": "§7潜行并空手对方块使用：",

@@ -10,13 +10,19 @@
 #include <unordered_map>
 
 #include "ll/api/event/EventBus.h"
+#include "ll/api/event/player/PlayerDestroyBlockEvent.h"
 #include "ll/api/event/player/PlayerInteractBlockEvent.h"
+#include "ll/api/event/player/PlayerPlaceBlockEvent.h"
 
 #include "mc/deps/core/math/Vec3.h"
 #include "mc/deps/core/string/HashedString.h"
+#include "mc/world/actor/player/AbilitiesIndex.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockSource.h"
+#include "mc/world/level/block/actor/BlockActor.h"
+#include "mc/world/level/block/actor/BlockActorType.h"
+#include "mc/world/level/block/actor/CauldronBlockActor.h"
 #include "mc/world/level/block/Block.h"
 #include "mc/world/level/block/BlockChangeContext.h"
 #include "mc/world/level/block/CauldronLiquidType.h"
@@ -122,6 +128,41 @@ bool setCauldron(BlockSource& bs, BlockPos const& pos, std::string_view fluid) {
     auto full = withLiquid->setState<int>(VanillaStates::FillLevel(), fluid.empty() ? 0 : 6);
     if (!full) return false;
     return setBlock(bs, pos, *full);
+}
+
+/// Potion or dyed-water cauldrons keep their contents in the block actor: the pump leaves them alone.
+bool cauldronHasExtras(BlockSource& bs, BlockPos const& pos) {
+    auto* be = bs.getBlockEntity(pos);
+    if (!be || be->getType() != BlockActorType::Cauldron) return false;
+    auto const& cauldron = *static_cast<CauldronBlockActor const*>(be);
+    return cauldron.mHasCustomColor || cauldron.mPotionId > 0;
+}
+
+/// Whether `player` may change the block at `pos` like a bucket would: needs the build and mine
+/// abilities (no adventure / spectator) and the LeviLamina place / destroy events must not be
+/// cancelled (protection mods hook those).
+bool mayEdit(Player& player, BlockPos const& pos, bool place, int face = 1) {
+    if (!player.canUseAbility(AbilitiesIndex::Build) || !player.canUseAbility(AbilitiesIndex::Mine)) return false;
+    auto& bus = ll::event::EventBus::getInstance();
+    if (place) {
+        auto f  = static_cast<uchar>(face);
+        auto ev = ll::event::PlayerPlacingBlockEvent(player, pos, f);
+        bus.publish(ev);
+        return !ev.isCancelled();
+    }
+    auto ev = ll::event::PlayerDestroyBlockEvent(player, pos);
+    bus.publish(ev);
+    return !ev.isCancelled();
+}
+
+/// Blocks with their own use action (buttons, doors, ...): sneak + use keeps its vanilla meaning.
+bool hasOwnUseAction(Block const& block) {
+    static constexpr std::string_view kWords[] =
+        {"button", "lever", "door", "fence_gate", "bell", "repeater", "comparator", "noteblock", "daylight_detector"};
+    auto const& name = block.getTypeName();
+    return std::any_of(std::begin(kWords), std::end(kWords), [&](std::string_view w) {
+        return name.find(w) != std::string::npos;
+    });
 }
 
 bool ultraWarm(BlockSource& bs) { return bs.getDimension().mUltraWarm; }
@@ -231,7 +272,7 @@ bool pumpFromWorld(Player& player, BlockPos const& pos, UpgradeContext const& pu
     if (fluid.empty() || !settings.allows(fluid)) return false;
     auto bp = pump.backpackPtr();
     if (tank::fill(bp, {std::string(fluid), fl::kBucket}, true, true) < fl::kBucket) return false;
-    if (!setBlock(bs, pos, "minecraft:air")) return false;
+    if (!mayEdit(player, pos, false) || !setBlock(bs, pos, "minecraft:air")) return false;
     tank::fill(bp, {std::string(fluid), fl::kBucket}, false, true);
     return true;
 }
@@ -242,11 +283,12 @@ bool useOnBlock(Player& player, BlockPos const& pos, int face, UpgradeContext co
     Block const& block = bs.getBlock(pos);
     auto         bp    = pump.backpackPtr();
     if (isCauldron(block)) {
+        if (cauldronHasExtras(bs, pos)) return false;
         if (!settings.output) {
             auto fluid = fullCauldronFluid(block);
             if (fluid.empty() || !settings.allows(fluid)) return false;
             if (tank::fill(bp, {std::string(fluid), fl::kBucket}, true, true) < fl::kBucket) return false;
-            if (!setCauldron(bs, pos, {})) return false;
+            if (!mayEdit(player, pos, false) || !setCauldron(bs, pos, {})) return false;
             tank::fill(bp, {std::string(fluid), fl::kBucket}, false, true);
             return true;
         }
@@ -255,7 +297,7 @@ bool useOnBlock(Player& player, BlockPos const& pos, int face, UpgradeContext co
         auto fluid = firstPlaceable(bp, settings, true);
         if (fluid.empty()) return false;
         if (tank::drain(bp, fluid, fl::kBucket, true, true).amount < fl::kBucket) return false;
-        if (!setCauldron(bs, pos, fluid)) return false;
+        if (!mayEdit(player, pos, true, face) || !setCauldron(bs, pos, fluid)) return false;
         tank::drain(bp, fluid, fl::kBucket, false, true);
         return true;
     }
@@ -270,7 +312,7 @@ bool useOnBlock(Player& player, BlockPos const& pos, int face, UpgradeContext co
     auto fluid = firstPlaceable(bp, settings, !ultraWarm(bs));
     if (fluid.empty()) return false;
     if (tank::drain(bp, fluid, fl::kBucket, true, true).amount < fl::kBucket) return false;
-    if (!setBlock(bs, target, "minecraft:" + fluid)) return false;
+    if (!mayEdit(player, target, true, face) || !setBlock(bs, target, "minecraft:" + fluid)) return false;
     tank::drain(bp, fluid, fl::kBucket, false, true);
     return true;
 }
@@ -315,7 +357,7 @@ public:
             button(
                 s.hand ? "minecraft:water_bucket" : "minecraft:bucket",
                 trFor(player, "abp.pump.hand", "Interact with held bucket: {}", fluidui::onOff(player, s.hand)),
-                {trFor(player, "abp.pump.hand.help", "§7Empties / fills the bucket in your hand.")},
+                {trFor(player, "abp.pump.hand.help", "§7Empties / fills a single bucket held in your hand.")},
                 [](Settings& x) { x.hand = !x.hand; }
             )
         );
@@ -408,8 +450,8 @@ public:
         cd.ticks += tick.interval;
         auto settings = Settings::of(tick.ctx);
         if (cd.ticks < intervalFor(settings)) return;
-        if (pumpCycle(tick.player, tick.ctx.withPlayer(&tick.player))) cd.ticks = 0;
-        else cd.ticks = intervalFor(settings); // ready as soon as there's something to do
+        cd.ticks = 0;
+        pumpCycle(tick.player, tick.ctx.withPlayer(&tick.player));
     }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
@@ -482,19 +524,21 @@ public:
             [this](ll::event::PlayerInteractBlockEvent& ev) {
                 auto& player = ev.self();
                 if (player.isClientSide() || !player.isSneaking() || !ev.item().isNull()) return;
-                // The client repeats the use action while the button is held: one action per 250 ms.
+                if (auto block = ev.block(); block && hasOwnUseAction(*block)) return;
                 auto now = std::chrono::steady_clock::now();
                 auto id  = player.getOrCreateUniqueID().rawID;
-                if (auto it = mLast.find(id); it != mLast.end() && now - it->second < std::chrono::milliseconds(250)) {
-                    ev.cancel();
-                    return;
-                }
                 for (auto& [carried, bp] : game::carriedBackpacks(player)) {
                     auto pump = activePump(bp);
                     if (!pump) continue;
                     auto settings = Settings::of(*pump);
                     if (!settings.advanced || !settings.world) continue;
+                    // The client repeats the use action while the button is held: one action per 250 ms.
+                    if (auto it = mLast.find(id); it != mLast.end() && now - it->second < kRepeatDelay) {
+                        ev.cancel();
+                        return;
+                    }
                     if (useOnBlock(player, ev.blockPos(), static_cast<int>(ev.face()), pump->withPlayer(&player), settings)) {
+                        std::erase_if(mLast, [&](auto const& e) { return now - e.second >= kRepeatDelay; });
                         mLast[id] = now;
                         ev.cancel();
                         return;
@@ -509,6 +553,8 @@ public:
     }
 
 private:
+    static constexpr auto kRepeatDelay = std::chrono::milliseconds(250);
+
     ll::event::ListenerPtr                                                  mListener;
     std::unordered_map<std::int64_t, std::chrono::steady_clock::time_point> mLast;
 };
@@ -643,6 +689,17 @@ ABP_REGISTER_SELFTEST("pump.world", [](Context& ctx) {
     // World interaction off: nothing happens.
     s.world = false;
     ctx.check(!useOnBlock(player, cauldron, static_cast<int>(FacingID::Up), pump, s), "world interaction off");
+    s.world = true;
+
+    // Protection mods cancel LeviLamina's destroy / place events: the pump respects that.
+    (void)tank::drain(bp, "lava", 1000);
+    auto& bus  = ll::event::EventBus::getInstance();
+    auto  deny = bus.emplaceListener<ll::event::PlayerDestroyBlockEvent>([](ll::event::PlayerDestroyBlockEvent& ev) { ev.cancel(); });
+    ctx.require(setBlock(bs, spot, "minecraft:water"), "place a water source again");
+    ctx.check(!pumpFromWorld(player, spot, pump, s), "a cancelled destroy event blocks pumping");
+    ctx.check(sourceFluid(bs.getBlock(spot)) == fl::kWater && tank::amountOf(bp, "water") == 0, "source and tank unchanged");
+    bus.removeListener(deny);
+    ctx.check(pumpFromWorld(player, spot, pump, s), "allowed again without the listener");
     cleanup();
 });
 
