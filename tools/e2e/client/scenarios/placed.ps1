@@ -26,6 +26,8 @@ Save-Screenshot 'aim' | Out-Null
 
 # Sneak + right-click on the ground: the backpack is placed.
 Sneak $true
+Start-Sleep -Milliseconds 300
+Save-Screenshot 'sneaking' | Out-Null
 Click 0.5 0.5 -Relative -Right
 Start-Sleep -Milliseconds 400
 Sneak $false

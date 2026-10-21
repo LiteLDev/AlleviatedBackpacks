@@ -11,6 +11,8 @@
 
 #include "ll/api/event/ListenerBase.h"
 
+#include "mc/world/level/BlockPos.h"
+
 #include "core/ItemStackData.h"
 #include "game/Backpack.h"
 #include "ui/menu/BackpackMenu.h"
@@ -140,6 +142,16 @@ private:
     std::unordered_map<std::string, BlockLocation> mByUuid;
     std::vector<PlacedEntry>                       mPendingDrops; ///< items that could not be spawned yet
     std::map<BlockLocation, int>                   mMismatches;   ///< consecutive checks without our block
+    /// A sneak-use to place / pick up, run on the next tick (outside the item-use transaction).
+    struct PendingAction {
+        enum class Kind { Place, PickUp };
+        std::int64_t player; ///< ActorUniqueID
+        Kind         kind;
+        BlockPos     pos;
+        int          face;
+    };
+    std::vector<PendingAction>                     mActions;
+    void                                           runActions();
     std::vector<BlockLocation>                     mOrphans;   ///< our block without an entry: removed next tick
     std::unordered_map<std::int64_t, std::int64_t> mCooldowns; ///< player unique id -> tick of last action
     std::vector<ll::event::ListenerPtr>            mListeners;

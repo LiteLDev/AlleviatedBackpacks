@@ -15,6 +15,7 @@
 #include "ll/api/service/Bedrock.h"
 
 #include "mc/deps/core/string/HashedString.h"
+#include "mc/legacy/ActorUniqueID.h"
 #include "mc/server/commands/CommandOrigin.h"
 #include "mc/server/commands/CommandOutput.h"
 #include "mc/server/commands/CommandPermissionLevel.h"
@@ -583,8 +584,24 @@ void PlacedBackpacks::tickPlaced(int interval) {
     }
 }
 
+void PlacedBackpacks::runActions() {
+    auto actions = std::move(mActions);
+    mActions.clear();
+    auto level = ll::service::getLevel();
+    if (!level) return;
+    for (auto const& a : actions) {
+        ActorUniqueID id;
+        id.rawID     = a.player;
+        auto* player = level->getPlayer(id);
+        if (!player || !player->isAlive()) continue;
+        if (a.kind == PendingAction::Kind::Place) placeFromHand(*player, a.pos, a.face);
+        else pickUp(*player, a.pos);
+    }
+}
+
 void PlacedBackpacks::tick() {
     ++mNow;
+    if (!mActions.empty()) runActions();
     if (!mOrphans.empty()) {
         auto orphans = std::move(mOrphans);
         mOrphans.clear();
@@ -621,10 +638,14 @@ void PlacedBackpacks::install() {
         mOrphans.clear();
         mPendingDrops.clear();
         mMismatches.clear();
+        mActions.clear();
     }));
     mListeners.push_back(bus.emplaceListener<ll::event::ServerLevelTickEvent>([this](auto&) { tick(); }));
     mListeners.push_back(bus.emplaceListener<ll::event::BlockChangedEvent>([this](ll::event::BlockChangedEvent& ev) {
         if (mGuard > 0 || ev.layer() != 0) return;
+        // Client process: the client level fires block changes too (network updates, prediction
+        // reverts); only the server level is the truth.
+        if (ev.blockSource().getLevel().isClientSide()) return;
         if (mEntries.empty() && !isBackpackBlock(ev.newBlock())) return; // fast path
         onBlockChanged(ev.blockSource(), ev.pos(), ev.previousBlock(), ev.newBlock());
     }));
@@ -651,14 +672,18 @@ void PlacedBackpacks::install() {
             if (!ui::MenuManager::get().current(player)) open(player, pos);
             return;
         }
+        // Placing / picking up runs on the next tick, outside the item-use transaction: a
+        // cancelled (= failed) use makes the game roll back what changed during it (the item in
+        // the hand, the block), which would undo our work.
         if (ours && sneak && player.getSelectedItem().isNull()) {
             ev.cancel();
-            pickUp(player, pos);
+            mActions.push_back({key, PendingAction::Kind::PickUp, pos, 0});
+            mCooldowns[key] = mNow;
             return;
         }
         if (sneak && holdingBackpack) {
             ev.cancel();
-            placeFromHand(player, pos, static_cast<int>(ev.face()));
+            mActions.push_back({key, PendingAction::Kind::Place, pos, static_cast<int>(ev.face())});
             mCooldowns[key] = mNow; // also after a refused placement (no GUI right after)
         }
         // Sneaking with another item on a placed backpack: vanilla placement against it.
@@ -688,6 +713,7 @@ void PlacedBackpacks::uninstall() {
     mOrphans.clear();
     mPendingDrops.clear();
     mMismatches.clear();
+    mActions.clear();
     mCooldowns.clear();
 }
 
