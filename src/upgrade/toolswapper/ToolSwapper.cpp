@@ -23,6 +23,7 @@
 #include "game/PlayerScan.h"
 #include "mod/Config.h"
 #include "mod/I18n.h"
+#include "mod/Log.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
 
@@ -284,6 +285,12 @@ bool swapBest(Player& player, Purpose purpose, double minScore, Scorer const& sc
         }
     }
     game::setItemAt(player, hand, game::ItemConv::toStack(tool, 1));
+    log().info(
+        "tool swapper: {} swapped {} for {}",
+        player.getRealName(),
+        heldData.empty() ? "<empty>" : heldData.id,
+        tool.id
+    );
     return true;
 }
 

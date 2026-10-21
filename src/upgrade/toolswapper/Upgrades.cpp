@@ -113,14 +113,12 @@ public:
                      trFor(player, "abp.toolswapper.click_to_open", "§eClick to open")}
                 ),
                 [ctx = mCtx](ui::ClickContext const& c) {
-                    ui::MenuManager::get().closeThen(c.player, [ctx](Player& p) {
-                        ui::FilterMenu::Options opts;
-                        opts.onBack = [ctx](Player& back) { openSettingsMenu(back, ctx); };
-                        ui::MenuManager::get().open(
-                            p,
-                            ui::FilterMenu::forUpgrade(p, ctx, "filter", kFilterSlots, opts)
-                        );
-                    });
+                    ui::FilterMenu::Options opts;
+                    opts.onBack = [ctx](Player& back) { openSettingsMenu(back, ctx); };
+                    ui::MenuManager::get().open(
+                        c.player,
+                        ui::FilterMenu::forUpgrade(c.player, ctx, "filter", kFilterSlots, opts)
+                    );
                 }
             )
         );
@@ -129,9 +127,7 @@ public:
             std::make_shared<ui::ButtonSlot>(
                 ui::icon("minecraft:arrow", trFor(player, "abp.menu.back_generic", "Back")),
                 [bp = mCtx.backpackPtr()](ui::ClickContext const& c) {
-                    ui::MenuManager::get().closeThen(c.player, [bp](Player& p) {
-                        ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
-                    });
+                    ui::BackpackMenu::openBackpack(c.player, bp, {}, ui::BackpackMenu::View::Upgrades);
                 }
             )
         );
@@ -150,15 +146,8 @@ std::shared_ptr<ui::Menu> makeSettingsMenu(Player& player, UpgradeContext const&
     return std::make_shared<SettingsMenu>(std::move(title), ctx);
 }
 
-/// Opens the settings menu after closing whatever chest menu is open: replacing a double chest by
-/// a single one in place leaves the client without a screen.
 void SettingsMenu::openSettingsMenu(Player& player, UpgradeContext const& ctx) {
-    auto& mm = ui::MenuManager::get();
-    if (!mm.current(player)) {
-        mm.open(player, makeSettingsMenu(player, ctx));
-        return;
-    }
-    mm.closeThen(player, [ctx](Player& p) { ui::MenuManager::get().open(p, makeSettingsMenu(p, ctx)); });
+    ui::MenuManager::get().open(player, makeSettingsMenu(player, ctx));
 }
 
 class ToolSwapperUpgrade : public IUpgrade {
@@ -195,9 +184,6 @@ public:
     }
     [[nodiscard]] std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         return makeSettingsMenu(player, ctx);
-    }
-    void openSettings(Player& player, UpgradeContext const& ctx) override {
-        SettingsMenu::openSettingsMenu(player, ctx);
     }
     [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
         auto s = settingsOf(ctx);

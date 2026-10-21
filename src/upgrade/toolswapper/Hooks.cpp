@@ -1,17 +1,19 @@
 // Game hooks that drive the Tool Swapper:
 // - start of block breaking (GameMode / SurvivalMode::startDestroyBlock and the server-authoritative
-//   ServerPlayerBlockUseHandler::onStartDestroyBlock) -> best tool, before the break speed is used;
-// - attacks (GameMode / SurvivalMode::attack, plus LeviLamina's PlayerAttackEvent) -> best weapon,
-//   before the damage is computed;
+//   ServerPlayerBlockUseHandler::onStartDestroyBlock) -> best tool;
+// - attacks (GameMode / SurvivalMode::attack, plus LeviLamina's PlayerAttackEvent) -> best weapon;
 // - empty-hand interaction with a shearable mob, or sneak-use of a log/dirt/... block with an empty
-//   hand -> shears/axe/hoe/shovel. These swaps run on the next tick, so the vanilla interaction that
-//   is in progress never sees (or overwrites) the swapped item.
-// Each hook is idempotent: once the right item is held, the next hook in the chain does nothing.
+//   hand -> shears/axe/hoe/shovel.
+//
+// The hooks only record what happened; the swap itself runs at the start of the next server tick.
+// Swapping inside the hook is not safe on a real client: the input packet being processed still
+// holds a copy of the old main-hand item and writes it back afterwards, which would duplicate the
+// held item (now also in the backpack) and delete the tool. Breaking continues server-side with
+// the new tool, and the inventory is re-sent so the client predicts with it too.
 
 #include <cstdint>
 #include <set>
 #include <tuple>
-#include <unordered_map>
 #include <vector>
 
 #include "ll/api/event/EventBus.h"
@@ -38,52 +40,62 @@ namespace abp::upgrade::toolswapper {
 
 namespace {
 
-struct PendingUse {
-    bool         block = false;
+enum class Action : int { Break = 0, Attack = 1, UseBlock = 2, UseEntity = 3 };
+
+struct Pending {
+    std::int64_t player = 0;
+    Action       action = Action::Break;
     BlockPos     pos{};
     std::int64_t actor = 0;
 };
-std::unordered_map<std::int64_t, PendingUse> gPending; // player unique id -> interaction to serve
-/// (player, action, x, y, z) already evaluated this tick: several hooks see the same action (e.g.
-/// SurvivalMode -> GameMode -> Player::attack); only the first one searches the backpacks.
+std::vector<Pending> gPending; // served on the next tick, in order
+/// (player, action, x, y, z) already queued this tick: several hooks see the same action (e.g.
+/// SurvivalMode -> GameMode -> Player::attack); it is served once.
 std::set<std::tuple<std::int64_t, int, int, int, int>> gSeenThisTick;
 bool                                                   gInstalled = false;
 
 /// Cheap pre-filter; `swapBest` does the full checks (alive, creative, open menu, config).
 bool eligible(Player& p) { return gInstalled && !p.isClientSide(); }
 
-bool firstThisTick(Player& p, int action, BlockPos const& pos = {}) {
-    return gSeenThisTick.emplace(p.getOrCreateUniqueID().rawID, action, pos.x, pos.y, pos.z).second;
+void queue(Player& p, Action action, BlockPos const& pos = {}, std::int64_t actor = 0) {
+    auto id = p.getOrCreateUniqueID().rawID;
+    if (!gSeenThisTick.emplace(id, static_cast<int>(action), pos.x, pos.y, pos.z).second) return;
+    gPending.push_back(Pending{id, action, pos, actor});
 }
 
 void onStartBreak(Player& p, BlockPos const& pos) {
-    if (!eligible(p) || !firstThisTick(p, 0, pos)) return;
-    try {
-        swapForBlock(p, p.getDimensionBlockSourceConst().getBlock(pos));
-    } catch (std::exception const& e) {
-        log().error("tool swapper (block) failed: {}", e.what());
-    }
+    if (eligible(p)) queue(p, Action::Break, pos);
 }
 
 void onAttack(Player& p) {
-    if (!eligible(p) || !firstThisTick(p, 1)) return;
-    try {
-        swapForAttack(p);
-    } catch (std::exception const& e) {
-        log().error("tool swapper (attack) failed: {}", e.what());
-    }
+    if (eligible(p)) queue(p, Action::Attack);
 }
 
 void onUseBlock(Player& p, ItemStack const& item, BlockPos const& pos, Block const* block) {
     if (!eligible(p) || !item.isNull() || !p.isSneaking()) return;
     Block const& b = block ? *block : p.getDimensionBlockSourceConst().getBlock(pos);
-    if (useToolFor(b).empty()) return;
-    gPending[p.getOrCreateUniqueID().rawID] = PendingUse{true, pos, 0};
+    if (!useToolFor(b).empty()) queue(p, Action::UseBlock, pos);
 }
 
 void onInteractEntity(Player& p, Actor& target) {
     if (!eligible(p) || !p.getSelectedItem().isNull() || !isShearable(target)) return;
-    gPending[p.getOrCreateUniqueID().rawID] = PendingUse{false, {}, target.getOrCreateUniqueID().rawID};
+    queue(p, Action::UseEntity, {}, target.getOrCreateUniqueID().rawID);
+}
+
+bool serve(Level& level, Player& p, Pending const& job) {
+    auto const& region = p.getDimensionBlockSourceConst();
+    switch (job.action) {
+    case Action::Break:
+        return swapForBlock(p, region.getBlock(job.pos));
+    case Action::Attack:
+        return swapForAttack(p);
+    case Action::UseBlock:
+        return swapForBlockUse(p, region.getBlock(job.pos));
+    case Action::UseEntity:
+        if (auto* target = level.fetchEntity(ActorUniqueID{job.actor}, false)) return swapForEntityUse(p, *target);
+        return false;
+    }
+    return false;
 }
 
 void onTick(Level& level) {
@@ -91,17 +103,13 @@ void onTick(Level& level) {
     if (gPending.empty()) return;
     auto pending = std::move(gPending);
     gPending.clear();
-    for (auto const& [playerId, use] : pending) {
-        auto* p = level.getPlayer(ActorUniqueID{playerId});
+    for (auto const& job : pending) {
+        auto* p = level.getPlayer(ActorUniqueID{job.player});
         if (!p || !eligible(*p)) continue;
         try {
-            if (use.block) {
-                swapForBlockUse(*p, p->getDimensionBlockSourceConst().getBlock(use.pos));
-            } else if (auto* target = level.fetchEntity(ActorUniqueID{use.actor}, false)) {
-                swapForEntityUse(*p, *target);
-            }
+            if (serve(level, *p, job)) p->refreshInventory();
         } catch (std::exception const& e) {
-            log().error("tool swapper (use) failed: {}", e.what());
+            log().error("tool swapper failed: {}", e.what());
         }
     }
 }

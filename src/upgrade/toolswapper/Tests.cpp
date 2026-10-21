@@ -288,6 +288,7 @@ ABP_REGISTER_SELFTEST("toolswapper.hook_start_destroy", [](Context& ctx) -> ll::
     ctx.require(gm != nullptr, "game mode");
     bool destroyed = false;
     gm->startDestroyBlock(pos, 1, destroyed);
+    co_await ctx.ticks(2); // served on the next tick
     gm->stopDestroyBlock(pos);
     ctx.check(heldId(p) == "minecraft:diamond_shovel", "startDestroyBlock swapped in the shovel, got " + heldId(p));
     ctx.check(bp->inventory().at(6).id == "minecraft:stick", "stick stored");
@@ -322,13 +323,14 @@ ABP_REGISTER_SELFTEST("toolswapper.hook_attack", [](Context& ctx) -> ll::coro::C
     auto* sheep  = spawnSheep(ctx, p, ground);
     auto  id     = sheep->getOrCreateUniqueID();
     co_await ctx.ticks(2);
-    if (auto* s = p.getLevel().fetchEntity(id, false)) {
-        p.mGameMode.get()->attack(*s, s->getPosition());
-        ctx.check(heldId(p) == "minecraft:stone_sword", "attack swapped in the sword, got " + heldId(p));
-        s->despawn();
-    } else {
-        ctx.fail("sheep vanished");
-    }
+    auto* s = p.getLevel().fetchEntity(id, false);
+    ctx.require(s != nullptr, "sheep present");
+    p.mGameMode.get()->attack(*s, s->getPosition());
+    // The swap is served at the start of the next tick.
+    co_await ctx.ticks(2);
+    ctx.check(heldId(p) == "minecraft:stone_sword", "attack swapped in the sword, got " + heldId(p));
+    ctx.check(bp->inventory().at(2).empty(), "sword left its slot (empty hand: nothing to store)");
+    if (auto* again = p.getLevel().fetchEntity(id, false)) again->despawn();
 });
 
 ABP_REGISTER_SELFTEST("toolswapper.shears_and_use", [](Context& ctx) -> ll::coro::CoroTask<> {

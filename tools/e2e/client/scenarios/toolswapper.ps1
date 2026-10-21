@@ -25,8 +25,9 @@ $mark = Get-LogMark
 Click 0.5 0.5 -Relative -Right
 Wait-LogLine 'menu shown: Diamond Backpack \(54 slots\)' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 800
-$p = HotbarSlot 2
-[AbpE2E.Native]::Key(0x10, $false); Click $p[0] $p[1] -Relative; [AbpE2E.Native]::Key(0x10, $true)
+$p = HotbarSlot 2; Click $p[0] $p[1] -Relative   # pickaxe -> cursor
+Start-Sleep -Milliseconds 300
+$p = MenuSlot 0;   Click $p[0] $p[1] -Relative   # -> first backpack slot
 Start-Sleep -Milliseconds 600
 
 # 2. Upgrades page; put the upgrade into the first upgrade slot.
@@ -59,12 +60,18 @@ if ($line -notmatch ' items=1 ' -or $line -notmatch 'advanced_tool_swapper') { t
 
 # 4. Hold cobblestone, look straight down at a stone block and mine it.
 Invoke-Chat '/setblock ~ ~-1 ~ stone'
-Invoke-Chat '/tp @s ~ ~ ~ 0 90'
+Invoke-Chat '/tp @s ~ ~ ~ facing ~ ~-5 ~'
 Press-Key '4'
 Start-Sleep -Milliseconds 600
 Save-Screenshot 'before-mining' | Out-Null
 Assert-GameForeground
-[AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 2500; [AbpE2E.Native]::MouseButton(0, $true)
+$mark = Get-LogMark
+[AbpE2E.Native]::MouseButton(0, $false)
+Start-Sleep -Milliseconds 300
+Save-Screenshot 'mining' | Out-Null
+Start-Sleep -Milliseconds 2200
+[AbpE2E.Native]::MouseButton(0, $true)
+Wait-LogLine 'tool swapper: .* swapped minecraft:cobblestone for minecraft:diamond_pickaxe' 5 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'after-mining' | Out-Null
 
@@ -75,4 +82,12 @@ $mark = Get-LogMark
 Invoke-Chat '/backpack info'
 $line = Wait-LogLine 'backpack info: ' 10 -Since $mark
 if ($line -notmatch ' items=10 ') { throw "expected the 10 cobblestone in the backpack after the swap, got: $line" }
+
+# Evidence: the backpack shows the cobblestone in the pickaxe's old slot, the hotbar the pickaxe.
+$mark = Get-LogMark
+Click 0.5 0.5 -Relative -Right
+Wait-LogLine 'menu shown: Diamond Backpack \(54 slots\)' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 800
+Save-Screenshot 'backpack-after-swap' | Out-Null
+Close-Screen
 Assert-NoErrors
