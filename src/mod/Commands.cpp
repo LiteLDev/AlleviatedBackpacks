@@ -132,10 +132,12 @@ void registerAll() {
         upgrade::forEachInstalled(bp, false, [&](upgrade::IUpgrade& u, upgrade::UpgradeContext const& ctx) {
             ups += (ups.empty() ? "" : ", ") + u.info().id + (ctx.state().enabled ? "" : " (off)");
         });
-        output.success(
-            "uuid=" + *uuid + " tier=" + std::string(core::tierInfo(bp->tier()).id)
-            + " slots=" + std::to_string(bp->inventory().size()) + " upgrades=[" + ups + "]"
-        );
+        auto items = bp->inventory().count([](core::ItemStackData const&) { return true; });
+        auto line  = "uuid=" + *uuid + " tier=" + std::string(core::tierInfo(bp->tier()).id)
+                  + " slots=" + std::to_string(bp->inventory().size()) + " items=" + std::to_string(items)
+                  + " upgrades=[" + ups + "]";
+        log().info("backpack info: {}", line);
+        output.success(line);
     });
 
     for (auto const& fn : SubcommandRegistry::entries()) fn(cmd);

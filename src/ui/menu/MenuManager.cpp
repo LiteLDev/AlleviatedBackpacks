@@ -17,6 +17,7 @@
 #include "mc/legacy/ActorUniqueID.h"
 #include "mc/network/MinecraftPacketIds.h"
 #include "mc/network/MinecraftPackets.h"
+#include "mc/network/NetEventCallback.h"
 #include "mc/network/ServerNetworkHandler.h"
 #include "mc/network/packet/BlockActorDataPacket.h"
 #include "mc/network/packet/ContainerClosePacket.h"
@@ -433,6 +434,7 @@ void MenuManager::tick() {
             o.mEntityUniqueID = ActorUniqueID::INVALID_ID();
             o.sendTo(*player);
             s.shown = true;
+            log().info("menu shown: {} ({} slots)", s.menu->title(), s.menu->size());
             sync(*player, s, true);
             continue;
         }
@@ -911,6 +913,8 @@ bool MenuManager::handleClosePacket(Player& player, int containerId) {
 // ---------------------------------------------------------------------------------------------
 
 namespace {
+// $handle overrides a NetEventCallback virtual: the hooked `this` is that base subobject, so use
+// thisFor<NetEventCallback>() (like LeviLamina does) to reach ServerNetworkHandler members.
 LL_TYPE_INSTANCE_HOOK(
     MenuItemStackRequestHook,
     ll::memory::HookPriority::High,
@@ -920,7 +924,7 @@ LL_TYPE_INSTANCE_HOOK(
     NetworkIdentifier const&      source,
     ItemStackRequestPacket const& packet
 ) {
-    if (auto* player = this->_getServerPlayer(source, packet.mSenderSubId)) {
+    if (auto* player = thisFor<NetEventCallback>()->_getServerPlayer(source, packet.mSenderSubId)) {
         if (MenuManager::get().handleRequestPacket(*player, &packet)) return;
     }
     origin(source, packet);
@@ -935,7 +939,7 @@ LL_TYPE_INSTANCE_HOOK(
     NetworkIdentifier const&    source,
     ContainerClosePacket const& packet
 ) {
-    if (auto* player = this->_getServerPlayer(source, packet.mSenderSubId)) {
+    if (auto* player = thisFor<NetEventCallback>()->_getServerPlayer(source, packet.mSenderSubId)) {
         if (MenuManager::get().handleClosePacket(*player, static_cast<int>(static_cast<schar>(packet.mContainerId)))) {
             return;
         }

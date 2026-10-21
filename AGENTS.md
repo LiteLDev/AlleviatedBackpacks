@@ -130,6 +130,8 @@ folder is `plugins`), or `bin/client/AlleviatedBackpacks` to
   members are fields (`.get()`, `*`, `->`). Packets without an MCAPI constructor are created with
   `MinecraftPackets::createPacket(MinecraftPacketIds::X)` + `static_cast`; send with `pkt.sendTo(player)`.
 - Hook virtuals via `&Cls::$fn` with `LL_TYPE_INSTANCE_HOOK`; `hook()` in `install()`, `unhook()` in `uninstall()`.
+- In `ServerNetworkHandler::$handle` hooks `this` is the `NetEventCallback` base subobject: use
+  `thisFor<NetEventCallback>()->_getServerPlayer(source, packet.mSenderSubId)` (`this->` crashes).
 - **No `dynamic_cast` on game types** (they have no usable RTTI: it throws `__non_rtti_object`).
   A Player that is not `isClientSide()` is a `ServerPlayer`.
 - Types used as command parameters must have external linkage (not in an anonymous namespace).
