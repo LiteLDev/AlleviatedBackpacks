@@ -1,0 +1,32 @@
+{
+  "abp.tiers.name.leather": "Leather",
+  "abp.tiers.name.copper": "Copper",
+  "abp.tiers.name.iron": "Iron",
+  "abp.tiers.name.gold": "Gold",
+  "abp.tiers.name.diamond": "Diamond",
+  "abp.tiers.name.netherite": "Netherite",
+
+  "abp.tiers.lore.tier": "§7Tier: §f{}",
+  "abp.tiers.lore.storage": "§7Storage: §f{}/{} slots §8({}% full)",
+  "abp.tiers.lore.upgrades": "§7Upgrades: §f{}/{}",
+  "abp.tiers.lore.upgrade_on": "§8 - §a{}",
+  "abp.tiers.lore.upgrade_off": "§8 - §7{} §8(off)",
+  "abp.tiers.lore.colors": "§7Colors: §f{} §7/ §f{}",
+
+  "abp.tiers.color.white": "White",
+  "abp.tiers.color.orange": "Orange",
+  "abp.tiers.color.magenta": "Magenta",
+  "abp.tiers.color.light_blue": "Light Blue",
+  "abp.tiers.color.yellow": "Yellow",
+  "abp.tiers.color.lime": "Lime",
+  "abp.tiers.color.pink": "Pink",
+  "abp.tiers.color.gray": "Gray",
+  "abp.tiers.color.light_gray": "Light Gray",
+  "abp.tiers.color.cyan": "Cyan",
+  "abp.tiers.color.purple": "Purple",
+  "abp.tiers.color.blue": "Blue",
+  "abp.tiers.color.brown": "Brown",
+  "abp.tiers.color.green": "Green",
+  "abp.tiers.color.red": "Red",
+  "abp.tiers.color.black": "Black"
+}
