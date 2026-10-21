@@ -1,0 +1,27 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:netherite_backpack_dye_cyan"
+    },
+    "tags": [
+      "crafting_table"
+    ],
+    "ingredients": [
+      {
+        "item": "alleviatedbackpacks:netherite_backpack"
+      },
+      {
+        "item": "minecraft:cyan_dye"
+      }
+    ],
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:netherite_backpack"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:netherite_backpack"
+    }
+  }
+}
