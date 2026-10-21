@@ -326,10 +326,10 @@ bool hasActive(game::Backpack const& backpack, std::string_view idOrGroup) {
 
 int dispatchPickup(Player& player, core::ItemStackData& item) {
     int before = item.count;
-    for (auto& [carried, bp] : game::carriedBackpacks(player)) {
+    for (auto& [carried, bp] : game::carriedBackpacks(player, false, true)) {
         if (item.empty()) break;
         forEachInstalled(bp, true, [&](IUpgrade& u, UpgradeContext const& ctx) {
-            if (item.empty()) return;
+            if (item.empty() || !carried.upgradeActive(u.info().id, u.info().groupOrId())) return;
             try {
                 u.onPickup(ctx.withPlayer(&player), item);
             } catch (std::exception const& e) {

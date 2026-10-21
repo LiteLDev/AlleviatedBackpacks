@@ -89,6 +89,9 @@ struct TickContext {
     Player&            player;   ///< the carrier
     game::ItemLocation where;    ///< where the backpack item is on the player
     int                interval; ///< game ticks since this backpack's previous tick
+    /// > 0: this backpack is stored inside a carried backpack (Inception); `where` is then the
+    /// outermost carried backpack's item, not this backpack's: don't write to it.
+    int                nestedDepth = 0;
 };
 
 /// Behaviour of one upgrade type. Implementations are stateless singletons: all per-instance

@@ -1,0 +1,22 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:inception_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "ESE",
+      "DBD",
+      "EDE"
+    ],
+    "key": {
+      "E": { "item": "minecraft:ender_eye" },
+      "S": { "item": "minecraft:nether_star" },
+      "D": { "item": "minecraft:diamond" },
+      "B": { "item": "alleviatedbackpacks:upgrade_base" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:inception_upgrade" }
+  }
+}

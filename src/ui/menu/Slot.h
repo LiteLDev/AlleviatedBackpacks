@@ -8,6 +8,7 @@
 #include "mc/world/item/ItemStack.h"
 
 #include "core/ItemStackData.h"
+#include "mod/Registry.h"
 
 class Player;
 
@@ -106,6 +107,8 @@ class StorageSlot : public Slot {
 public:
     StorageSlot(std::shared_ptr<game::Backpack> backpack, int index) : mBackpack(std::move(backpack)), mIndex(index) {}
     [[nodiscard]] ItemStack display(Player& player) const override;
+    /// Runs the registered storage click handlers (`ABP_REGISTER_STORAGE_CLICK`); default: none.
+    bool                    click(ClickContext const& ctx) override;
     ItemStack               take(Player& player, int amount) override;
     int                     accept(Player& player, ItemStack const& stack) override;
 
@@ -115,6 +118,19 @@ private:
     std::shared_ptr<game::Backpack> mBackpack;
     int                             mIndex;
 };
+
+/// Extension point for clicks on backpack storage slots (e.g. Inception opens a nested backpack
+/// when it is dropped with Q). Called before any item moves; return true to handle the click
+/// (nothing moves). Handlers run in registration order; the first that returns true wins.
+using StorageClickHandler =
+    std::function<bool(ClickContext const& ctx, std::shared_ptr<game::Backpack> const& backpack, int index)>;
+using StorageClickRegistry = StaticRegistry<StorageClickHandler>;
+
+namespace detail {
+struct StorageClickRegistrar {
+    explicit StorageClickRegistrar(StorageClickHandler h) { StorageClickRegistry::add(std::move(h)); }
+};
+} // namespace detail
 
 /// A slot made of callbacks, for one-off custom behaviour.
 class CallbackSlot : public Slot {
@@ -131,3 +147,7 @@ public:
 };
 
 } // namespace abp::ui
+
+/// Adds a backpack storage-slot click handler (see `abp::ui::StorageClickHandler`).
+#define ABP_REGISTER_STORAGE_CLICK(...)                                                                                \
+    static ::abp::ui::detail::StorageClickRegistrar ABP_UNIQUE(abp_storage_click_)(__VA_ARGS__)
