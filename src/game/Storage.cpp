@@ -1,5 +1,7 @@
 #include "game/Storage.h"
 
+#include <unordered_set>
+
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/server/ServerStartedEvent.h"
 #include "ll/api/event/server/ServerStoppingEvent.h"
@@ -128,6 +130,30 @@ void Storage::unload(std::string const& uuid) {
     if (it == mCache.end()) return;
     save(*it->second.backpack);
     mCache.erase(it);
+}
+
+std::vector<std::string> Storage::storedUuids() const {
+    std::vector<std::string> out;
+    auto*                    db = levelStorage();
+    if (!db) return out;
+    std::string const               prefix = keyOf("");
+    std::unordered_set<std::string> seen;
+    db->forEachKeyWithPrefix(prefix, DBHelpers::Category::Uncategorized, [&](std::string_view key, std::string_view) {
+        if (key.starts_with(prefix)) key.remove_prefix(prefix.size()); // some DB versions pass the full key
+        if (!key.empty() && seen.emplace(key).second) out.emplace_back(key);
+    });
+    // Created but not yet flushed to the DB (create() saves at once, so this is rare).
+    for (auto const& [uuid, _] : mCache) {
+        if (seen.insert(uuid).second) out.push_back(uuid);
+    }
+    return out;
+}
+
+void Storage::forEachLoaded(std::function<void(std::shared_ptr<Backpack> const&)> const& fn) const {
+    std::vector<std::shared_ptr<Backpack>> loaded; // copy: `fn` may touch the cache
+    loaded.reserve(mCache.size());
+    for (auto const& [_, e] : mCache) loaded.push_back(e.backpack);
+    for (auto const& bp : loaded) fn(bp);
 }
 
 void Storage::evictUnused() {

@@ -1,0 +1,35 @@
+{
+  "abp.admin.upgrade_disabled": "此升级已在本服务器上禁用。",
+  "abp.admin.upgrade_disabled_lore": "§c已在本服务器上禁用",
+  "abp.admin.err.one_target": "请只选择一名玩家（副本与原背包共享存储）。",
+  "abp.admin.test_upgrade": "管理测试升级",
+
+  "abp.admin.err.permission": "你需要管理员权限。",
+  "abp.admin.err.uuid_short": "请至少输入 UUID 的前 4 个字符。",
+  "abp.admin.err.uuid_ambiguous": "有多个背包匹配 {}。",
+  "abp.admin.err.uuid_unknown": "没有 UUID 为 {} 的背包。",
+  "abp.admin.err.no_target": "没有匹配的玩家。",
+
+  "abp.admin.list.header": "共 {} 个已存储的背包：",
+  "abp.admin.list.header_holder": "{1} 的背包共 {0} 个：",
+  "abp.admin.list.line": "{} §7{}§r {}/{} 格，{} 个物品，{} 个升级，持有者：{}，最后出现：{}",
+  "abp.admin.list.first": "（首个持有者：{}）",
+  "abp.admin.list.legacy": "（追踪开始前已存在）",
+  "abp.admin.list.nobody": "（从未被玩家持有）",
+  "abp.admin.list.more": "……另有 {} 个",
+
+  "abp.admin.info.upgrades": "升级：[{}]",
+  "abp.admin.info.holders": "首个持有者：{}（{}），最后持有者：{}（{}）",
+
+  "abp.admin.stats.line": "背包：已存储 {} 个（已加载 {} 个），共 {} 个物品；空背包 {} 个，从未被持有 {} 个，无法读取 {} 个，死亡保留 {} 份",
+  "abp.admin.stats.tiers": "各等级数量：{}",
+
+  "abp.admin.give.ok": "已将背包 {} 给予 {}。",
+  "abp.admin.remove.ok": "已删除背包 {}。",
+  "abp.admin.removenonplayer.ok": "已删除 {} 个从未被玩家持有的背包。",
+  "abp.admin.cleanup.ok": "已删除 {} 个空的、未使用的背包。",
+
+  "abp.admin.openfor.title": "背包 {}",
+  "abp.admin.openfor.failed": "无法打开该背包。",
+  "abp.admin.openfor.ok": "已打开背包 {}。"
+}
