@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "ll/api/event/ListenerBase.h"
 
@@ -63,6 +64,11 @@ public:
     using CreateListener = std::function<void(ItemStack& stack, std::shared_ptr<Backpack> const& backpack)>;
     int  addCreateListener(CreateListener fn);
     void removeCreateListener(int id);
+
+    /// Uuids of every backpack stored in the world (loaded or not), in DB key order.
+    [[nodiscard]] std::vector<std::string> storedUuids() const;
+    /// Calls `fn` for every currently loaded (cached) backpack.
+    void forEachLoaded(std::function<void(std::shared_ptr<Backpack> const&)> const& fn) const;
 
     /// Drops cached backpacks nobody else references and nobody looked up for a while (after
     /// saving them). Carried backpacks are looked up by the ticker, so they stay loaded.
