@@ -14,12 +14,6 @@
       "part_visibility": [
         {
           "body": "v.is_worn"
-        },
-        {
-          "rightItem": "!v.is_worn && !v.in_off_hand"
-        },
-        {
-          "leftItem": "v.in_off_hand"
         }
       ]
     }

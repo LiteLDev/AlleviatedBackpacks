@@ -14,8 +14,7 @@
       },
       "scripts": {
         "pre_animation": [
-          "v.is_worn = c.item_slot == 'chest';",
-          "v.in_off_hand = c.item_slot == 'off_hand';"
+          "v.is_worn = q.is_item_name_any('slot.armor.chest', 0, 'alleviatedbackpacks:gold_backpack');"
         ]
       },
       "render_controllers": [
