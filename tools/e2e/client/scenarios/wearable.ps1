@@ -2,7 +2,6 @@
 # (third-person views), in the hand, on a zombie, and opening the worn backpack by double sneak.
 function Press-F5 { Assert-GameForeground; [AbpE2E.Native]::Key(0x74, $false); Start-Sleep -Milliseconds 60; [AbpE2E.Native]::Key(0x74, $true); Start-Sleep -Milliseconds 600 }
 
-Invoke-Chat '/difficulty normal'
 $r = Invoke-SelfTest 'wearable.*'
 if ($r.Fail -gt 0 -or $r.Pass -lt 9) { throw "wearable selftests: pass=$($r.Pass) fail=$($r.Fail)" }
 
@@ -59,6 +58,7 @@ Save-Screenshot 'double-sneak-menu' | Out-Null
 Close-Screen
 
 # A zombie wearing a backpack (mobs render chest attachables too).
+Invoke-Chat '/difficulty normal'
 Invoke-Chat '/summon husk ~ ~ ~4'
 Start-Sleep -Milliseconds 500
 Invoke-Chat '/replaceitem entity @e[type=husk] slot.armor.chest 0 alleviatedbackpacks:diamond_backpack'

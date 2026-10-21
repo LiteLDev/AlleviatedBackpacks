@@ -5,6 +5,7 @@
 
 #include <cmath>
 
+#include "mc/deps/shared_types/legacy/Difficulty.h"
 #include "mc/deps/shared_types/legacy/actor/ActorDamageCause.h"
 #include "mc/deps/shared_types/legacy/actor/ArmorSlot.h"
 #include "mc/server/SimulatedPlayer.h"
@@ -59,7 +60,19 @@ struct ConfigGuard {
     WearableConfig& cfg() { return config::mut<WearableConfig>(); }
 };
 
-class ProbeUpgrade : public upgrade::IUpgrade {
+/// Hostile mobs can't spawn in peaceful: raises the difficulty for the test, restores it after.
+struct DifficultyGuard {
+    Level&                            level;
+    SharedTypes::Legacy::Difficulty   saved;
+    explicit DifficultyGuard(Level& l) : level(l), saved(l.getDifficulty()) {
+        if (saved == SharedTypes::Legacy::Difficulty::Peaceful) level.setDifficulty(SharedTypes::Legacy::Difficulty::Normal);
+    }
+    DifficultyGuard(DifficultyGuard const&)            = delete;
+    DifficultyGuard& operator=(DifficultyGuard const&) = delete;
+    ~DifficultyGuard() { level.setDifficulty(saved); }
+};
+
+class ProbeUpgrade: public upgrade::IUpgrade {
 public:
     upgrade::UpgradeInfo mInfo{
         .id           = "wearable_probe",
@@ -263,6 +276,7 @@ ABP_REGISTER_SELFTEST("wearable.tier_rolls", [](Context& ctx) {
 
 ABP_REGISTER_SELFTEST("wearable.mob_spawns_with_backpack", [](Context& ctx) -> ll::coro::CoroTask<> {
     co_await groundPlayer(ctx);
+    DifficultyGuard difficulty(ctx.player().getLevel());
     ConfigGuard guard;
     auto&       c = guard.cfg().mobs;
     c.enabled     = true;
@@ -292,6 +306,7 @@ ABP_REGISTER_SELFTEST("wearable.mob_spawns_with_backpack", [](Context& ctx) -> l
 
 ABP_REGISTER_SELFTEST("wearable.mob_drops_to_players_only", [](Context& ctx) -> ll::coro::CoroTask<> {
     co_await groundPlayer(ctx);
+    DifficultyGuard difficulty(ctx.player().getLevel());
     ConfigGuard guard;
     guard.cfg().mobs.chance                      = 0.0f;
     guard.cfg().mobs.dropChanceNotKilledByPlayer = 0.0f;
