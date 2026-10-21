@@ -1,0 +1,23 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:advanced_jukebox_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      "DJD",
+      "GBG",
+      "RGR"
+    ],
+    "key": {
+      "D": { "item": "minecraft:diamond" },
+      "J": { "item": "minecraft:jukebox" },
+      "G": { "item": "minecraft:gold_ingot" },
+      "B": { "item": "alleviatedbackpacks:upgrade_base" },
+      "R": { "item": "minecraft:redstone" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:advanced_jukebox_upgrade" }
+  }
+}

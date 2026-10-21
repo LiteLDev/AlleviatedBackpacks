@@ -1,0 +1,19 @@
+{
+  "abp.pump.name": "Pump Upgrade",
+  "abp.pump.advanced.name": "Advanced Pump Upgrade",
+  "abp.pump.mode.input": "Mode: fill the tanks",
+  "abp.pump.mode.input.help": "§7Fluid goes from buckets / the world into the tanks.",
+  "abp.pump.mode.output": "Mode: empty the tanks",
+  "abp.pump.mode.output.help": "§7Fluid goes from the tanks into buckets / the world.",
+  "abp.pump.hand": "Interact with held bucket: {}",
+  "abp.pump.hand.help": "§7Empties / fills a single bucket held in your hand.",
+  "abp.pump.world": "Interact with the world: {}",
+  "abp.pump.world.help1": "§7Input: pumps fluid sources you stand in.",
+  "abp.pump.world.help2": "§7Sneak + use with an empty hand on a block:",
+  "abp.pump.world.help3": "§7pump / place fluid, drain / fill cauldrons.",
+  "abp.pump.filter": "Fluid filter ▶",
+  "abp.pump.filter.help1": "§7Put a filled bucket or bottle to allow its fluid.",
+  "abp.pump.filter.help2": "§7Empty filter: every fluid.",
+  "abp.pump.filter.list": "§7Filter: §f{}",
+  "abp.pump.no_tank": "§cInstall a Tank Upgrade to store fluids."
+}

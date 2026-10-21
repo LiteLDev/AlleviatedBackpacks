@@ -1,0 +1,22 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:advanced_feeding_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      " D ",
+      "GFG",
+      "RRR"
+    ],
+    "key": {
+      "D": { "item": "minecraft:diamond" },
+      "G": { "item": "minecraft:gold_ingot" },
+      "F": { "item": "alleviatedbackpacks:feeding_upgrade" },
+      "R": { "item": "minecraft:redstone" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:feeding_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:advanced_feeding_upgrade" }
+  }
+}

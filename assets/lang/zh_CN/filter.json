@@ -1,0 +1,22 @@
+{
+  "abp.upgrade.filter.name": "过滤升级",
+  "abp.upgrade.advanced_filter.name": "高级过滤升级",
+
+  "abp.filter_upgrade.direction": "方向：{}",
+  "abp.filter_upgrade.direction.both": "输入和输出",
+  "abp.filter_upgrade.direction.input": "仅输入",
+  "abp.filter_upgrade.direction.output": "仅输出",
+  "abp.filter_upgrade.direction.help": "§7过滤器检查哪些自动化传输",
+
+  "abp.filter_upgrade.lore.empty_allow": "§7过滤器为空：§a接受所有物品",
+  "abp.filter_upgrade.lore.empty_deny": "§7黑名单为空：§a接受所有物品",
+  "abp.filter_upgrade.lore.allow": "§7白名单：§f{} 种物品",
+  "abp.filter_upgrade.lore.deny": "§7黑名单：§f{} 种物品",
+  "abp.filter_upgrade.lore.allow_tags": "§7白名单：§f{} 个标签",
+  "abp.filter_upgrade.lore.deny_tags": "§7黑名单：§f{} 个标签",
+  "abp.filter_upgrade.lore.match_namespace": "§7按命名空间（模组）匹配",
+  "abp.filter_upgrade.lore.match_tag": "§7按标签匹配",
+  "abp.filter_upgrade.lore.nbt": "§7匹配 NBT",
+  "abp.filter_upgrade.lore.durability": "§7匹配耐久度",
+  "abp.filter_upgrade.lore.direction": "§7方向：§f{}"
+}

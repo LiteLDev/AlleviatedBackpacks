@@ -1,0 +1,14 @@
+{
+  "abp.stonecutter.name": "Stonecutter Upgrade",
+  "abp.stonecutter.title": "Stonecutter",
+  "abp.stonecutter.button": "Stonecutter",
+  "abp.stonecutter.selected": "§a» Selected",
+  "abp.stonecutter.select": "§7Click to select",
+  "abp.stonecutter.help_input": "§7Put blocks into the slot below",
+  "abp.stonecutter.help_select": "§7Pick an output on the right",
+  "abp.stonecutter.help_click": "§7Click the result to cut one",
+  "abp.stonecutter.help_shift": "§7Shift-click the result to cut as many as possible",
+  "abp.stonecutter.next_page_hint": "§7Click for the next page",
+  "abp.stonecutter.page": "Outputs page {} of {}",
+  "abp.stonecutter.describe_selected": "§7Output: {}"
+}

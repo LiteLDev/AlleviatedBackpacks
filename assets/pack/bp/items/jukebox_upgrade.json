@@ -1,0 +1,14 @@
+{
+  "format_version": "1.21.40",
+  "minecraft:item": {
+    "description": {
+      "identifier": "alleviatedbackpacks:jukebox_upgrade",
+      "menu_category": { "category": "items" }
+    },
+    "components": {
+      "minecraft:icon": "abp_jukebox_upgrade",
+      "minecraft:max_stack_size": 1,
+      "minecraft:display_name": { "value": "item.alleviatedbackpacks:jukebox_upgrade.name" }
+    }
+  }
+}

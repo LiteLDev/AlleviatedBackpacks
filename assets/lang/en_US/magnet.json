@@ -1,0 +1,10 @@
+{
+  "abp.magnet.magnet.name": "Magnet Upgrade",
+  "abp.magnet.advanced_magnet.name": "Advanced Magnet Upgrade",
+  "abp.magnet.items": "Pick up items: {}",
+  "abp.magnet.xp": "Pick up XP: {}",
+  "abp.magnet.lore.range": "§7Range: §f{} blocks",
+  "abp.magnet.lore.items": "§7Pick up items: {}",
+  "abp.magnet.lore.xp": "§7Pick up XP: {}",
+  "abp.magnet.lore.filter": "§7Filter: §f{} item(s)"
+}
