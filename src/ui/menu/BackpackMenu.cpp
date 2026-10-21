@@ -59,6 +59,9 @@ public:
             s.enabled ? trFor(player, "abp.menu.upgrade.enabled", "§aEnabled")
                       : trFor(player, "abp.menu.upgrade.disabled", "§cDisabled")
         );
+        if (type && !upgrade::typeAllowed(*type)) {
+            lore.push_back(trFor(player, "abp.admin.upgrade_disabled_lore", "§cDisabled on this server"));
+        }
         if (type) {
             auto extra = type->describe(player, upgrade::UpgradeContext(mBackpack, mIndex, &player));
             lore.insert(lore.end(), extra.begin(), extra.end());
