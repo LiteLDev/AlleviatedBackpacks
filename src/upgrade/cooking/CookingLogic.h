@@ -168,8 +168,8 @@ struct AutoEnv {
 [[nodiscard]] inline bool isAutoFuel(core::ItemStackData const& item, CookEnv const& env, AutoEnv const& a) {
     if (item.empty() || !env.burnTicks || !a.fuelFilter.passes(item, a.tags)) return false;
     if (env.burnTicks(item.withCount(1)) <= 0) return false;
-    if (isAutoInput(item, env, a) && !explicitlyAllowed(a.fuelFilter, item, a.tags)) return false;
-    return true;
+    if (explicitlyAllowed(a.fuelFilter, item, a.tags)) return true;
+    return !isAutoInput(item, env, a);
 }
 
 /// Auto variants: moves the output slot into the storage. Returns true if anything moved.
@@ -240,9 +240,10 @@ inline bool pullFuel(CookState& s, CookEnv const& env, AutoEnv const& a) {
     return changed;
 }
 
-/// One automatic exchange with the storage: push output, pull input, pull fuel.
+/// One automatic exchange with the storage: push output and spent fuel, pull input, pull fuel.
 inline bool autoExchange(CookState& s, CookEnv const& env, AutoEnv const& a) {
     bool changed = pushOutput(s, a);
+    changed |= pushSpentFuel(s, env, a);
     changed |= pullInput(s, env, a);
     changed |= pullFuel(s, env, a);
     return changed;

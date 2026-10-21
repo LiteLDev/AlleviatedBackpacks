@@ -101,10 +101,10 @@ std::unordered_set<std::string> productIds(UpgradeContext const& ctx) {
 void setProductIds(UpgradeContext const& ctx, std::unordered_set<std::string> const& ids) {
     std::vector<std::string> sorted(ids.begin(), ids.end());
     std::sort(sorted.begin(), sorted.end());
-    if (sorted.size() > 256) sorted.resize(256);
-    ctx.settings()[kProductsKey] = sorted;
-    ctx.saveSettings(false);
+    ctx.settings()[kProductsKey] = sorted; // saved together with the state
 }
+
+constexpr std::size_t kMaxProducts = 512;
 
 } // namespace
 
@@ -275,7 +275,7 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int tic
             auto& e = produced[r.id];
             e.first = r;
             e.second += r.count;
-            if (products.insert(r.id).second) newProduct = true;
+            if (products.size() < kMaxProducts && products.insert(r.id).second) newProduct = true;
         };
         auto    inFilter   = inputFilter(ctx);
         auto    fuelFilter = CookingUpgrade::fuelFilter(ctx);
@@ -328,7 +328,7 @@ std::vector<std::string> CookingUpgrade::describe(Player& player, UpgradeContext
     auto                     st = state(ctx);
     std::vector<std::string> out;
     out.push_back(trFor(player, "abp.cooking.describe.slots", "§7Input {} · Fuel {} · Output {}", st.input.count, st.fuel.count, st.output.count));
-    if (st.cook > 0) {
+    if (st.burning() && st.cook > 0) {
         out.push_back(trFor(player, "abp.cooking.describe.cooking", "§6Cooking {}%", st.cookPercent()));
     }
     return out;

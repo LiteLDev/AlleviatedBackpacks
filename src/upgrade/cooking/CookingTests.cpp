@@ -326,6 +326,7 @@ ABP_REGISTER_SELFTEST("cooking.menu_rollback_keeps_items", [](Context& ctx) {
     auto menu = up.createSettingsMenu(player, u);
     ctx.require(menu != nullptr && mm.open(player, menu), "open");
     mm.forceShown(player);
+    int xp0 = player.getXpEarnedAtCurrentLevel();
     // Swapping with an item the slot refuses rolls back without losing anything.
     for (int slot : {L.output, L.fuel, L.input}) {
         (void)mm.simulate(player, {Action::Swap, {Where::Menu, slot}, {Where::Inventory, 3}, 1});
@@ -336,11 +337,15 @@ ABP_REGISTER_SELFTEST("cooking.menu_rollback_keeps_items", [](Context& ctx) {
     ctx.check(s.input.count == 1 && s.cook >= 150, "input and progress kept: " + str(s.input) + " cook " + std::to_string(s.cook));
     ctx.check(inventoryCount(player, "minecraft:dirt") == 1, "dirt kept");
     // Experience is paid once per result.
-    int xp0 = player.getXpEarnedAtCurrentLevel();
+    // Reopening must not pay twice either.
+    mm.close(player);
+    menu = up.createSettingsMenu(player, u);
+    ctx.require(menu != nullptr && mm.open(player, menu), "reopen");
+    mm.forceShown(player);
     ctx.check(mm.simulate(player, {Action::Take, {Where::Menu, L.output}, {Where::Inventory, 10}, 5}), "take results");
     int xp1 = player.getXpEarnedAtCurrentLevel();
     ctx.info("xp " + std::to_string(xp0) + " -> " + std::to_string(xp1));
-    ctx.check(xp1 - xp0 <= 4 && xp1 >= 3, "5 ingots pay about 3.5 xp in total");
+    ctx.check(xp1 - xp0 >= 3 && xp1 - xp0 <= 4, "5 ingots pay 3 or 4 xp in total, got " + std::to_string(xp1 - xp0));
     ctx.check(mm.simulate(player, {Action::Take, {Where::Menu, L.fuel}, {Where::Inventory, 11}, 1}), "take the bucket");
     ctx.check(inventoryCount(player, "minecraft:bucket") == 1, "bucket in the inventory");
     mm.close(player);

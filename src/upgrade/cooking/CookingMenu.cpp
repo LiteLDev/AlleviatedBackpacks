@@ -53,6 +53,9 @@ public:
 
     void build(Player& player) override;
     void onTick(Player& player) override {
+        // Put-backs are only rollbacks of moves within one request (see itemSlot()).
+        for (auto& t : mTaken) t.clear();
+        mTakenCook = 0;
         if (!mUpgrade.installedAt(mCtx)) ui::MenuManager::get().close(player);
     }
 
@@ -67,13 +70,15 @@ private:
 
     CookingUpgrade& mUpgrade;
     UpgradeContext  mCtx;
-    /// Per item slot: what was taken out recently (may be put back by a rolled-back move).
+    /// Per item slot: what was taken out during the current request (a rolled-back move may put it
+    /// back). Cleared every tick.
     std::array<core::ItemStackData, 3> mTaken;
     int                                mTakenCook = 0; ///< cook progress when the input was emptied
-    int                                mXpCredit  = 0; ///< results put back whose XP was already paid
 };
 
 ItemStack filler(char const* id = "minecraft:gray_stained_glass_pane") { return ui::icon(id, " "); }
+
+constexpr char const* kXpPaidKey = "xpPaid";
 
 /// How many items of `offered` slot `which` takes (0 = refuse).
 bool acceptsItem(CookingUpgrade const& u, int which, core::ItemStackData const& d) {
@@ -111,11 +116,15 @@ std::shared_ptr<ui::Slot> CookingMenu::itemSlot(int which) {
         auto& taken = mTaken[static_cast<std::size_t>(which)];
         if (!taken.empty() && taken.sameItem(got)) taken.count += n;
         else taken = got;
-        // Like a furnace's result slot: taking the results awards their experience (once: items
-        // put back by a failed move keep the experience already paid in `mXpCredit`).
+        // Like a furnace's result slot: taking the results awards their experience, once: results
+        // put back by a rolled-back move are remembered in "xpPaid" (persisted).
         if (which == 2 && !mUpgrade.automatic()) {
-            int paid = std::min(n, mXpCredit);
-            mXpCredit -= paid;
+            auto& s    = mCtx.settings();
+            int   paid = std::min(n, std::max(0, s.value(kXpPaidKey, 0)));
+            if (paid > 0) {
+                s[kXpPaidKey] = s.value(kXpPaidKey, 0) - paid;
+                mCtx.saveSettings(false);
+            }
             if (int xp = xpFor(got, n - paid); xp > 0) p.addExperience(xp);
         }
         return game::ItemConv::toStack(got, n);
@@ -141,7 +150,10 @@ std::shared_ptr<ui::Slot> CookingMenu::itemSlot(int which) {
         CookingUpgrade::setState(mCtx, st);
         if (restoring) {
             taken = taken.withCount(taken.count - n);
-            if (which == 2) mXpCredit += n;
+            if (which == 2 && !mUpgrade.automatic()) {
+                mCtx.settings()[kXpPaidKey] = std::max(0, mCtx.settings().value(kXpPaidKey, 0)) + n;
+                mCtx.saveSettings(false);
+            }
         }
         return n;
     };
