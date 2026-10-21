@@ -1,0 +1,21 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:crafting_upgrade"
+    },
+    "tags": ["crafting_table"],
+    "pattern": [
+      " T ",
+      "IBI",
+      " I "
+    ],
+    "key": {
+      "T": { "item": "minecraft:crafting_table" },
+      "I": { "item": "minecraft:iron_ingot" },
+      "B": { "item": "alleviatedbackpacks:upgrade_base" }
+    },
+    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
+    "result": { "item": "alleviatedbackpacks:crafting_upgrade" }
+  }
+}
