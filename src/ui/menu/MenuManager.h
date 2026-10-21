@@ -42,6 +42,9 @@ public:
     /// Opens `menu`, replacing any open menu (which gets `onClose`). Returns false if the player
     /// can't open a menu (not a server player, dead).
     bool open(Player& player, std::shared_ptr<Menu> menu);
+    /// Same as `open` (kept for callers that switch between menus from inside a menu): switching
+    /// is reliable on a real client and shows the new menu's title.
+    bool swap(Player& player, std::shared_ptr<Menu> menu) { return open(player, std::move(menu)); }
     /// Closes the player's menu, if any.
     void close(Player& player);
     /// Closes every open menu (world stopping, mod disable).
