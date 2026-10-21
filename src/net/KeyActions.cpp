@@ -103,7 +103,7 @@ bool toolSwap(Player& player) {
         return false;
     }
     if (!hasToolSwapper(player)) {
-        upgrade::transfer::sendTip(player, trFor(player, "abp.companion.status.no_tool_swap_upgrade", "No Tool Swapper Upgrade present"));
+        upgrade::transfer::sendTip(player, trFor(player, "abp.companion.status.no_tool_swap_upgrade", "No tool swapper upgrade installed"));
         return false;
     }
     auto hit = player.traceRay(kReach, true, true);
@@ -135,8 +135,8 @@ bool toggleUpgrade(Player& player, int slot) {
     log().info("key action: {} switched upgrade {} ({}) {}", player.getRealName(), slot + 1, type->info().id, on ? "on" : "off");
     upgrade::transfer::sendTip(
         player,
-        on ? trFor(player, "abp.companion.status.upgrade_on", "{} Switched On", name)
-           : trFor(player, "abp.companion.status.upgrade_off", "{} Switched Off", name)
+        on ? trFor(player, "abp.companion.status.upgrade_on", "{} turned on", name)
+           : trFor(player, "abp.companion.status.upgrade_off", "{} turned off", name)
     );
     return true;
 }

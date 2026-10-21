@@ -439,15 +439,15 @@ void BackpackScreenLayer::buildControls(cs::BackpackScreenModel const& m) {
         };
         b->dynamicTooltip = [toStorage]() -> std::vector<TooltipLine> {
             if (input::shiftDown()) {
-                return {{toStorage ? ctr("abp.companion.button.transfer_to_storage", "Transfer to Storage")
-                                   : ctr("abp.companion.button.transfer_to_inventory", "Transfer to Inventory"),
+                return {{toStorage ? ctr("abp.companion.button.transfer_to_storage", "Move to backpack")
+                                   : ctr("abp.companion.button.transfer_to_inventory", "Move to inventory"),
                          0xFFFFFF}};
             }
             return {
-                {toStorage ? ctr("abp.companion.button.transfer_to_storage_filtered", "Transfer Matching to Storage")
-                           : ctr("abp.companion.button.transfer_to_inventory_filtered", "Transfer Matching to Inventory"),
+                {toStorage ? ctr("abp.companion.button.transfer_to_storage_filtered", "Move matching items to the backpack")
+                           : ctr("abp.companion.button.transfer_to_inventory_filtered", "Move matching items to the inventory"),
                  0xFFFFFF},
-                {ctr("abp.companion.button.transfer_all", "Shift To Transfer All"), 0x555555},
+                {ctr("abp.companion.button.transfer_all", "Shift: move everything"), 0x555555},
             };
         };
         b->onClick = [toStorage](int button) {
@@ -464,7 +464,7 @@ void BackpackScreenLayer::buildControls(cs::BackpackScreenModel const& m) {
         sort->size         = Button::Size::Small;
         sort->rect         = R(mLayout.sortButton);
         sort->icon         = [](Painter& p, float x, float y) { sb::icon(p, sb::Icon::TransferToStorage, x, y); }; // SC's SORT icon
-        sort->tooltipLines = {{ctr("abp.companion.button.sort_action", "Sort Inventory"), 0xFFFFFF}};
+        sort->tooltipLines = {{ctr("abp.companion.button.sort_action", "Sort"), 0xFFFFFF}};
         sort->onClick      = [](int button) {
             if (button == 0) net::sendScreenAction({{"action", "sort"}});
         };
@@ -654,7 +654,7 @@ void BackpackScreenLayer::drawSearch(Painter& p, double t) {
     mSearch.render(p, t);
     if (mSearch.text().empty() && !focused) sb::icon(p, sb::Icon::Search, r.x + r.w / 2 + 2 - 3.5f, r.y + 1.5f);
     if (!mFilter.blank() && mVisibleCount == 0) {
-        p.text(ctr("abp.companion.screen.no_results", "No items match the search"), mLeft + 7, mTop + 18, Color::rgb(kTextColor));
+        p.text(ctr("abp.companion.screen.no_results", "Nothing matches the search"), mLeft + 7, mTop + 18, Color::rgb(kTextColor));
     }
 }
 
@@ -702,8 +702,8 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
     if (!mSearch.focused() && mSearch.rect.contains(mx, my)) {
         drawTooltip(
             p,
-            {{ctr("abp.companion.search.title", "Click to search"), 0xFFFFFF},
-             {ctr("abp.companion.search.detail", "@ prefix to search by mod name"), 0xAAAAAA}},
+            {{ctr("abp.companion.search.title", "Search"), 0xFFFFFF},
+             {ctr("abp.companion.search.detail", "@name filters by mod, #text by tooltip"), 0xAAAAAA}},
             mx,
             my
         );
@@ -1224,7 +1224,7 @@ bool BackpackScreenLayer::menuMouse(cs::BackpackScreenModel const&, MouseButton 
 
 // ---- settings screen -----------------------------------------------------------------------------------------------
 // SB's SettingsScreen: the storage slots (contents, memory and no-sort marks), the player inventory,
-// and tabs: Back To Backpack, Backpack (context + main toggles), No Sort and Memory. Slot clicks /
+// and tabs: Back to the backpack, Backpack (context + main toggles), No Sort and Memory. Slot clicks /
 // drags in the No Sort or Memory tab select (left) / unselect (right) slots.
 
 void BackpackScreenLayer::showSettings(bool on) {
@@ -1294,11 +1294,11 @@ void BackpackScreenLayer::buildSettingsTab(cs::BackpackScreenModel const& m, Tab
             auto const* cur = net::screenModel();
             bool        pl  = cur && settingsValues(*cur).value("context", std::string("backpack")) == "player";
             if (pl) {
-                return {{ctr("abp.companion.settings.context_player.tooltip", "Player level settings"), 0xFFFFFF},
-                        {ctr("abp.companion.settings.context_player.detail", "Apply to all backpacks/storages unless overriden"), 0xAAAAAA}};
+                return {{ctr("abp.companion.settings.context_player.tooltip", "Settings for all your backpacks"), 0xFFFFFF},
+                        {ctr("abp.companion.settings.context_player.detail", "Used by every backpack that does not change them"), 0xAAAAAA}};
             }
-            return {{ctr("abp.companion.settings.context_backpack.tooltip", "This Backpack's settings"), 0xFFFFFF},
-                    {ctr("abp.companion.settings.context_backpack.detail", "Inherited from player or overriden for this backpack"), 0xAAAAAA}};
+            return {{ctr("abp.companion.settings.context_backpack.tooltip", "Settings of this backpack"), 0xFFFFFF},
+                    {ctr("abp.companion.settings.context_backpack.detail", "Start from your settings; changes apply to this backpack only"), 0xAAAAAA}};
         };
         ctxBtn->onClick = [] { setting({{"what", "context"}}); };
         tab.widgets.add(std::move(ctxBtn));
@@ -1317,22 +1317,22 @@ void BackpackScreenLayer::buildSettingsTab(cs::BackpackScreenModel const& m, Tab
         };
         static Opt const opts[] = {
             {"shiftClickIntoOpenTab", sb::Icon::ShiftClickTabOn, sb::Icon::ShiftClickTabOff,
-             "abp.companion.settings.shift_click_open_tab.on", "Shift Click Into Open Tab First",
-             "abp.companion.settings.shift_click_open_tab.off", "Shift Click Into Inventory First",
-             "abp.companion.settings.shift_click_open_tab.on.tooltip", "Shift click from storage/inventory will first try to put the stack in an open tab and only then into inventory/storage.",
-             "abp.companion.settings.shift_click_open_tab.off.tooltip", "Shift click from storage/inventory will first try to put the stack in inventory/storage and only then into an open tab.",
+             "abp.companion.settings.shift_click_open_tab.on", "Shift-click: open tab first",
+             "abp.companion.settings.shift_click_open_tab.off", "Shift-click: inventory first",
+             "abp.companion.settings.shift_click_open_tab.on.tooltip", "Shift-clicked stacks go into the open upgrade tab when it takes them, otherwise into the inventory or backpack.",
+             "abp.companion.settings.shift_click_open_tab.off.tooltip", "Shift-clicked stacks go into the inventory or backpack first and only then into the open upgrade tab.",
              true},
             {"keepTabOpen", sb::Icon::KeepTabOpenOn, sb::Icon::KeepTabOpenOff,
-             "abp.companion.settings.keep_tab_open.on", "Keep Tab Open: ON",
-             "abp.companion.settings.keep_tab_open.off", "Keep Tab Open: OFF",
-             "abp.companion.settings.keep_tab_open.on.tooltip", "On close of its gui the backpack/storage records which upgrade tab was last open and opens it when the gui is open next time",
-             "abp.companion.settings.keep_tab_open.off.tooltip", "Open upgrade tab gets closed when the backpack/storage gui is closed and when the gui is next open all of the tabs are closed",
+             "abp.companion.settings.keep_tab_open.on", "Remember open tab: on",
+             "abp.companion.settings.keep_tab_open.off", "Remember open tab: off",
+             "abp.companion.settings.keep_tab_open.on.tooltip", "The upgrade tab that was open when the screen closed opens again next time.",
+             "abp.companion.settings.keep_tab_open.off.tooltip", "All upgrade tabs start closed every time the screen opens.",
              true},
             {"keepSearchPhrase", sb::Icon::KeepSearchOn, sb::Icon::KeepSearchOff,
-             "abp.companion.settings.keep_search_phrase.on", "Keep Search Phrase: ON",
-             "abp.companion.settings.keep_search_phrase.off", "Keep Search Phrase: OFF",
-             "abp.companion.settings.keep_search_phrase.on.tooltip", "Backpack / Storage gui keeps the search phrase and prefills it / filters by it when open again",
-             "abp.companion.settings.keep_search_phrase.off.tooltip", "Backpack / Storage gui clears the search phrase when closed and shows all unfiltered item when open again",
+             "abp.companion.settings.keep_search_phrase.on", "Remember search: on",
+             "abp.companion.settings.keep_search_phrase.off", "Remember search: off",
+             "abp.companion.settings.keep_search_phrase.on.tooltip", "The search text stays and filters the slots again when the screen reopens.",
+             "abp.companion.settings.keep_search_phrase.off.tooltip", "The search box starts empty every time the screen opens.",
              false},
         };
         float bx = x + 3;
@@ -1360,10 +1360,10 @@ void BackpackScreenLayer::buildSettingsTab(cs::BackpackScreenModel const& m, Tab
     bool memory = tab.slot == kMemoryTab;
     char const* what = memory ? "memory" : "noSort";
     tab.widgets.add(iconButton({x + 3, y + 24, 18, 18}, sb::Icon::SelectAll,
-                               {{ctr("abp.companion.settings.select_all", "Select All Slots"), 0xFFFFFF}},
+                               {{ctr("abp.companion.settings.select_all", "Select every slot"), 0xFFFFFF}},
                                [what](int b) { if (b == 0) setting({{"what", what}, {"op", "selectAll"}}); }));
     tab.widgets.add(iconButton({x + 21, y + 24, 18, 18}, sb::Icon::UnselectAll,
-                               {{ctr("abp.companion.settings.unselect_all", "Unselect All Slots"), 0xFFFFFF}},
+                               {{ctr("abp.companion.settings.unselect_all", "Clear every slot"), 0xFFFFFF}},
                                [what](int b) { if (b == 0) setting({{"what", what}, {"op", "unselectAll"}}); }));
     if (memory) {
         auto t     = std::make_unique<ToggleButton>();
@@ -1387,9 +1387,9 @@ void BackpackScreenLayer::buildSettingsTab(cs::BackpackScreenModel const& m, Tab
             auto const* cur = net::screenModel();
             sb::colorSquare(p, ix, iy, cur ? cur->noSortColor : 0x80C71F);
         };
-        b->tooltipLines = {{ctr("abp.companion.settings.toggle_color", "Toggle Color"), 0xFFFFFF},
-                           {ctr("abp.companion.settings.toggle_color.detail1", "Next = Left Click"), 0xAAAAAA},
-                           {ctr("abp.companion.settings.toggle_color.detail2", "Previous = Right Click"), 0xAAAAAA}};
+        b->tooltipLines = {{ctr("abp.companion.settings.toggle_color", "Change colour"), 0xFFFFFF},
+                           {ctr("abp.companion.settings.toggle_color.detail1", "Left click: next"), 0xAAAAAA},
+                           {ctr("abp.companion.settings.toggle_color.detail2", "Right click: previous"), 0xAAAAAA}};
         b->onClick      = [](int button) { setting({{"what", "noSortColor"}, {"dir", button == 1 ? -1 : 1}}); };
         tab.widgets.add(std::move(b));
     }
@@ -1524,32 +1524,32 @@ void BackpackScreenLayer::renderSettings(Painter& p, cs::BackpackScreenModel con
             if (isOpen ? !iconRect.contains(mx, my) : !tab.rect.contains(mx, my)) continue;
             switch (tab.slot) {
             case kBackTab:
-                lines.push_back({ctr("abp.companion.settings.back_to_backpack", "Back To Backpack"), 0xFFFFFF});
+                lines.push_back({ctr("abp.companion.settings.back_to_backpack", "Back to the backpack"), 0xFFFFFF});
                 break;
             case kMainTab:
                 if (!isOpen) lines.push_back({ctr("abp.companion.settings.backpack.tooltip", "Backpack Settings"), 0xFFFFFF});
                 break;
             case kNoSortTab:
-                lines.push_back({ctr("abp.companion.settings.no_sort.tooltip", "No Sort Slot Settings"), 0xFFFFFF});
+                lines.push_back({ctr("abp.companion.settings.no_sort.tooltip", "Slots sorting leaves alone"), 0xFFFFFF});
                 if (isOpen) {
-                    lines.push_back({ctr("abp.companion.settings.no_sort.open1", "Allows selecting slots that are ignored by sorting"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.select_all_hint", "Select all / Unselect all = buttons"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.select_hint", "Select slot = left click/drag"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.unselect_hint", "Unselect slot = right click/drag"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.no_sort.open1", "Mark slots whose items sorting never moves"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.select_all_hint", "Buttons: select every slot / clear every slot"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.select_hint", "Left click or drag: select a slot"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.unselect_hint", "Right click or drag: clear a slot"), 0xAAAAAA});
                 } else {
-                    lines.push_back({ctr("abp.companion.settings.no_sort.detail1", "Allows selecting slots that are ignored by sorting"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.open_tab_hint", "Open tab to modify slot settings"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.no_sort.detail1", "Mark slots whose items sorting never moves"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.open_tab_hint", "Open the tab to edit the slots"), 0xAAAAAA});
                 }
                 break;
             case kMemoryTab:
-                lines.push_back({ctr("abp.companion.settings.memory.tooltip", "Slot Memory Settings"), 0xFFFFFF});
-                lines.push_back({ctr("abp.companion.settings.memory.detail1", "Allows selecting slots that remember their contents and only allow matching stacks in them"), 0xAAAAAA});
+                lines.push_back({ctr("abp.companion.settings.memory.tooltip", "Remembered slots"), 0xFFFFFF});
+                lines.push_back({ctr("abp.companion.settings.memory.detail1", "A remembered slot keeps its item and only takes that item"), 0xAAAAAA});
                 if (isOpen) {
-                    lines.push_back({ctr("abp.companion.settings.select_all_hint", "Select all / Unselect all = buttons"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.select_hint", "Select slot = left click/drag"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.unselect_hint", "Unselect slot = right click/drag"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.select_all_hint", "Buttons: select every slot / clear every slot"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.select_hint", "Left click or drag: select a slot"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.unselect_hint", "Right click or drag: clear a slot"), 0xAAAAAA});
                 } else {
-                    lines.push_back({ctr("abp.companion.settings.open_tab_hint", "Open tab to modify slot settings"), 0xAAAAAA});
+                    lines.push_back({ctr("abp.companion.settings.open_tab_hint", "Open the tab to edit the slots"), 0xAAAAAA});
                 }
                 break;
             default:

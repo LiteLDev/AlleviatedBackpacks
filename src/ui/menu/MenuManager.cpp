@@ -361,9 +361,17 @@ void MenuManager::place(Player& player, Session& s) {
     s.wait  = kOpenDelay;
 }
 
+MenuManager::NavigationGuard::NavigationGuard(Player const& player) : mKey(keyOf(player)) { ++MenuManager::get().mGuarded[mKey]; }
+
+MenuManager::NavigationGuard::~NavigationGuard() {
+    auto& g = MenuManager::get().mGuarded;
+    if (auto it = g.find(mKey); it != g.end() && --it->second <= 0) g.erase(it);
+}
+
 void MenuManager::close(Player& player) {
     auto key = keyOf(player);
     if (!mSessions.contains(key)) return;
+    if (mGuarded.contains(key)) return; // a tab-hosted menu wanted to close itself
     if (mBusy) {
         mDeferred.push_back([this, key] {
             if (auto* p = findPlayer(key)) close(*p);
@@ -379,6 +387,14 @@ void MenuManager::reopen(Player& player) {
 
 void MenuManager::closeThen(Player& player, std::function<void(Player&)> fn) {
     auto key = keyOf(player);
+    if (mGuarded.contains(key)) {
+        if (fn) {
+            after(kAfterClose, [key, fn = std::move(fn)] {
+                if (auto* p = findPlayer(key)) fn(*p);
+            });
+        }
+        return;
+    }
     auto it  = mSessions.find(key);
     if (it == mSessions.end()) {
         if (fn) fn(player);

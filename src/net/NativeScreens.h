@@ -86,6 +86,8 @@ bool handleScreenAction(Player& player, nlohmann::json const& body);
 bool handleKeyAction(Player& player, nlohmann::json const& body);
 
 namespace detail {
+/// Contents.cpp: drop the request rate state of a player who left.
+void forgetContentsRates(Player const& player);
 struct TabDataRegistrar {
     explicit TabDataRegistrar(TabDataProvider p) { TabDataRegistry::add(std::move(p)); }
 };

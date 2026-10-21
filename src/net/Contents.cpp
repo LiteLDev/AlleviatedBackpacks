@@ -9,7 +9,11 @@
 #include "core/screen/CountFormat.h"
 #include "core/screen/ScreenModel.h"
 #include "game/Backpack.h"
+#include "game/BackpackItem.h"
+#include "game/PlayerScan.h"
 #include "game/Storage.h"
+#include "ui/menu/BackpackMenu.h"
+#include "ui/menu/MenuManager.h"
 #include "mod/I18n.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
@@ -52,12 +56,33 @@ bool allowed(Player& player, std::string const& uuid) {
     return true;
 }
 
+/// Only backpacks the player can see: carried (also nested ones), the open backpack screen's
+/// backpack and the backpacks stored in it. Nobody can read another player's backpack by uuid.
+bool canSee(Player& player, std::string const& uuid) {
+    for (auto const& [carried, bp] : game::carriedBackpacks(player, false, true)) {
+        if (carried.uuid && *carried.uuid == uuid) return true;
+    }
+    auto menu = ui::MenuManager::get().current(player);
+    auto* bm  = menu ? dynamic_cast<ui::BackpackMenu*>(menu.get()) : nullptr;
+    if (!bm) return false;
+    auto& bp = *bm->backpack();
+    if (bp.uuid() == uuid) return true;
+    auto& inv = bp.inventory();
+    for (int i = 0; i < inv.size(); ++i) {
+        auto const& d = inv.at(i);
+        if (!d.empty() && game::isBackpack(d) && game::backpackUuid(d) == uuid) return true;
+    }
+    return false;
+}
+
 std::shared_ptr<game::Backpack> lookup(std::string const& uuid) {
     auto& storage = game::Storage::get();
     if (uuid.empty() || uuid.size() > 64 || !storage.available()) return nullptr;
     return storage.find(uuid);
 }
 } // namespace
+
+void detail::forgetContentsRates(Player const& player) { gRates.erase(player.getOrCreateUniqueID().rawID); }
 
 core::screen::ContentsModel buildContents(Player& player, std::shared_ptr<game::Backpack> const& backpack) {
     core::screen::ContentsModel m;
@@ -69,7 +94,7 @@ core::screen::ContentsModel buildContents(Player& player, std::shared_ptr<game::
         m.lines.push_back(trFor(
             player,
             "abp.companion.tooltip.stack_multiplier",
-            "§aStack Size Multiplier: §f{}",
+            "§aStack multiplier: §f×{}",
             core::screen::formatMultiplier(mult)
         ));
     }
@@ -123,7 +148,7 @@ public:
         auto uuid = packet.body.value("uuid", std::string{});
         if (!allowed(*player, uuid)) return;
         try {
-            auto bp = lookup(uuid);
+            auto bp = canSee(*player, uuid) ? lookup(uuid) : nullptr;
             auto m  = bp ? buildContents(*player, bp) : core::screen::ContentsModel{};
             if (!bp) m.uuid = uuid;
             send(*player, ContentsPacket{m.toJson()});
@@ -141,6 +166,8 @@ public:
         if (!player || !packet.valid() || !hasCompanion(*player)) return;
         auto uuid = packet.body.value("uuid", std::string{});
         if (!allowed(*player, "render:" + uuid)) return;
+        // Render info is appearance only (tier, colours, enabled upgrade ids): other players'
+        // worn / placed backpacks need it too, so it isn't limited to visible contents.
         if (auto bp = lookup(uuid)) send(*player, RenderInfoPacket{buildRenderInfo(*bp).toJson()});
     }
 };

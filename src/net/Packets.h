@@ -5,9 +5,9 @@
 // Every packet carries the protocol version (u16) and a JSON body. The set is versioned by
 // `core::screen::kProtocolVersion`; a peer drops packets of another version. Packets are only
 // ever sent to a client that announced the companion (`HelloPacket`), so vanilla clients never
-// see them; a server without the mod ignores the client's packets (LeviLamina drops unknown
-// runtime packets; a vanilla BDS never receives them because the client only sends `Hello` and
-// waits for `Welcome`).
+// see them. A LeviLamina server without the mod drops the client's runtime packets (unknown
+// runtime id); the client sends `Hello` at most 15 times and nothing else until `Welcome`.
+// Client-to-server bodies are limited to `kMaxClientBody`.
 //
 // Directions:
 //   client -> server: Hello, ScreenAction, KeyAction, ContentsRequest, RenderInfoRequest
@@ -39,11 +39,13 @@
 
 namespace abp::net {
 
-/// Largest JSON body accepted (a 120-slot screen model with NBT is far below this).
+/// Largest JSON body accepted from the server (a 120-slot screen model with NBT is far below).
 inline constexpr std::uint64_t kMaxBody = 4u * 1024u * 1024u;
+/// Largest JSON body accepted from a client (actions are tiny; keeps parsing cheap).
+inline constexpr std::uint64_t kMaxClientBody = 16u * 1024u;
 
-/// A runtime packet with a protocol version and a JSON body.
-template <class Derived>
+/// A runtime packet with a protocol version and a JSON body of at most `MaxBody` bytes.
+template <class Derived, std::uint64_t MaxBody = kMaxBody>
 class JsonPacket : public ll::network::PacketBase<Derived> {
 public:
     int            version = core::screen::kProtocolVersion;
@@ -61,7 +63,7 @@ public:
         auto v = stream.getUnsignedShort();
         if (!v) return nonstd::make_unexpected(v.error());
         version = v.value();
-        auto s  = stream.getString(kMaxBody);
+        auto s  = stream.getString(MaxBody);
         if (!s) return nonstd::make_unexpected(s.error());
         body = nlohmann::json::parse(s.value(), nullptr, false);
         return {};
@@ -72,19 +74,19 @@ public:
 };
 
 // client -> server
-class HelloPacket : public JsonPacket<HelloPacket> {
+class HelloPacket : public JsonPacket<HelloPacket, kMaxClientBody> {
     using JsonPacket::JsonPacket;
 };
-class ScreenActionPacket : public JsonPacket<ScreenActionPacket> {
+class ScreenActionPacket : public JsonPacket<ScreenActionPacket, kMaxClientBody> {
     using JsonPacket::JsonPacket;
 };
-class KeyActionPacket : public JsonPacket<KeyActionPacket> {
+class KeyActionPacket : public JsonPacket<KeyActionPacket, kMaxClientBody> {
     using JsonPacket::JsonPacket;
 };
-class ContentsRequestPacket : public JsonPacket<ContentsRequestPacket> {
+class ContentsRequestPacket : public JsonPacket<ContentsRequestPacket, kMaxClientBody> {
     using JsonPacket::JsonPacket;
 };
-class RenderInfoRequestPacket : public JsonPacket<RenderInfoRequestPacket> {
+class RenderInfoRequestPacket : public JsonPacket<RenderInfoRequestPacket, kMaxClientBody> {
     using JsonPacket::JsonPacket;
 };
 

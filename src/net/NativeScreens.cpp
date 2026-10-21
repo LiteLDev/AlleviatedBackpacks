@@ -5,6 +5,9 @@
 #include <optional>
 #include <unordered_map>
 
+#include "ll/api/event/EventBus.h"
+#include "ll/api/event/player/PlayerDisconnectEvent.h"
+
 #include "mc/world/actor/player/Inventory.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
@@ -244,6 +247,15 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
                 setError(s, reason, {index});
                 return false;
             }
+        } else if (!content.empty() && !cursor.isNull()) {
+            // Swapping one upgrade for another: the installed one must allow it (conversion items
+            // that aren't upgrades are left to IUpgrade::useItemOn).
+            auto data = game::ItemConv::toData(cursor).withCount(1);
+            auto* installed = upgrade::upgradeFor(content);
+            if (installed && upgrade::upgradeFor(data) && !installed->canReplaceWith(upgrade::UpgradeContext(bp, index, &p), data, reason)) {
+                setError(s, reason, {index});
+                return false;
+            }
         }
     }
 
@@ -470,6 +482,8 @@ void forgetTabMenus(Player const& p) {
 }
 
 nlohmann::json tabMenuJson(Player& p, ui::Menu& menu) {
+    // Settings may have changed elsewhere (another player, a tab action handler): rebuild.
+    menu.invalidate();
     menu.ensureBuilt(p);
     nlohmann::json slots = nlohmann::json::array();
     for (int i = 0; i < menu.size(); ++i) {
@@ -528,7 +542,13 @@ bool handleSettingsAction(Player& player, ui::BackpackMenu& menu, NativeSession&
             if (!tabMenu || i < 0 || i >= tabMenu->size()) return false;
             tabMenu->ensureBuilt(player);
             std::shared_ptr<ui::Slot> target(tabMenu, tabMenu->slot(i)); // aliasing: keeps the menu alive
-            bool ok = clickSlotObject(player, target, data.value("button", 0), data.value("shift", false), menu.lockedInventorySlot);
+            // The menu lives in a tab, not as the open screen: its buttons must not close the
+            // backpack screen (close()/closeThen() act on the open menu).
+            bool ok;
+            {
+                MenuManager::NavigationGuard guard(player);
+                ok = clickSlotObject(player, target, data.value("button", 0), data.value("shift", false), menu.lockedInventorySlot);
+            }
             MenuManager::get().resyncPlayer(player);
             s.dirty = true;
             return ok;
@@ -685,8 +705,13 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
         return true;
     }
     if (action == "resync") {
-        s->sent = {}; // forces a full patch
-        pushUpdate(player, *base, *s, true);
+        // The client's model is unreliable (a patch failed): send it whole again.
+        auto model        = buildFor(player, *base);
+        model.session     = s->id;
+        model.containerId = s->containerId;
+        applyError(model, *s);
+        s->sent = model;
+        send(player, ScreenOpenPacket{model.toJson()});
         return true;
     }
 
@@ -834,6 +859,8 @@ public:
     }
 };
 
+std::unordered_map<std::int64_t, std::chrono::steady_clock::time_point> gLastTold;
+
 /// Link shown to players without the client mod (also in README.md).
 constexpr std::string_view kClientModUrl = "https://github.com/LiteLDev/AlleviatedBackpacks/releases";
 
@@ -842,8 +869,9 @@ constexpr std::string_view kClientModUrl = "https://github.com/LiteLDev/Alleviat
 ui::MenuManager::Presentation presentationFor(Player& player, ui::Menu&) {
     if (hasCompanion(player)) return ui::MenuManager::Presentation::Virtual;
     if (player.isSimulatedPlayer()) return ui::MenuManager::Presentation::Chest;
-    static std::unordered_map<std::int64_t, std::chrono::steady_clock::time_point> lastTold;
     auto  now  = std::chrono::steady_clock::now();
+    if (gLastTold.size() > 512) gLastTold.clear();
+    auto& lastTold = gLastTold;
     auto& last = lastTold[keyOf(player)];
     if (now - last > std::chrono::seconds(3)) {
         last = now;
@@ -858,9 +886,19 @@ ui::MenuManager::Presentation presentationFor(Player& player, ui::Menu&) {
     return ui::MenuManager::Presentation::Refuse;
 }
 
+void forgetPlayer(Player const& p) {
+    forgetTabMenus(p);
+    gSettingsContext.erase(keyOf(p));
+    gSessions.erase(keyOf(p));
+    detail::forgetContentsRates(p);
+}
+
 class NativeScreens {
 public:
     void install() {
+        mDisconnect = ll::event::EventBus::getInstance().emplaceListener<ll::event::PlayerDisconnectEvent>(
+            [](ll::event::PlayerDisconnectEvent& ev) { forgetPlayer(ev.self()); }
+        );
         ui::MenuManager::get().setPresentationGate(presentationFor);
         ui::MenuManager::Observer o;
         o.beforeShow = onBeforeShow;
@@ -871,13 +909,15 @@ public:
     void uninstall() {
         ui::MenuManager::get().removeObserver(mObserver);
         ui::MenuManager::get().setPresentationGate(nullptr);
+        ll::event::EventBus::getInstance().removeListener(mDisconnect);
         gSessions.clear();
         gTabMenus.clear();
         gSettingsContext.clear();
     }
 
 private:
-    int mObserver = 0;
+    int                    mObserver = 0;
+    ll::event::ListenerPtr mDisconnect;
 };
 
 } // namespace abp::net

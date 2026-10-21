@@ -6,9 +6,10 @@
 // the server records the player and answers `WelcomePacket`. Server-to-client companion packets
 // are only ever sent to recorded players (`send`), so vanilla clients never receive them.
 //
-// Screen routing: `hasCompanion(player)` decides whether a backpack menu is also shown as the
-// native Sophisticated Backpacks screen (companion) or only as the resource-pack / fake chest UI
-// (vanilla clients). `uiModeFor` is the single decision point other units should use.
+// The client mod is required: companions get native Sophisticated Backpacks screens for every menu
+// (MenuManager "virtual" presentation, see NativeScreens.cpp), players without it are refused
+// backpack screens with a message, and selftests' simulated players keep the chest sessions.
+// `uiModeFor` reports what a player gets.
 
 #include <functional>
 #include <optional>
@@ -46,14 +47,13 @@ void setCompanion(Player const& player, std::optional<CompanionInfo> info);
 
 /// How the server shows backpack screens to a player.
 enum class UiMode {
-    Native,   ///< companion client: native SB screen over the (hidden) container screen
-    JsonUi,   ///< vanilla client with the resource-pack JSON UI (G1)
-    Chest,    ///< plain fake chest
+    Native,   ///< companion client: native SB screens (no container screen at all)
+    JsonUi,   ///< reserved (the JSON UI unit was cancelled; only if a decider is installed)
+    Chest,    ///< no client mod: screens are refused (simulated players: chest sessions)
 };
-/// Native for companions; otherwise whatever the JSON UI unit decides (`setJsonUiDecider`),
-/// else Chest.
+/// Native for companions; otherwise JsonUi if a decider says so (none is installed), else Chest.
 [[nodiscard]] UiMode uiModeFor(Player const& player);
-/// Installed by the JSON UI unit (`jsonui::jsonUiEnabledFor`). nullptr removes it.
+/// Optional decider for a resource-pack UI (none ships). nullptr removes it.
 void setJsonUiDecider(std::function<bool(Player const&)> decider);
 
 /// Receives server-to-client packets meant for simulated players (selftests).

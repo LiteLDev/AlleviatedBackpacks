@@ -19,6 +19,7 @@
 #include "mc/world/level/Level.h"
 
 #include "mod/Commands.h"
+#include "mod/I18n.h"
 #include "mod/Log.h"
 #include "mod/Main.h"
 #include "mod/Module.h"
@@ -152,13 +153,15 @@ ABP_REGISTER_MODULE_ORDERED(abp::net::CompanionRegistry, abp::ModuleOrder::Menu 
 ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
     cmd.overload().text("companion").execute([](CommandOrigin const& origin, CommandOutput& output) {
         auto* entity = origin.getEntity();
-        if (entity && entity->isPlayer()) {
-            auto& player = static_cast<Player&>(*entity);
-            auto  info   = abp::net::companionInfo(player);
-            output.success(
-                info ? "companion: yes (client mod " + info->version + ")" : std::string("companion: no (vanilla UI)")
-            );
+        Player* player = entity && entity->isPlayer() ? static_cast<Player*>(entity) : nullptr;
+        auto    say    = [&](std::string_view key, std::string_view fallback, auto const&... args) {
+            output.success(player ? abp::trFor(*player, key, fallback, args...) : abp::tr(key, fallback, args...));
+        };
+        if (player) {
+            if (auto info = abp::net::companionInfo(*player)) say("abp.companion.cmd.yes", "companion: yes (client mod {})", info->version);
+            else say("abp.companion.cmd.no", "companion: no (no client mod: backpack screens are refused)");
         }
-        output.success("companion: " + std::to_string(abp::net::companionCount()) + " player(s) with the client mod");
+        // The e2e harnesses match the English form of this line.
+        say("abp.companion.cmd.count", "companion: {} player(s) with the client mod", abp::net::companionCount());
     });
 });

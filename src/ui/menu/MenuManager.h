@@ -95,6 +95,21 @@ public:
     /// Container id of the player's open menu (-1 if none).
     [[nodiscard]] int containerIdOf(Player const& player) const;
 
+    /// While alive, `close`/`closeThen` for this player leave the open menu alone (`closeThen`
+    /// just runs its callback a few ticks later). The client companion shows upgrade settings menus
+    /// inside the backpack screen's tabs and runs their slot callbacks under this guard, so a
+    /// "Back" button can't close the backpack screen.
+    class NavigationGuard {
+    public:
+        explicit NavigationGuard(Player const& player);
+        ~NavigationGuard();
+        NavigationGuard(NavigationGuard const&)            = delete;
+        NavigationGuard& operator=(NavigationGuard const&) = delete;
+
+    private:
+        std::int64_t mKey;
+    };
+
     // ---- presentation (additive hook: the client companion) ----------------------------------
     /// How a menu is shown to a player, decided when it opens.
     enum class Presentation {
@@ -166,6 +181,7 @@ private:
     bool                                                       mBusy = false;
     std::vector<std::pair<int, Observer>>                      mObservers;
     PresentationGate                                           mGate;
+    std::unordered_map<std::int64_t, int>                      mGuarded; ///< NavigationGuard depth per player
     int                                                        mNextVirtualId = 1000;
     int                                                        mNextObserver = 1;
 

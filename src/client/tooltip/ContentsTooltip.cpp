@@ -86,7 +86,7 @@ std::string yellow(std::string s) { return "§e" + s; }
 ui::TooltipImage contentsImage(ui::Painter& p, Built const& b) {
     std::vector<std::string> lines = b.lines;
     bool empty = b.upgrades.empty() && b.items.empty();
-    if (empty) lines.push_back(yellow(ctr("abp.companion.tooltip.empty", "No Upgrades or Inventory Contents")));
+    if (empty) lines.push_back(yellow(ctr("abp.companion.tooltip.empty", "No upgrades or items inside")));
 
     float upgradesWidth = 0;
     for (std::size_t i = 0; i < b.upgrades.size(); ++i) upgradesWidth += (b.toggleable[i] ? 4 : 0) + kStackWidth;
@@ -152,7 +152,7 @@ bool contentsWanted() { return input::shiftDown() || cursorHasItem(); }
 std::string pressForContentsLine() {
     return ctr(
         "abp.companion.tooltip.press_for_contents",
-        "§7Press <{}§7> to View Contents",
+        "§7Hold {}§7 to show the contents",
         "§b" + ctr("abp.companion.tooltip.shift", "Left Shift")
     );
 }

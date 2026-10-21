@@ -1,4 +1,7 @@
 {
+    "abp.companion.cmd.yes": "伴随客户端：已安装（客户端模组 {}）",
+    "abp.companion.cmd.no": "伴随客户端：未安装（背包界面将被拒绝）",
+    "abp.companion.cmd.count": "伴随客户端：{} 名玩家安装了客户端模组",
     "abp.companion.required": "§cAlleviatedBackpacks 需要安装客户端模组才能显示背包界面。§7下载地址：§b{}",
     "abp.companion.tooltip.stack_multiplier": "§a堆叠倍率：§f{}",
     "abp.companion.tooltip.fluid": "§f{} mB §9{}",
