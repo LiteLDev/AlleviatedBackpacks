@@ -1,0 +1,8 @@
+{
+  "abp_refill_upgrade": {
+    "textures": "textures/items/refill_upgrade"
+  },
+  "abp_advanced_refill_upgrade": {
+    "textures": "textures/items/advanced_refill_upgrade"
+  }
+}
