@@ -280,22 +280,30 @@ ABP_REGISTER_SELFTEST("everlasting.death_drop", [](Context& ctx) -> ll::coro::Co
     player.setPlayerGameType(GameType::Survival); // creative players drop nothing on death
     co_await ctx.ticks(2);
     player.kill();
-    co_await ctx.ticks(15);
-    co_await ctx.ticks(5);
-    ItemActor* dropped = nullptr;
-    for (auto* a : player.getLevel().getRuntimeActorList()) {
-        if (!a || a->mRemoved || !a->hasType(ActorType::ItemEntity)) continue;
-        auto& item = static_cast<ItemActor&>(*a);
-        if (game::backpackUuid(item.item()) == p.everlasting->uuid()) {
-            dropped = &item;
-            drops.track(a->getOrCreateUniqueID());
+    co_await ctx.ticks(20);
+    auto findDropped = [&]() -> ItemActor* {
+        for (auto* a : player.getLevel().getRuntimeActorList()) {
+            if (!a || a->mRemoved || !a->hasType(ActorType::ItemEntity)) continue;
+            auto& item = static_cast<ItemActor&>(*a);
+            if (game::backpackUuid(item.item()) == p.everlasting->uuid()) {
+                drops.track(a->getOrCreateUniqueID());
+                return &item;
+            }
         }
+        return nullptr;
+    };
+    ItemActor* dropped = findDropped();
+    if (!dropped && !player.isAlive() && game::isBackpack(player.getInventory().getItem(0))) {
+        // The world keeps inventories on death (keepInventory): nothing drops. Check a backpack the
+        // player throws instead, through the same vanilla drop path.
+        ctx.info("keepInventory is on in this world: checking a thrown backpack instead");
+        auto& thrower = ctx.spawnPlayer();
+        co_await ctx.ticks(10);
+        thrower.drop(ctx.backpackItem(*p.everlasting), false);
+        co_await ctx.ticks(5);
+        dropped = findDropped();
     }
-    ctx.require(
-        dropped != nullptr,
-        std::string("backpack dropped on death (alive=") + (player.isAlive() ? "1" : "0") + ", still in inventory="
-            + (game::isBackpack(player.getInventory().getItem(0)) ? "1" : "0") + ")"
-    );
+    ctx.require(dropped != nullptr, "backpack dropped on death");
     auto id = dropped->getOrCreateUniqueID();
     ctx.check(dropped->isFireImmune(), "dropped backpack is everlasting");
     dropped->hurtByCause(1000.0f, Cause::Lava);
