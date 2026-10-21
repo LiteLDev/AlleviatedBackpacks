@@ -1,0 +1,14 @@
+{
+  "abp.void.name": "Void Upgrade",
+  "abp.void.advanced_name": "Advanced Void Upgrade",
+  "abp.void.mode.all": "Void: all matching items",
+  "abp.void.mode.all.desc": "§7Every matching item is destroyed",
+  "abp.void.mode.overflow": "Void: only overflow",
+  "abp.void.mode.overflow.desc": "§7Keeps one stack, voids what doesn't fit",
+  "abp.void.work_in_gui": "Work in GUI: {}",
+  "abp.void.work_in_gui.desc": "§7Also void items you put in by hand",
+  "abp.void.describe.allow": "§7Voids {} listed item(s)",
+  "abp.void.describe.deny": "§7Voids everything except {} listed item(s)",
+  "abp.void.describe.overflow": "§7Only overflow",
+  "abp.void.describe.gui": "§7Also in the GUI"
+}
