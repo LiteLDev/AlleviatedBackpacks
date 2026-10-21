@@ -16,6 +16,7 @@
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/Storage.h"
+#include "feature/admin/Admin.h"
 #include "mod/Config.h"
 #include "mod/GeneralConfig.h"
 #include "mod/I18n.h"
@@ -158,7 +159,7 @@ std::optional<NestedUpgrades> nestedUpgradesOf(game::Backpack const& backpack) {
     for (auto const& s : backpack.data().upgrades) {
         if (s.empty() || !s.enabled) continue;
         auto* u = upgradeFor(s.item);
-        if (!u || u->info().id != kId) continue;
+        if (!u || u->info().id != kId || !typeAllowed(*u)) continue;
         auto it = s.settings.find(kSettingKey);
         if (it == s.settings.end() || !it->is_string()) return NestedUpgrades::All;
         return nestedUpgradesFromString(it->get<std::string>());
@@ -208,6 +209,14 @@ std::shared_ptr<game::Backpack> resolveNested(std::shared_ptr<game::Backpack> co
 // ---- nested upgrades (PlayerScan provider) ----------------------------------------------------
 
 namespace {
+/// Scan depth for nested upgrades: `inception.maxDepth`, never deeper than the server's nesting
+/// limit (`admin.maxNestingDepth`, 0 = unlimited), since deeper backpacks can't exist anyway.
+int effectiveMaxDepth() {
+    int depth = config::get<InceptionConfig>().maxDepth;
+    int limit = config::get<admin::AdminConfig>().maxNestingDepth;
+    return limit > 0 ? std::min(depth, limit) : depth;
+}
+
 void walk(
     game::CarriedBackpack const&                                                    parent,
     std::shared_ptr<game::Backpack> const&                                          parentBp,
@@ -215,8 +224,7 @@ void walk(
     std::unordered_set<std::string>&                                                seen,
     std::vector<std::pair<game::CarriedBackpack, std::shared_ptr<game::Backpack>>>& list
 ) {
-    auto const& cfg = config::get<InceptionConfig>();
-    if (depth > cfg.maxDepth) return;
+    if (depth > effectiveMaxDepth()) return;
     if (!parent.upgradeActive(kId, kId)) return;
     auto mode = nestedUpgradesOf(*parentBp);
     if (!mode || *mode == NestedUpgrades::None) return;
@@ -246,7 +254,7 @@ void walk(
 
 void appendNested(Player&, std::vector<std::pair<game::CarriedBackpack, std::shared_ptr<game::Backpack>>>& list) {
     auto const& cfg = config::get<InceptionConfig>();
-    if (!cfg.nestedUpgradesWork || cfg.maxDepth <= 0) return;
+    if (!cfg.nestedUpgradesWork || effectiveMaxDepth() <= 0) return;
     std::unordered_set<std::string> seen;
     for (auto const& [c, bp] : list) seen.insert(bp->uuid());
     // walk() appends to `list`: iterate the directly carried entries by index (copies, since the

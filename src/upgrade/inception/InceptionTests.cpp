@@ -6,6 +6,7 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
+#include "feature/admin/Admin.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
@@ -181,6 +182,14 @@ ABP_REGISTER_SELFTEST("inception.depth_and_requirements", [](Context& ctx) {
     ctx.check(findCarried(player, b->uuid()).has_value(), "depth 1 found with maxDepth 1");
     ctx.check(!findCarried(player, c->uuid()).has_value(), "depth 2 hidden with maxDepth 1");
     config::mut<InceptionConfig>().maxDepth = 3;
+    {
+        // The server nesting limit (admin.maxNestingDepth) caps the scan as well.
+        ConfigGuard<admin::AdminConfig> adminGuard;
+        config::mut<admin::AdminConfig>().maxNestingDepth = 1;
+        ctx.check(!findCarried(player, c->uuid()).has_value(), "depth 2 hidden by admin.maxNestingDepth=1");
+        config::mut<admin::AdminConfig>().maxNestingDepth = 0;
+        ctx.check(findCarried(player, c->uuid()).has_value(), "admin limit 0 = unlimited");
+    }
 
     // Nesting allowed by the server config, but without Inception: inner upgrades stay inactive.
     config::mut<GeneralConfig>().allowNesting = true;
