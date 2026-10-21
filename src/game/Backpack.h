@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include "core/BackpackData.h"
+#include "mod/Registry.h"
 
 namespace abp::game {
 
@@ -62,6 +63,10 @@ public:
     /// The function `rebuildHooks()` runs (installed by the upgrade module).
     using HookBuilder = std::function<void(Backpack&)>;
     static void setHookBuilder(HookBuilder fn);
+    /// Extra builders run after the main one on every rebuild, for built-in (non-upgrade) rules such
+    /// as GUI memory slots. Register at static-init time with `ABP_REGISTER_BACKPACK_HOOKS(fn)`; use
+    /// a unique hook owner string (e.g. "gui:memory").
+    static void addHookContributor(HookBuilder fn);
 
 private:
     core::BackpackData                    mData;
@@ -71,4 +76,14 @@ private:
     std::unordered_map<std::string, std::any> mTransient;
 };
 
+namespace detail {
+struct HookContributorRegistrar {
+    explicit HookContributorRegistrar(Backpack::HookBuilder fn) { Backpack::addHookContributor(std::move(fn)); }
+};
+} // namespace detail
+
 } // namespace abp::game
+
+/// Adds a hook contributor (see `abp::game::Backpack::addHookContributor`).
+#define ABP_REGISTER_BACKPACK_HOOKS(...)                                                                               \
+    static ::abp::game::detail::HookContributorRegistrar ABP_UNIQUE(abp_backpack_hooks_)(__VA_ARGS__)

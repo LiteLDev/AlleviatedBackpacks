@@ -1,5 +1,5 @@
 // `/backpack` (alias `/abp`):
-//   /backpack open                 open the backpack in your hand
+//   /backpack open                 open the first carried backpack (chest, offhand, inventory)
 //   /backpack give <tier>          (op) give yourself a backpack
 //   /backpack selftest [glob]      (op / console) run selftests
 //   /backpack reload               (op / console) reload configs and translations
@@ -70,8 +70,9 @@ void registerAll() {
     cmd.overload().text("open").execute([](CommandOrigin const& origin, CommandOutput& output) {
         auto* player = playerOf(origin);
         if (!player) return output.error("Only players can open backpacks.");
-        if (!ui::BackpackMenu::openFor(*player, game::selectedSlot(*player))) {
-            return output.error(trFor(*player, "abp.cmd.open.no_backpack", "Hold a backpack in your main hand."));
+        // First carried backpack: chest slot, offhand, then inventory (the Java mod's keybind).
+        if (!ui::BackpackMenu::openCarried(*player)) {
+            return output.error(trFor(*player, "abp.gui.open.none", "You are not carrying a backpack."));
         }
         output.success(trFor(*player, "abp.cmd.open.ok", "Backpack opened."));
     });
