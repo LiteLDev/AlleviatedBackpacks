@@ -37,7 +37,6 @@ public:
 
     MagnetMenu(Player& player, UpgradeContext const& ctx, int slots, bool advanced);
     void build(Player& player) override;
-
 private:
     UpgradeContext mCtx;
 };

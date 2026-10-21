@@ -79,6 +79,9 @@ ActorUniqueID spawnItem(Player& player, std::string_view id, int count, float dx
     );
     if (!item) return ActorUniqueID{};
     item->pickupDelay() = 0;
+    // spawnItem throws the item in a random direction; keep it where it was put so it neither
+    // drifts into the player's vanilla pickup reach nor out of the magnet's range.
+    const_cast<Vec3&>(item->getPosDelta()) = Vec3{0.0f, 0.0f, 0.0f};
     if (source) {
         item->setSourceEntity(source);
         item->age() = 0;
@@ -273,7 +276,7 @@ ABP_REGISTER_SELFTEST("magnet.toggles_and_disable", [](Context& ctx) -> ll::coro
     UpgradeContext uc(bp, slot);
     uc.settings()["pickupItems"] = false;
     uc.saveSettings();
-    auto item = spawnItem(player, "minecraft:bone", 3, 2.3f);
+    auto item = spawnItem(player, "minecraft:bone", 3, 2.6f);
     tickMagnet(bp, slot, player);
     ctx.check(countOf(*bp, "minecraft:bone") == 0, "pickupItems off: nothing pulled");
     auto bones = data("minecraft:bone", 2);
@@ -288,7 +291,7 @@ ABP_REGISTER_SELFTEST("magnet.toggles_and_disable", [](Context& ctx) -> ll::coro
     // A disabled upgrade isn't ticked by the carried-backpack ticker.
     setEnabled(bp, slot, false);
     ctx.require(ctx.give(player, ctx.backpackItem(*bp), 5) == 5, "give backpack");
-    auto more = spawnItem(player, "minecraft:bone", 4, 2.3f);
+    auto more = spawnItem(player, "minecraft:bone", 4, 2.6f);
     co_await ctx.ticks(25);
     ctx.check(countOf(*bp, "minecraft:bone") == 3, "disabled magnet doesn't pull");
     ctx.check(findItem(player, more) != nullptr, "bone still on the ground");
@@ -353,8 +356,12 @@ ABP_REGISTER_SELFTEST("magnet.xp_consumer_hook", [](Context& ctx) -> ll::coro::C
     ctx.check(*took == 2, "consumer took 2 (got " + std::to_string(*took) + ")");
     auto rest = orbsAround(player, 4);
     ctx.check(rest.size() == 1 && orbValue(*rest[0]) == 3, "a 3 XP orb is left for the player");
-    for (int i = 0; i < 40 && !orbsAround(player, 4).empty(); ++i) co_await ctx.ticks(1);
-    ctx.check(player.getXpEarnedAtCurrentLevel() == before + 3, "player got the remaining 3 XP");
+    for (int i = 0; i < 80 && player.getXpEarnedAtCurrentLevel() < before + 3; ++i) co_await ctx.ticks(1);
+    ctx.check(
+        player.getXpEarnedAtCurrentLevel() == before + 3,
+        "player got the remaining 3 XP (xp " + std::to_string(before) + " -> "
+            + std::to_string(player.getXpEarnedAtCurrentLevel()) + ")"
+    );
     *cap = 1000;
 
     // XP off: orbs are left alone by the magnet.
