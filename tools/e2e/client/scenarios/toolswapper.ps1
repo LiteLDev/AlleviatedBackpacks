@@ -35,6 +35,11 @@ Start-Sleep -Milliseconds 800
 $p = HotbarSlot 1; Click $p[0] $p[1] -Relative
 $p = MenuSlot 0;   Click $p[0] $p[1] -Relative
 Start-Sleep -Milliseconds 800
+# Leave and re-enter the upgrades page so its toggle / settings buttons are rebuilt.
+$p = MenuSlot 52; Click $p[0] $p[1] -Relative
+Start-Sleep -Milliseconds 500
+Click $p[0] $p[1] -Relative
+Start-Sleep -Milliseconds 800
 Save-Screenshot 'upgrade-installed' | Out-Null
 
 # 3. Its settings menu (the repeater below the upgrade).
