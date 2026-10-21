@@ -49,12 +49,23 @@ $p = MenuSlot 0    # first upgrade slot
 Click $p[0] $p[1] -Relative
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'upgrade-installed' | Out-Null
+# The upgrades page doesn't redraw its toggle/settings rows right after an install (foundation
+# menu); switch to storage and back to get the settings button.
+$p = MenuSlot 45   # back to storage
+Click $p[0] $p[1] -Relative
+Start-Sleep -Milliseconds 600
+$p = MenuSlot 52
+Click $p[0] $p[1] -Relative
+Start-Sleep -Milliseconds 800
+Save-Screenshot 'upgrades-page' | Out-Null
 $mark = Get-LogMark
 $p = MenuSlot 18   # settings button of upgrade slot 0
 Click $p[0] $p[1] -Relative
 Wait-LogLine 'menu shown: Advanced Deposit Upgrade \(27 slots\)' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 2000
 Save-Screenshot 'deposit-settings' | Out-Null
+Start-Sleep -Milliseconds 2000
+Save-Screenshot 'deposit-settings-2' | Out-Null
 Close-Screen
 Start-Sleep -Milliseconds 500
 Assert-BackpackItems 84
