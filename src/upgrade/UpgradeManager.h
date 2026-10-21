@@ -71,4 +71,22 @@ void forEachInstalled(
 /// items were taken (item.count is reduced accordingly).
 int dispatchPickup(Player& player, core::ItemStackData& item);
 
+// ---- server rules (append-only extension points, used by the admin unit) ------------------------
+
+/// Server-wide gate for upgrade types (e.g. a config deny-list). A type the gate rejects can't be
+/// installed and behaves as switched off everywhere: no `attach()`, no ticks, no pickups,
+/// `hasActive()` is false. Default (no gate): every type is allowed. Rebuild the hooks of loaded
+/// backpacks after changing what the gate returns.
+using TypeGate = std::function<bool(IUpgrade const&)>;
+void setTypeGate(TypeGate gate);
+/// True if the gate allows this upgrade type.
+[[nodiscard]] bool typeAllowed(IUpgrade const& upgrade);
+
+/// Extra backpack-wide rules applied on every hook rebuild, after the foundation rule and before
+/// the upgrades' `attach()`. `fn` registers inventory hooks (use an owner such as "abp:<unit>").
+/// Re-adding an `id` replaces it. Rebuild the hooks of loaded backpacks after (un)registering.
+using RuleBuilder = std::function<void(game::Backpack&)>;
+void addRuleBuilder(std::string id, RuleBuilder fn);
+void removeRuleBuilder(std::string const& id);
+
 } // namespace abp::upgrade

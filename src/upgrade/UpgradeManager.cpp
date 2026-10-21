@@ -58,6 +58,16 @@ core::ItemStackData embedSettings(core::ItemStackData const& item, nlohmann::jso
     return out;
 }
 
+TypeGate& typeGate() {
+    static TypeGate gate;
+    return gate;
+}
+
+std::vector<std::pair<std::string, RuleBuilder>>& ruleBuilders() {
+    static std::vector<std::pair<std::string, RuleBuilder>> builders;
+    return builders;
+}
+
 bool sameGroupOrId(IUpgrade const& u, std::string_view name) { return u.info().id == name || u.info().groupOrId() == name; }
 
 /// True if backpack `from` contains (at any depth) a backpack item bound to `target`.
@@ -98,11 +108,18 @@ void buildHooks(game::Backpack& bp) {
         }
         return core::InsertVerdict::Allow;
     });
+    for (auto const& [id, fn] : ruleBuilders()) {
+        try {
+            fn(bp);
+        } catch (std::exception const& e) {
+            log().error("backpack rule {} failed: {}", id, e.what());
+        }
+    }
     auto const& slots = bp.data().upgrades;
     for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
         auto const& s = slots[static_cast<std::size_t>(i)];
         if (s.empty() || !s.enabled) continue;
-        if (auto* u = byItemId(s.item.id)) {
+        if (auto* u = byItemId(s.item.id); u && typeAllowed(*u)) {
             try {
                 u->attach(UpgradeContext(self, i), inv);
             } catch (std::exception const& e) {
@@ -139,6 +156,24 @@ void IUpgrade::openSettings(Player& player, UpgradeContext const& ctx) {
     if (auto menu = createSettingsMenu(player, ctx)) ui::MenuManager::get().open(player, std::move(menu));
 }
 
+// ---- server rules ------------------------------------------------------------------------------
+
+void setTypeGate(TypeGate gate) { typeGate() = std::move(gate); }
+
+bool typeAllowed(IUpgrade const& upgrade) {
+    auto const& gate = typeGate();
+    return !gate || gate(upgrade);
+}
+
+void addRuleBuilder(std::string id, RuleBuilder fn) {
+    removeRuleBuilder(id);
+    ruleBuilders().emplace_back(std::move(id), std::move(fn));
+}
+
+void removeRuleBuilder(std::string const& id) {
+    std::erase_if(ruleBuilders(), [&](auto const& e) { return e.first == id; });
+}
+
 // ---- manager -----------------------------------------------------------------------------------
 
 IUpgrade* upgradeFor(core::ItemStackData const& item) { return item.empty() ? nullptr : byItemId(item.id); }
@@ -166,6 +201,10 @@ bool canInstall(
     auto* type = upgradeFor(item);
     if (!type) {
         why = message(player, "abp.upgrade.error.not_upgrade", "Only upgrades can go into upgrade slots.");
+        return false;
+    }
+    if (!typeAllowed(*type)) {
+        why = message(player, "abp.admin.upgrade_disabled", "This upgrade is disabled on this server.");
         return false;
     }
     auto const& info  = type->info();
@@ -312,14 +351,15 @@ void forEachInstalled(
     for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
         auto const& s = slots[static_cast<std::size_t>(i)];
         if (s.empty() || (activeOnly && !s.enabled)) continue;
-        if (auto* u = upgradeFor(s.item)) fn(*u, UpgradeContext(backpack, i));
+        auto* u = upgradeFor(s.item);
+        if (u && (!activeOnly || typeAllowed(*u))) fn(*u, UpgradeContext(backpack, i));
     }
 }
 
 bool hasActive(game::Backpack const& backpack, std::string_view idOrGroup) {
     for (auto const& s : backpack.data().upgrades) {
         if (s.empty() || !s.enabled) continue;
-        if (auto* u = upgradeFor(s.item); u && sameGroupOrId(*u, idOrGroup)) return true;
+        if (auto* u = upgradeFor(s.item); u && typeAllowed(*u) && sameGroupOrId(*u, idOrGroup)) return true;
     }
     return false;
 }
