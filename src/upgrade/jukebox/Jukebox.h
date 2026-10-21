@@ -112,6 +112,9 @@ public:
     /// isn't called for 2 seconds. Call `stopAll(uuid)` when the backpack is picked up / broken.
     void tickPlaced(std::shared_ptr<game::Backpack> const& backpack, int dim, Vec3 const& pos);
 
+    /// Runs `fn` on the server thread after `ticks` ticks (menu switching).
+    void runLater(int ticks, std::function<void()> fn) { mLater.emplace_back(mNow + std::max(1, ticks), std::move(fn)); }
+
     // ---- selftests ----------------------------------------------------------------------------
     void setObserver(std::function<void(SoundEvent const&)> fn) { mObserver = std::move(fn); }
     /// Overrides every track's length (ticks); nullopt = real lengths.
@@ -167,6 +170,7 @@ private:
     std::int64_t                                  mNow = 0;
     std::function<void(SoundEvent const&)>        mObserver;
     std::optional<int>                            mDurationOverride;
+    std::vector<std::pair<std::int64_t, std::function<void()>>> mLater;
 };
 
 } // namespace abp::upgrade::jukebox

@@ -71,6 +71,7 @@ void Service::uninstall() {
     for (auto& [key, p] : mPlaybacks) stopSounds(p);
     mPlaybacks.clear();
     mPlaced.clear();
+    mLater.clear();
     if (mTick) ll::event::EventBus::getInstance().removeListener(mTick);
     mTick = nullptr;
 }
@@ -269,6 +270,15 @@ std::optional<UpgradeContext> Service::validContext(Playback const& p) const {
 
 void Service::tick() {
     ++mNow;
+    if (!mLater.empty()) {
+        std::vector<std::function<void()>> due;
+        std::erase_if(mLater, [&](auto& e) {
+            if (e.first > mNow) return false;
+            due.push_back(std::move(e.second));
+            return true;
+        });
+        for (auto& fn : due) fn();
+    }
     if (mNow % 100 == 0) {
         std::erase_if(mPlaced, [&](auto const& e) { return mNow - e.second.lastSeen > 100; });
     }

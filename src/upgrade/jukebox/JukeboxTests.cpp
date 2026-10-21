@@ -199,11 +199,12 @@ ABP_REGISTER_SELFTEST("jukebox.buttons", [](Context& ctx) -> ll::coro::CoroTask<
     press(player, 53);
     ctx.check(repeatMode(s.ctx()) == core::RepeatMode::All, "repeat all");
     press(player, 45);
-    co_await ctx.ticks(15);
-    ctx.check(
-        std::dynamic_pointer_cast<ui::BackpackMenu>(ui::MenuManager::get().current(player)) != nullptr,
-        "back reopens the backpack"
-    );
+    bool back = false;
+    for (int i = 0; i < 40 && !back; ++i) {
+        co_await ctx.ticks(1);
+        back = std::dynamic_pointer_cast<ui::BackpackMenu>(ui::MenuManager::get().current(player)) != nullptr;
+    }
+    ctx.check(back, "back reopens the backpack");
     ui::MenuManager::get().close(player);
 });
 

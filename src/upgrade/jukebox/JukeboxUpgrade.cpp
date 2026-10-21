@@ -3,7 +3,10 @@
 
 #include <algorithm>
 
+#include "ll/api/service/Bedrock.h"
+
 #include "mc/world/actor/player/Player.h"
+#include "mc/world/level/Level.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "game/ItemConv.h"
@@ -102,6 +105,21 @@ namespace {
 
 constexpr std::string_view kFiller = "minecraft:gray_stained_glass_pane";
 
+/// Ticks between closing one chest screen and opening the next. Swapping screens in place (or
+/// re-opening right after the close) left the real client without a screen.
+constexpr int kSwitchDelay = 15;
+
+/// Closes the player's menu, then runs `open` once the client screen is surely gone.
+void switchMenu(Player& player, std::function<void(Player&)> open) {
+    ui::MenuManager::get().closeThen(player, [open = std::move(open)](Player& p) {
+        auto id = p.getOrCreateUniqueID();
+        Service::get().runLater(kSwitchDelay, [id, open] {
+            auto level = ll::service::getLevel();
+            if (auto* pl = level ? level->getPlayer(id) : nullptr; pl && pl->isAlive()) open(*pl);
+        });
+    });
+}
+
 /// Menu slot of disc slot `i`: basic in the middle; advanced in two rows of six.
 int discMenuSlot(int i, int count) {
     if (count <= 1) return 22;
@@ -124,7 +142,7 @@ public:
         setSlot(45, std::make_shared<ui::ButtonSlot>(
             ui::icon("minecraft:smithing_table", trFor(player, "abp.jukebox.back", "Back to upgrades")),
             [bp = mCtx.backpackPtr()](ui::ClickContext const& c) {
-                ui::MenuManager::get().closeThen(c.player, [bp](Player& p) {
+                switchMenu(c.player, [bp](Player& p) {
                     ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
                 });
             }
@@ -274,7 +292,7 @@ public:
     // close the backpack first, then open the jukebox menu.
     void openSettings(Player& player, UpgradeContext const& ctx) override {
         auto menu = createSettingsMenu(player, ctx);
-        ui::MenuManager::get().closeThen(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
+        switchMenu(player, [menu](Player& p) { ui::MenuManager::get().open(p, menu); });
     }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
