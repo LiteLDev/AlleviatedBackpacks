@@ -36,6 +36,12 @@ public:
     /// Opens `menu`, replacing any open menu (which gets `onClose`). Returns false if the player
     /// can't open a menu (not a server player, dead).
     bool open(Player& player, std::shared_ptr<Menu> menu);
+    /// Replaces the open menu with `menu` inside the same chest screen: no close/reopen on the
+    /// client (the title stays the old one), the slots are rebuilt and re-sent at once. The old
+    /// menu gets `onClose` + `onDestroyed`; the cursor stays. Use it to switch between menus of
+    /// the same size: on a real client, opening a new chest right after a server-side close is
+    /// unreliable. Falls back to `open` when no menu is shown or the sizes differ.
+    bool swap(Player& player, std::shared_ptr<Menu> menu);
     /// Closes the player's menu, if any.
     void close(Player& player);
     /// Closes every open menu (world stopping, mod disable).

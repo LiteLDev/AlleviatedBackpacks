@@ -257,6 +257,48 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
     return true;
 }
 
+bool MenuManager::swap(Player& player, std::shared_ptr<Menu> menu) {
+    if (!menu) return false;
+    if (mBusy) {
+        auto key = keyOf(player);
+        mDeferred.push_back([this, key, menu] {
+            if (auto* p = findPlayer(key)) swap(*p, menu);
+        });
+        return true;
+    }
+    auto it = mSessions.find(keyOf(player));
+    if (it == mSessions.end() || !it->second->shown || it->second->menu->rows() != menu->rows()) {
+        return open(player, std::move(menu));
+    }
+    auto old = it->second->menu;
+    try {
+        old->onClose(player);
+    } catch (std::exception const& e) {
+        log().error("menu onClose failed: {}", e.what());
+    }
+    try {
+        old->onDestroyed();
+    } catch (std::exception const& e) {
+        log().error("menu onDestroyed failed: {}", e.what());
+    }
+    // The callbacks may have closed or replaced the session.
+    it = mSessions.find(keyOf(player));
+    if (it == mSessions.end() || it->second->menu != old) return open(player, std::move(menu));
+    auto& s = *it->second;
+    s.menu  = std::move(menu);
+    s.menu->invalidate();
+    s.lastVersion.reset();
+    s.needFull = true;
+    try {
+        s.menu->onOpen(player);
+    } catch (std::exception const& e) {
+        log().error("menu onOpen failed: {}", e.what());
+    }
+    log().info("menu shown: {} ({} slots)", s.menu->title(), s.menu->size());
+    sync(player, s, true);
+    return true;
+}
+
 void MenuManager::close(Player& player) {
     auto key = keyOf(player);
     if (!mSessions.contains(key)) return;
