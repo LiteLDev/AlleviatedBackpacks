@@ -71,7 +71,7 @@ void decorateItemIcon(ui::Painter& painter, ItemStack const& stack, float x, flo
 void dispatchPlaced(PlacedContext const& ctx);
 
 /// Default backpack colours (no tint applied by the built-in hook).
-inline constexpr std::uint32_t kDefaultMain   = 0xFFA0703C;
-inline constexpr std::uint32_t kDefaultAccent = 0xFF5A3C1E;
+inline constexpr std::uint32_t kDefaultMain   = 0xFFCC613A;
+inline constexpr std::uint32_t kDefaultAccent = 0xFF622E1A;
 
 } // namespace abp::client::render

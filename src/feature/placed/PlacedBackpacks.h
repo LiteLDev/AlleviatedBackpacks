@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "core/Tier.h"
+
 #include "ll/api/event/ListenerBase.h"
 
 #include "mc/world/level/BlockPos.h"
@@ -25,10 +27,30 @@ class Player;
 
 namespace abp::placed {
 
-/// Block id of a placed backpack (one block type; tier and facing are block states).
+/// Legacy (phase 1) block of a placed backpack: one block, tier and facing as block states.
+/// Converted to the per-tier blocks on the placed tick.
 inline constexpr std::string_view kBlockId     = "alleviatedbackpacks:placed_backpack";
 inline constexpr std::string_view kFacingState = "alleviatedbackpacks:facing"; ///< 0 south, 1 west, 2 north, 3 east
-inline constexpr std::string_view kTierState   = "alleviatedbackpacks:tier";   ///< core::Tier value
+inline constexpr std::string_view kTierState   = "alleviatedbackpacks:tier";   ///< legacy block only: core::Tier value
+/// SB BackpackBlock states (per-tier blocks): parts of the model (shape) and the open state.
+inline constexpr std::string_view kLeftTankState  = "alleviatedbackpacks:left_tank";
+inline constexpr std::string_view kRightTankState = "alleviatedbackpacks:right_tank";
+inline constexpr std::string_view kBatteryState   = "alleviatedbackpacks:battery";
+inline constexpr std::string_view kOpenState      = "alleviatedbackpacks:open";
+
+/// Block of a placed backpack of `tier` (SB: one block per tier), "alleviatedbackpacks:placed_<tier>_backpack".
+[[nodiscard]] std::string blockIdFor(core::Tier tier);
+/// Every placed-backpack block id (the per-tier blocks and the legacy block).
+[[nodiscard]] std::vector<std::string> blockIds();
+
+/// Part / open states of a placed backpack block.
+struct BlockParts {
+    bool leftTank  = false;
+    bool rightTank = false;
+    bool battery   = false;
+    bool open      = false;
+    [[nodiscard]] bool operator==(BlockParts const&) const = default;
+};
 
 /// `config/placed.json`.
 struct PlacedConfig {
@@ -104,9 +126,20 @@ public:
     /// Removes the backpack block at `pos` (without dropping it) and returns its item.
     std::optional<ItemStack> take(BlockSource& region, BlockPos const& pos);
 
-    /// Sneak + use with a backpack in the main hand on `clicked` / `face`: places it.
+    /// Sneak + use with a backpack in the main hand on `clicked` / `face`: places it. In creative
+    /// the placed backpack is a clone with a new uuid and the item stays in the hand (SB).
     bool placeFromHand(Player& player, BlockPos const& clicked, int face);
-    /// Sneak + use with an empty hand: the backpack goes into the player's hand.
+    /// Fills / drains the backpack's tanks with the fluid container in the main hand (SB
+    /// BackpackBlock.useItemOn). True if the click was a fluid container on a backpack with tanks.
+    bool useFluidContainer(Player& player, BlockPos const& pos);
+    /// The comparator output of the placed backpack at `pos` (SB: InventoryHelper.getAnalogOutputSignal).
+    [[nodiscard]] int comparatorSignal(BlockSource& region, BlockPos const& pos);
+    /// Players with the backpack at `loc` open (SB ContainerOpenersCounter).
+    [[nodiscard]] int openers(BlockLocation const& loc) const;
+    /// Part states the block at `loc` should have (tanks / battery of its backpack, open).
+    [[nodiscard]] BlockParts partsFor(BlockLocation const& loc, game::Backpack& backpack) const;
+    /// Sneak + use with an empty main hand: the backpack goes into the player's main hand (5 tick
+    /// cooldown, wool break sound). Infinity upgrades allow it to operators only.
     bool pickUp(Player& player, BlockPos const& pos);
     /// Use: opens the backpack GUI (closes when the block goes away or the player walks off).
     bool open(Player& player, BlockPos const& pos, ui::BackpackMenu::View view = ui::BackpackMenu::View::Storage);
@@ -119,8 +152,12 @@ public:
     /// Re-reads the position map from the world DB (selftests: persistence).
     void reload() { load(); }
 
-    /// Block state value (tier / facing) of a placed-backpack block, nullopt if not one.
+    /// Block state value (facing / legacy tier) of a placed-backpack block, nullopt if not one.
     [[nodiscard]] static std::optional<int> stateOf(Block const& block, std::string_view state);
+    /// Bool block state of a placed-backpack block (parts, open), nullopt if not one.
+    [[nodiscard]] static std::optional<bool> boolStateOf(Block const& block, std::string_view state);
+    /// Tier of a placed-backpack block, nullopt if not one.
+    [[nodiscard]] static std::optional<core::Tier> tierOfBlock(Block const& block);
 
 private:
     void load();
@@ -137,6 +174,17 @@ private:
     void closeViewers(std::string const* uuid);
     [[nodiscard]] static ItemStack itemOf(PlacedEntry const& entry);
     void tick();
+    /// Placed tick work for one entry with its block present: legacy block conversion, part /
+    /// open states, the display entity, items falling into the block.
+    void maintain(BlockSource& region, PlacedEntry const& entry, std::shared_ptr<game::Backpack> const& bp);
+    /// Re-places blocks of Everlasting backpacks an explosion destroyed.
+    void restoreProtected();
+    struct Protected {
+        PlacedEntry entry;
+        Block const* block;
+    };
+    std::vector<Protected> mRestore;
+    std::int64_t           mLastPurge = 0;
 
     std::map<BlockLocation, PlacedEntry>           mEntries;
     std::unordered_map<std::string, BlockLocation> mByUuid;
@@ -144,7 +192,7 @@ private:
     std::map<BlockLocation, int>                   mMismatches;   ///< consecutive checks without our block
     /// A sneak-use to place / pick up, run on the next tick (outside the item-use transaction).
     struct PendingAction {
-        enum class Kind { Place, PickUp, Open };
+        enum class Kind { Place, PickUp, Open, Fluid };
         std::int64_t player; ///< ActorUniqueID
         Kind         kind;
         BlockPos     pos;

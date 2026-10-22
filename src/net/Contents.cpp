@@ -137,6 +137,13 @@ core::screen::RenderInfo buildRenderInfo(game::Backpack const& backpack) {
         if (s.empty() || !s.enabled) continue;
         if (auto* type = upgrade::upgradeFor(s.item)) r.upgrades.push_back(type->info().id);
     }
+    for (auto const& contributor : RenderInfoRegistry::entries()) {
+        try {
+            if (contributor) contributor(const_cast<game::Backpack&>(backpack), r);
+        } catch (std::exception const& e) {
+            log().error("render info contributor failed: {}", e.what());
+        }
+    }
     return r;
 }
 

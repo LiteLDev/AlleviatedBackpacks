@@ -29,8 +29,8 @@ struct BackpackData {
 
     std::string              uuid;
     Tier                     tier        = Tier::Leather;
-    std::uint32_t            mainColor   = 0xFFA0703C; ///< ARGB
-    std::uint32_t            accentColor = 0xFF5A3C1E; ///< ARGB
+    std::uint32_t            mainColor   = 0xFFCC613A; ///< ARGB
+    std::uint32_t            accentColor = 0xFF622E1A; ///< ARGB
     BackpackInventory        inventory;
     std::vector<UpgradeSlot> upgrades;
     nlohmann::json           settings = nlohmann::json::object();
