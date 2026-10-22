@@ -324,7 +324,7 @@ void addJukeboxUpgradeAndRandomDisc(std::shared_ptr<game::Backpack> const& bp) {
         return;
     }
     upgrade::UpgradeContext ctx(bp, 0);
-    int numberOfDiscs = advanced ? nextInt(upgrade::jukebox::kAdvancedSlots / 3) + 1 : 1;
+    int numberOfDiscs = advanced ? nextInt(std::max(1, upgrade::jukebox::advancedSlots() / 3)) + 1 : 1;
     std::vector<std::string> used;
     for (int i = 0; i < numberOfDiscs * 2 && static_cast<int>(used.size()) < numberOfDiscs; ++i) {
         auto const& disc = discs[static_cast<std::size_t>(nextInt(static_cast<int>(discs.size())))];

@@ -71,6 +71,8 @@ public:
     /// it (Sophisticated Core). nullptr removes the gate.
     using TierGrowthGate = std::function<bool(ItemStack const& stack, Backpack const& backpack)>;
     void setTierGrowthGate(TierGrowthGate gate) { mTierGrowthGate = std::move(gate); }
+    /// The installed gate (empty when none); e.g. tier recipes refuse what it refuses.
+    [[nodiscard]] TierGrowthGate const& tierGrowthGate() const { return mTierGrowthGate; }
 
     /// Uuids of every backpack stored in the world (loaded or not), in DB key order.
     [[nodiscard]] std::vector<std::string> storedUuids() const;

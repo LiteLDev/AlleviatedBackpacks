@@ -14,7 +14,7 @@
     ],
     "key": {
       "G": {
-        "item": "minecraft:glass"
+        "tag": "alleviatedbackpacks:glass_blocks"
       },
       "B": {
         "item": "alleviatedbackpacks:upgrade_base"

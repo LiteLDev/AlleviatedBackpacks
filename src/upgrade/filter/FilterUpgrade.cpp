@@ -6,6 +6,10 @@
 
 #include "upgrade/filter/FilterUpgrade.h"
 
+#include <algorithm>
+#include <memory>
+#include <vector>
+
 #include "mc/world/actor/player/Player.h"
 
 #include "game/Backpack.h"
@@ -104,24 +108,51 @@ public:
     [[nodiscard]] UpgradeInfo const& info() const override { return mInfo; }
 
     void attach(UpgradeContext const& ctx, core::BackpackInventory& inv) override {
-        auto filter = filtering::load(ctx, mInfo.tier);
-        auto dir    = directionOf(ctx);
+        // SC FilteredItemHandler.matchesFilters: the active Filter upgrades of a direction decide
+        // together. One filter: its result. Several allow lists: any of them may match. Several
+        // with at least one block list: every one must pass. The first active Filter upgrade
+        // registers the combined hooks; the others register none.
+        int first = -1;
+        forEachInstalled(ctx.backpackPtr(), true, [&](IUpgrade& u, UpgradeContext const& c) {
+            if (first < 0 && u.info().groupOrId() == mInfo.groupOrId()) first = c.slot();
+        });
+        if (first != ctx.slot()) return;
+        // The filters taking part in automated inserts (Both / Input) and extracts (Both / Output).
+        auto inFilters  = std::make_shared<std::vector<core::Filter>>();
+        auto outFilters = std::make_shared<std::vector<core::Filter>>();
+        forEachInstalled(ctx.backpackPtr(), true, [&](IUpgrade& u, UpgradeContext const& c) {
+            if (u.info().groupOrId() != mInfo.groupOrId()) return;
+            auto filter = filtering::load(c, u.info().tier);
+            auto dir    = directionOf(c);
+            if (dir != Direction::Output) inFilters->push_back(filter);
+            if (dir != Direction::Input) outFilters->push_back(filter);
+        });
+        auto weak = std::weak_ptr<game::Backpack>(ctx.backpackPtr());
         // SC FilterUpgradeWrapper: a ContentsFilterLogic (STORAGE = items already in the backpack).
-        auto passes = [filter, weak = std::weak_ptr<game::Backpack>(ctx.backpackPtr())](core::ItemStackData const& item) {
+        auto passes = [weak](core::Filter const& filter, core::ItemStackData const& item) {
             if (!filter.filterByStorage) return filter.passes(item, &filtering::matcher());
             auto bp = weak.lock();
             return bp && filtering::matchesContents(filter, *bp, item);
         };
-        if (dir != Direction::Output) {
-            inv.addInsertFilter(ctx.hookOwner(), kPriority, [passes](core::InsertQuery const& q) {
+        auto decide = [passes](std::vector<core::Filter> const& active, core::ItemStackData const& item) {
+            if (active.empty()) return true;
+            if (active.size() == 1) return passes(active.front(), item);
+            bool matchAll = std::any_of(active.begin(), active.end(), [](core::Filter const& f) {
+                return f.mode != core::FilterMode::Allow;
+            });
+            if (matchAll) return std::all_of(active.begin(), active.end(), [&](core::Filter const& f) { return passes(f, item); });
+            return std::any_of(active.begin(), active.end(), [&](core::Filter const& f) { return passes(f, item); });
+        };
+        if (!inFilters->empty()) {
+            inv.addInsertFilter(ctx.hookOwner(), kPriority, [decide, inFilters](core::InsertQuery const& q) {
                 if (q.ctx.source != core::Source::Automation) return core::InsertVerdict::Allow;
-                return passes(q.stack) ? core::InsertVerdict::Allow : core::InsertVerdict::Deny;
+                return decide(*inFilters, q.stack) ? core::InsertVerdict::Allow : core::InsertVerdict::Deny;
             });
         }
-        if (dir != Direction::Input) {
-            inv.addExtractFilter(ctx.hookOwner(), kPriority, [passes](core::ExtractQuery const& q) {
+        if (!outFilters->empty()) {
+            inv.addExtractFilter(ctx.hookOwner(), kPriority, [decide, outFilters](core::ExtractQuery const& q) {
                 if (q.ctx.source != core::Source::Automation) return true;
-                return passes(q.stack);
+                return decide(*outFilters, q.stack);
             });
         }
     }

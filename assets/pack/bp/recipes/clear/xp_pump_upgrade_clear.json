@@ -1,0 +1,12 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:xp_pump_upgrade_clear"
+    },
+    "tags": ["crafting_table"],
+    "ingredients": [{ "item": "alleviatedbackpacks:xp_pump_upgrade" }],
+    "unlock": [{ "item": "alleviatedbackpacks:xp_pump_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:xp_pump_upgrade", "count": 1 }
+  }
+}

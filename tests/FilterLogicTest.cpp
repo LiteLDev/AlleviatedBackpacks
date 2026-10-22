@@ -121,6 +121,24 @@ TEST(FilterLogic, TagListSortedUnique) {
     EXPECT_TRUE(f.tagsToAdd(t.tagsOf(item("minecraft:oak_log"))).empty()); // "All Item's tags are already added"
 }
 
+// SC TreeSet<ResourceLocation>: path first, then namespace ("x" = "minecraft:x").
+TEST(FilterLogic, TagOrderIsResourceLocationOrder) {
+    EXPECT_TRUE(abp::core::tagLess("zzz:apple", "aaa:banana"));
+    EXPECT_TRUE(abp::core::tagLess("a:logs", "b:logs"));
+    EXPECT_TRUE(abp::core::tagLess("logs", "zzz:logs"));      // minecraft < zzz
+    EXPECT_TRUE(abp::core::tagLess("aaa:logs", "logs"));      // aaa < minecraft
+    EXPECT_FALSE(abp::core::tagLess("minecraft:x", "minecraft:x"));
+    Filter f(1);
+    f.addTag("mymod:wood");
+    f.addTag("minecraft:logs");
+    f.addTag("c:wood");
+    f.addTag("minecraft:axe");
+    EXPECT_EQ(f.tags, (std::vector<std::string>{"minecraft:axe", "minecraft:logs", "c:wood", "mymod:wood"}));
+    std::vector<std::string> v{"z:b", "a:c", "z:b", "m:a"};
+    abp::core::sortTags(v);
+    EXPECT_EQ(v, (std::vector<std::string>{"m:a", "z:b", "a:c"}));
+}
+
 TEST(FilterLogic, RejectsDuplicates) {
     Filter f(3, FilterDefaults{});
     f.setGhost(0, item("minecraft:stone"));

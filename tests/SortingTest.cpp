@@ -175,6 +175,24 @@ TEST(BackpackInventory, SlotPreferenceSimulateCountsOnce) {
     EXPECT_EQ(real.remainder.count, 64);
 }
 
+// SC InventoryHandlerSlotTracker: partly filled stacks of the item first, then empty memory slots,
+// then other empty slots.
+TEST(BackpackInventory, MergeBeforeEmptyMemorySlot) {
+    BackpackInventory inv(4);
+    inv.set(0, item("minecraft:stone", 10));
+    inv.addSlotPreference("mem", 0, [](ItemStackData const& s) {
+        return s.id == "minecraft:stone" ? std::vector<int>{2} : std::vector<int>{};
+    });
+    inv.insert(item("minecraft:stone", 5), kPlayer);
+    EXPECT_EQ(inv.at(0).count, 15);
+    EXPECT_TRUE(inv.at(2).empty());
+    // The overflow of the partial stack goes into the memory slot before other empty slots.
+    inv.insert(item("minecraft:stone", 60), kPlayer);
+    EXPECT_EQ(inv.at(0).count, 64);
+    EXPECT_EQ(inv.at(2).count, 11);
+    EXPECT_TRUE(inv.at(1).empty());
+}
+
 TEST(Sorting, MemoryMatchIgnoresNbt) {
     auto a = item("minecraft:iron_sword", 1, 1);
     auto b = a;

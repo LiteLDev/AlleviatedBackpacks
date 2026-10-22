@@ -1,0 +1,12 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:advanced_mob_catcher_upgrade_clear"
+    },
+    "tags": ["crafting_table"],
+    "ingredients": [{ "item": "alleviatedbackpacks:advanced_mob_catcher_upgrade" }],
+    "unlock": [{ "item": "alleviatedbackpacks:advanced_mob_catcher_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:advanced_mob_catcher_upgrade", "count": 1 }
+  }
+}

@@ -41,11 +41,12 @@ struct MobCatcherConfig {
     /// When true, mobs that expose inventories (Bedrock `minecraft:inventory`) are not capturable.
     bool disallowInventoryEntities = false;
     /// Entity types (or #families) that cannot be captured.
-    std::vector<std::string> entityBlockList = {"minecraft:wither"};
+    /// SB default: empty (the wither and the ender dragon are refused in code anyway).
+    std::vector<std::string> entityBlockList = {};
     /// Entity types (or #families) treated as hostile by slot cost and tier rules.
-    std::vector<std::string> hostileOverrides = {"minecraft:enderman"};
+    std::vector<std::string> hostileOverrides = {}; ///< SB default: empty
     /// Entity types (or #families) treated as passive. Bedrock's villager is "villager_v2".
-    std::vector<std::string> passiveOverrides = {"minecraft:villager", "minecraft:villager_v2"};
+    std::vector<std::string> passiveOverrides = {}; ///< SB default: empty
 };
 
 [[nodiscard]] MobCatcherConfig const& config();

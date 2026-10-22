@@ -9,11 +9,18 @@
 #include "mc/world/actor/player/Player.h"
 
 #include "core/Appearance.h"
+#include "feature/admin/SbConfig.h"
 #include "feature/gui/Gui.h"
 #include "game/Backpack.h"
 #include "mod/Config.h"
 
 namespace abp::feature::gui {
+
+bool otherPlayerOpeningAllowed() {
+    return config::get<GuiConfig>().allowOpeningOtherPlayerBackpacks && admin::sbServer().allowOpeningOtherPlayerBackpacks;
+}
+
+bool itemDisplayDisabled() { return config::get<GuiConfig>().itemDisplayDisabled || admin::sbServer().itemDisplayDisabled; }
 
 namespace {
 using nlohmann::json;
@@ -198,7 +205,7 @@ void setSearchPhrase(Player& player, game::Backpack& backpack, std::string const
 }
 
 bool anotherPlayerCanOpen(Player& wearer, game::Backpack const& backpack) {
-    if (!config::get<GuiConfig>().allowOpeningOtherPlayerBackpacks) return false;
+    if (!otherPlayerOpeningAllowed()) return false;
     return settingValue(wearer, backpack, MainSetting::AnotherPlayerCanOpen);
 }
 
@@ -283,7 +290,7 @@ void setItemDisplayColor(game::Backpack& backpack, int dye) {
 }
 
 std::optional<DisplayedItem> displayedItem(game::Backpack& backpack) {
-    if (config::get<GuiConfig>().itemDisplayDisabled) return std::nullopt;
+    if (itemDisplayDisabled()) return std::nullopt;
     auto d = itemDisplay(backpack);
     if (d.slots.empty()) return std::nullopt;
     DisplayedItem out;

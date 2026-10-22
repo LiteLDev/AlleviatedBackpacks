@@ -242,7 +242,9 @@ bool canInstall(
         }
     }
     if (count >= info.maxPerBackpack) {
-        why = message(player, "abp.upgrade.error.max", "This backpack already has the maximum of this upgrade.");
+        why = info.existsKey.empty()
+                ? message(player, "abp.upgrade.error.max", "This backpack already has the maximum of this upgrade.")
+                : message(player, info.existsKey, info.existsFallback);
         return false;
     }
     if (auto const& gate = installGate(); gate && !gate(backpack, *type, player, why)) return false;

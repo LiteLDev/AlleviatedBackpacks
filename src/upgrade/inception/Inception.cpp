@@ -445,6 +445,8 @@ public:
             .nameFallback = "Inception Upgrade",
             .hasSettings  = true,
             .toggleable   = false,
+            .existsKey      = "abp.inception.error.exists",
+            .existsFallback = "There's already Inception Upgrade in another upgrade slot",
         };
         return info;
     }

@@ -1,0 +1,12 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:anvil_upgrade_clear"
+    },
+    "tags": ["crafting_table"],
+    "ingredients": [{ "item": "alleviatedbackpacks:anvil_upgrade" }],
+    "unlock": [{ "item": "alleviatedbackpacks:anvil_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:anvil_upgrade", "count": 1 }
+  }
+}

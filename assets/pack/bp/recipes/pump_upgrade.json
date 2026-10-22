@@ -14,7 +14,7 @@
     ],
     "key": {
       "G": {
-        "item": "minecraft:glass"
+        "tag": "alleviatedbackpacks:glass_blocks"
       },
       "U": {
         "item": "minecraft:bucket"

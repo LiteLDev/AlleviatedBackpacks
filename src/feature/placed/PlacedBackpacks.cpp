@@ -154,6 +154,13 @@ bool isFluidContainer(ItemStack const& stack) {
     return core::fluid::contentsOf(data.id, data.aux).has_value() || core::fluid::isEmptyContainer(data.id);
 }
 
+/// Buckets (empty or filled): the items Java gives a fluid-handler capability.
+bool isBucket(ItemStack const& stack) {
+    if (stack.isNull()) return false;
+    auto id = std::string(stack.getTypeName());
+    return id == "minecraft:bucket" || id.ends_with("_bucket");
+}
+
 bool hasEverlasting(game::Backpack const& bp) { return upgrade::hasActive(bp, "everlasting"); }
 
 BlockPos posOf(BlockLocation const& l) { return BlockPos{l.x, l.y, l.z}; }
@@ -534,7 +541,8 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
     }
     auto uuidBefore = game::backpackUuid(item);
     bool creative   = player.isCreative() && !keepInHand;
-    ItemStack placedItem = item;
+    ItemStack                placedItem = item;
+    std::vector<std::string> nestedClones; ///< storages created for backpacks inside the clone
     if (creative) {
         // SB BackpackItem.tryPlace: in creative the block gets a clone (new uuid, same contents)
         // and the item stays in the hand.
@@ -549,6 +557,31 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
         auto data = src->data();
         data.uuid = clone->uuid();
         clone->data() = std::move(data);
+        clone->rebuildHooks(); // the copied inventory still carries the original's hooks
+        // SB cloneSubbackpacks: backpacks inside the clone get their own copies too (one level),
+        // so the clone and the original never share a nested storage.
+        for (int i = 0; i < clone->inventory().size(); ++i) {
+            auto const& slotData = clone->inventory().at(i);
+            if (slotData.empty()) continue;
+            auto stack = game::ItemConv::toStack(slotData, std::max(1, std::min(slotData.count, 255)));
+            if (!game::isBackpack(stack)) continue;
+            auto subUuid = game::backpackUuid(stack);
+            auto sub     = subUuid ? storage.find(*subUuid) : nullptr;
+            if (!sub) continue;
+            auto subClone = storage.create(sub->tier());
+            if (!subClone) continue;
+            auto subData       = sub->data();
+            subData.uuid       = subClone->uuid();
+            subClone->data()   = std::move(subData);
+            subClone->rebuildHooks();
+            subClone->markDirty();
+            storage.save(*subClone);
+            nestedClones.push_back(subClone->uuid());
+            game::setBackpackUuid(stack, subClone->uuid());
+            auto updated  = game::ItemConv::toData(stack);
+            updated.count = slotData.count;
+            clone->inventory().set(i, updated);
+        }
         clone->rebuildHooks();
         clone->markDirty();
         storage.save(*clone);
@@ -559,6 +592,7 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
         if (auto u = game::backpackUuid(placedItem); u && u != game::backpackUuid(item)) {
             game::Storage::get().erase(*u);
         }
+        for (auto const& u : nestedClones) game::Storage::get().erase(u);
     }
     if (result != PlaceResult::Ok) {
         // place() may have bound a fresh uuid to the item before failing: keep that binding.
@@ -728,21 +762,39 @@ bool PlacedBackpacks::useFluidContainer(Player& player, BlockPos const& pos) {
     bool isFull  = core::fluid::contentsOf(data.id, data.aux).has_value();
     bool isEmpty = core::fluid::isEmptyContainer(data.id);
     if (!isFull && !isEmpty) return false;
-    if (upgrade::tank::tanks(bp).empty()) return false;
+    // SB useItemOn: a fluid container on a backpack without tanks does nothing (no GUI either).
+    if (upgrade::tank::tanks(bp).empty()) return true;
     // SB BackpackBlock.useItemOn: empty the container into the tanks, else fill it from them.
     std::optional<core::ItemStackData> result;
+    std::string                        fluidId;
+    bool                               emptied = false;
     auto tanks = upgrade::tank::tanks(bp);
     if (isFull) {
         for (auto const& t : tanks) {
             if ((result = upgrade::tank::emptyContainer(data.withCount(1), upgrade::tank::fillerOf(t)))) break;
+        }
+        if (result) {
+            emptied = true;
+            fluidId = core::fluid::contentsOf(data.id, data.aux)->fluid.id;
         }
     }
     if (!result && isEmpty) {
         for (auto const& t : tanks) {
             auto fluid = upgrade::tank::read(t).fluid();
             if (fluid.empty()) continue;
-            if ((result = upgrade::tank::fillContainer(data.withCount(1), fluid, upgrade::tank::drainerOf(t)))) break;
+            if ((result = upgrade::tank::fillContainer(data.withCount(1), fluid, upgrade::tank::drainerOf(t)))) {
+                fluidId = fluid;
+                break;
+            }
         }
+    }
+    if (result && isBucket(held)) {
+        // FluidUtil.tryEmpty/FillContainerAndStow: the fluid type's bucket sound at the player
+        // (volume 1, pitch 1); lava has its own, every other fluid uses the water ones.
+        bool lava = fluidId == "minecraft:lava";
+        auto name = emptied ? (lava ? "bucket.empty.lava" : "bucket.empty.water") : (lava ? "bucket.fill.lava" : "bucket.fill.water");
+        auto at   = player.getPosition();
+        playSoundAt(region, BlockPos{static_cast<int>(std::floor(at.x)), static_cast<int>(std::floor(at.y)), static_cast<int>(std::floor(at.z))}, name, 1.0f, 1.0f);
     }    if (result) {
         auto  out  = game::ItemConv::toStack(*result, 1);
         auto& inv  = player.getInventory();
@@ -1035,7 +1087,10 @@ void PlacedBackpacks::install() {
         }
         if (ours && !sneak && isFluidContainer(player.getSelectedItem())) {
             // SB useItemOn: a fluid container fills / drains the tanks (next tick, see below).
-            if (auto bp = backpackAt(region, pos); bp && !upgrade::tank::tanks(bp).empty()) {
+            // Buckets (Java's fluid-handler items) do nothing at all without tanks: no GUI, and
+            // the bucket isn't emptied. Bottles only act on tanks; otherwise the GUI opens.
+            auto bp = backpackAt(region, pos);
+            if (isBucket(player.getSelectedItem()) || (bp && !upgrade::tank::tanks(bp).empty())) {
                 ev.cancel();
                 mActions.push_back({key, PendingAction::Kind::Fluid, pos, 0});
                 mCooldowns[key] = mNow;

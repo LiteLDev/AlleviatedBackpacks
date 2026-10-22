@@ -147,6 +147,8 @@ public:
             .nameKey      = "abp.everlasting.name",
             .nameFallback = "Everlasting Upgrade",
             .toggleable   = false,
+            .existsKey      = "abp.everlasting.error.exists",
+            .existsFallback = "There's already Everlasting Upgrade in another upgrade slot",
         };
         return info;
     }
