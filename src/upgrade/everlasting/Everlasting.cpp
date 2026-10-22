@@ -31,7 +31,9 @@
 #include "mc/world/level/BlockSource.h"
 #include "mc/deps/shared_types/v1_26_20/block/MaterialType.h"
 #include "mc/legacy/ActorUniqueID.h"
+#include "mc/world/level/Explosion.h"
 #include "mc/world/level/Level.h"
+#include "mc/world/phys/AABB.h"
 
 #include "feature/wearable/Wearable.h"
 #include "game/BackpackItem.h"
@@ -133,6 +135,37 @@ LL_TYPE_INSTANCE_HOOK(EverlastingOutOfWorldHook, ll::memory::HookPriority::Norma
     if (hasType(ActorType::ItemEntity) && everlastingActor(static_cast<ItemActor&>(static_cast<Actor&>(*this)))) return;
     origin();
 }
+
+// SB EverlastingBackpackItemEntity.ignoreExplosion: explosions don't push it. Bedrock applies the
+// knock-back inside Explosion::explode (to every entity within twice the radius): remember the
+// motion and position of the everlasting backpacks around and put them back afterwards.
+LL_TYPE_INSTANCE_HOOK(EverlastingExplosionHook, ll::memory::HookPriority::Normal, Explosion, &Explosion::explode, bool, ::IRandom& random) {
+    struct Kept {
+        ActorUniqueID id;
+        Vec3          pos;
+        Vec3          delta;
+    };
+    std::vector<Kept> kept;
+    BlockSource&      region = mRegion;
+    if (!region.getLevel().isClientSide()) {
+        Vec3  centre = mPos;
+        float reach  = static_cast<float>(mRadius) * 2.0f + 1.0f;
+        for (auto* a : region.getEntities(AABB(centre - Vec3{reach, reach, reach}, centre + Vec3{reach, reach, reach}), 0.0f)) {
+            if (!a || a->mRemoved || !a->hasType(ActorType::ItemEntity)) continue;
+            auto& item = static_cast<ItemActor&>(*a);
+            if (!game::isBackpack(item.item()) || !everlastingActor(item)) continue;
+            kept.push_back({a->getOrCreateUniqueID(), a->getPosition(), a->getPosDelta()});
+        }
+    }
+    bool result = origin(random);
+    for (auto const& k : kept) {
+        auto* a = region.getLevel().fetchEntity(k.id, false);
+        if (!a || a->mRemoved) continue;
+        const_cast<Vec3&>(a->getPosDelta()) = k.delta;
+        if (a->getPosition().distanceTo(k.pos) > 0.0001f) a->_setPos(k.pos);
+    }
+    return result;
+}
 #pragma clang diagnostic pop
 } // namespace
 
@@ -177,6 +210,7 @@ public:
         EverlastingInvulnerableHook::hook();
         EverlastingFireImmuneHook::hook();
         EverlastingOutOfWorldHook::hook();
+        EverlastingExplosionHook::hook();
         mListener = ll::event::EventBus::getInstance().emplaceListener<ll::event::ServerLevelTickEvent>(
             [this](ll::event::ServerLevelTickEvent& ev) { tick(ev.level()); }
         );
@@ -184,6 +218,7 @@ public:
     void uninstall() {
         ll::event::EventBus::getInstance().removeListener(mListener);
         mTracked.clear();
+        EverlastingExplosionHook::unhook();
         EverlastingOutOfWorldHook::unhook();
         EverlastingFireImmuneHook::unhook();
         EverlastingInvulnerableHook::unhook();

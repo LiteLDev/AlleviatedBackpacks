@@ -34,6 +34,7 @@
 #include "mc/world/level/storage/db_helpers/Category.h"
 
 #include "core/Codec.h"
+#include "feature/placed/PlacedBackpacks.h"
 #include "core/Format.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -641,27 +642,45 @@ std::vector<std::string> removeWhere(Pred&& pred) {
 }
 } // namespace
 
+namespace {
+/// SB BackpackStorage.hasItems / hasOtherBackpackData: no items, no upgrades and nothing else
+/// stored (default colours, no settings but our own bookkeeping). Unopened mob backpacks waiting
+/// for their loot carry a settings marker (`kPendingLootSetting`), so they count as having data.
+bool holdsNothing(game::Backpack& bp) {
+    auto const& d = bp.data();
+    if (!bp.inventory().isEmpty()) return false;
+    for (auto const& u : d.upgrades)
+        if (!u.empty()) return false;
+    core::BackpackData const defaults;
+    if (d.mainColor != defaults.mainColor || d.accentColor != defaults.accentColor) return false;
+    if (d.settings.is_object()) {
+        for (auto const& [k, _] : d.settings.items())
+            if (k != kSettingsKey) return false;
+    }
+    return true;
+}
+} // namespace
+
 std::vector<std::string> removeNonPlayer(bool onlyWithEmptyInventory) {
-    auto const& log_ = AccessLog::get();
     auto removed = removeWhere([&](game::Backpack& bp) {
         // SB: no access log record (and, with onlyWithEmptyInventory, no items, no upgrades and no
         // other backpack data). Backpacks players had before the access log existed count as
         // accessed (legacy / holder records) so updating never deletes them.
-        if (log_.contains(bp.uuid()) || holderOf(bp).first || isLegacy(bp.uuid())) return false;
-        if (!onlyWithEmptyInventory) return true;
-        auto const& d = bp.data();
-        if (!bp.inventory().isEmpty()) return false;
-        for (auto const& u : d.upgrades)
-            if (!u.empty()) return false;
-        core::BackpackData const defaults;
-        if (d.mainColor != defaults.mainColor || d.accentColor != defaults.accentColor) return false;
-        if (d.settings.is_object()) {
-            for (auto const& [k, _] : d.settings.items())
-                if (k != kSettingsKey) return false;
-        }
-        return true;
+        if (playerAccessed(bp)) return false;
+        return !onlyWithEmptyInventory || holdsNothing(bp);
     });
     if (!removed.empty()) log().info("admin: removed {} non player backpacks", removed.size());
+    return removed;
+}
+
+std::vector<std::string> dropEmptyStorages() {
+    // Placed backpacks keep their storage (the block stands for it).
+    std::unordered_set<std::string> placedUuids;
+    for (auto const& e : placed::PlacedBackpacks::get().entries()) placedUuids.insert(e.uuid);
+    auto removed = removeWhere([&](game::Backpack& bp) {
+        return !placedUuids.contains(bp.uuid()) && !playerAccessed(bp) && holdsNothing(bp);
+    });
+    log().info("admin: dropped {} empty, never accessed backpack storage(s) on load", removed.size());
     return removed;
 }
 
@@ -820,6 +839,11 @@ void migrateHolderRecords() {
 
 // ---- module -------------------------------------------------------------------------------------------
 
+namespace {
+/// SB BackpackStorage.load: empty, never accessed storages are dropped once per world load.
+bool gDropEmptyPending = false;
+} // namespace
+
 class AdminModule {
 public:
     void install() {
@@ -898,6 +922,7 @@ private:
         AccessLog::get().load();
         loadOrMarkLegacy();
         migrateHolderRecords();
+        gDropEmptyPending = true; // on the first tick, once every unit has loaded the world
         if (auto level = ll::service::getLevel()) {
             level->forEachPlayer([](Player& p) {
                 if (!p.isClientSide()) loadStash(p);
@@ -908,6 +933,14 @@ private:
 
     void tick(Level& level) {
         ++mTicks;
+        if (gDropEmptyPending && game::Storage::get().available()) {
+            gDropEmptyPending = false;
+            try {
+                (void)dropEmptyStorages();
+            } catch (std::exception const& e) {
+                log().error("admin: dropping empty storages failed: {}", e.what());
+            }
+        }
         runPendingOpens(level);
         if (mTicks % 600 == 0) AccessLog::get().save(); // every 30 s, like the storage
         bool scan  = mTicks % std::max(1, cfg().holderScanInterval) == 0;

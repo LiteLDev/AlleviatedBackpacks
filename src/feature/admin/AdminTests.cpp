@@ -2,6 +2,7 @@
 // Commands are executed for real through the command registry (console origin, and a player origin
 // for the permission check), so parsing, overload selection and permissions are covered too.
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -288,6 +289,42 @@ ABP_REGISTER_SELFTEST("admin.sb_upgrade_limits", [](Context& ctx) {
     ctx.check(contains(reason, "can't be used in"), "SC upgrade_not_allowed: " + reason);
     cfg.maxUpgradesPerStorage = {};
     for (int i = 0; i < 2; ++i) ctx.check(ctx.installUpgrade(other, "smoking", i) == i, "no entries = no limit");
+});
+
+// SB BackpackStorage.load: storages without an access log record that hold nothing are dropped
+// (once per world load); anything stored, an access record or pending mob loot keeps them.
+ABP_REGISTER_SELFTEST("admin.drop_empty_on_load", [](Context& ctx) {
+    auto uuidOf = [&](auto&& setup) {
+        auto bp = ctx.createBackpack(Tier::Iron);
+        setup(*bp);
+        bp->markDirty();
+        game::Storage::get().save(*bp);
+        return bp->uuid();
+    };
+    auto empty    = uuidOf([](game::Backpack&) {});
+    auto accessed = uuidOf([](game::Backpack& bp) {
+        AccessLogRecord r;
+        r.backpackItemRegistryName = "alleviatedbackpacks:iron_backpack";
+        r.backpackUuid             = bp.uuid();
+        r.playerName               = "selftest";
+        AccessLog::get().put(r);
+    });
+    auto items    = uuidOf([](game::Backpack& bp) { bp.inventory().set(0, data("minecraft:dirt", 1)); });
+    auto upgraded = ctx.createBackpack(Tier::Iron);
+    ctx.require(ctx.installUpgrade(upgraded, "crafting") >= 0, "upgrade installed");
+    auto upgradedUuid = upgraded->uuid();
+    upgraded.reset();
+    auto coloured = uuidOf([](game::Backpack& bp) { bp.data().mainColor = 0xFF112233u; });
+    auto loot     = uuidOf([](game::Backpack& bp) { bp.data().settings[std::string(kPendingLootSetting)] = true; });
+    auto removed  = dropEmptyStorages();
+    auto gone     = [&](std::string const& u) { return std::find(removed.begin(), removed.end(), u) != removed.end(); };
+    ctx.check(gone(empty) && !game::Storage::get().find(empty), "an empty, never accessed storage is dropped");
+    ctx.check(!gone(accessed) && game::Storage::get().find(accessed), "an access log record keeps it");
+    ctx.check(!gone(items), "items keep it");
+    ctx.check(!gone(upgradedUuid), "upgrades keep it");
+    ctx.check(!gone(coloured), "non-default data keeps it");
+    ctx.check(!gone(loot), "an unopened mob backpack waiting for its loot keeps it");
+    AccessLog::get().erase(accessed);
 });
 
 ABP_REGISTER_SELFTEST("admin.enabled_items", [](Context& ctx) {

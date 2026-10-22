@@ -143,6 +143,13 @@ resolveUuid(std::string const& input, std::string* errorKey = nullptr, std::stri
 /// items, no upgrades, no other data). Linked-storage groups and backpacks in use are kept.
 /// Returns the removed uuids.
 std::vector<std::string> removeNonPlayer(bool onlyWithEmptyInventory = false);
+/// SB BackpackStorage.load (`isPlayerBackpackOrNotEmpty`): deletes stored backpacks without an
+/// access log record that hold nothing (no items, no upgrades, default colours and settings).
+/// Runs once per world load (logs the count). Placed, linked and in-use backpacks are kept.
+std::vector<std::string> dropEmptyStorages();
+/// Settings key marking an unopened mob backpack whose loot is still to be generated (counts as
+/// data for `dropEmptyStorages`).
+inline constexpr std::string_view kPendingLootSetting = "pendingLoot";
 /// Removes stored backpacks that hold nothing (no items, no upgrades, default colours) and that
 /// nobody is using right now. Items bound to them get fresh storage on next open. Returns the uuids.
 std::vector<std::string> cleanupEmpty();
