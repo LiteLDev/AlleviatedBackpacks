@@ -811,6 +811,11 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
                 int room = it.isNull() ? cursor.getMaxStackSize() : std::max(0, it.getMaxStackSize() - it.mCount);
                 if (std::min(n, room) <= 0) continue;
                 ok |= mm.simulate(player, act(ActionType::Place, {Where::Cursor, 0}, {Where::Inventory, i}, std::min(n, room)));
+            } else if (a == "upgrade" && menu && i >= 0 && i < static_cast<int>(menu->backpack()->data().upgrades.size())) {
+                // SC quick craft over empty upgrade slots: one upgrade each (same rules as a right
+                // click: install checks, error overlay).
+                if (!menu->backpack()->data().upgrades[static_cast<std::size_t>(i)].empty()) continue;
+                ok |= clickMenuSlot(player, *menu, *s, Area::Upgrade, i, 1, false, false);
             }
         }
     } else if (action == "menuClick") {
@@ -895,6 +900,7 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
             auto*       type = st.empty() ? nullptr : upgrade::upgradeFor(st.item);
             if (!type || !type->info().toggleable) return false;
             upgrade::setEnabled(bp, slot, !st.enabled);
+            setOpenTab(*bp, -1); // SC reloadUpgradeControl(RELOAD_NEEDED): removeOpenTabId
             ok = true;
         } else if (action == "settings" || action == "upgradeSettings" || action == "tab" || action == "setting") {
             ok = handleSettingsAction(player, *menu, *s, action, body);

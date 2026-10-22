@@ -270,6 +270,26 @@ ABP_REGISTER_SELFTEST("mainscreen.open_tab_on_storage", [](Context& ctx) {
     setPlayerOption(p, "keepTabOpen", std::nullopt);
 });
 
+// GX-3: dragging upgrades over empty upgrade slots installs one in each (SC quick craft); switching
+// an upgrade on/off drops the open tab (SC RELOAD_NEEDED -> removeOpenTabId).
+ABP_REGISTER_SELFTEST("mainscreen.upgrade_drag_and_switch", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Gold); // 3 upgrade slots
+    Companion c(p);
+    auto      s       = open(ctx, p, bp);
+    auto*     magnet  = upgrade::byId("magnet");
+    ctx.require(magnet != nullptr, "magnet");
+    setCursor(p, game::ItemConv::make(magnet->info().itemId, 2));
+    ctx.check(act(p, s, "distribute", {{"button", 1}, {"slots", json::array({json{{"area", "upgrade"}, {"index", 0}}, json{{"area", "upgrade"}, {"index", 2}}})}}), "distribute");
+    auto const& ups = bp->data().upgrades;
+    ctx.check(!ups[0].empty() && ups[1].empty() && !ups[2].empty(), "one magnet in each dragged slot");
+    ctx.check(cursorOf(p).isNull(), "cursor used up");
+    ctx.check(act(p, s, "openTab", {{"slot", 0}}), "open the magnet tab");
+    ctx.check(act(p, s, "toggleUpgrade", {{"slot", 0}}), "switch it off");
+    auto const& st = bp->data().settings;
+    ctx.check(st.value("mainscreen", json::object()).value("openTab", -1) == -1, "the open tab is dropped");
+});
+
 ABP_REGISTER_SELFTEST("mainscreen.error_overlay", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& p  = ctx.player();
     auto  bp = ctx.createBackpack(Tier::Iron);

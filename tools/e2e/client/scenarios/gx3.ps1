@@ -313,10 +313,29 @@ Wait-LogLine 'companion: reopened the kept upgrade tab 0' 10 -Since $mark | Out-
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'tab-kept-open' | Out-Null
 Read-Layout $mark
-$t1 = Tab-Pos 1
+# Switching the upgrade off closes its open tab (SC RELOAD_NEEDED); switch it back on.
 $mark = Get-LogMark
-Gui-Click $t1[0] $t1[1]
-Wait-LogLine "native screen: open tab -1 kept on backpack $A" 10 -Since $mark | Out-Null
+Gui-Click -19 14
+Wait-LogLine 'companion: upgrade tabs rebuilt, the open tab closed' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 600
+Save-Screenshot 'switch-closed-tab' | Out-Null
+Gui-Click -19 14
+Start-Sleep -Milliseconds 400
+# The sort key runs before the tabs get the click (SC handleGuiMouseKeyPress).
+$t0 = Tab-Pos 0
+Gui-Move $t0[0] $t0[1]
+$mark = Get-LogMark
+Middle-Click
+Wait-LogLine 'key sound: sort \(played\)' 10 -Since $mark | Out-Null
+# A click on a closed tab's border keeps the cursor item (SC hasClickedOutside: tab rectangles).
+$h = Hotbar-Pos 7
+Gui-Click $h[0] $h[1]
+$mark = Get-LogMark
+Gui-Click ($L.Width + 2) 6
+Start-Sleep -Milliseconds 600
+if ((Get-LeviLog -Since $mark) -match 'dropCursor') { throw 'a click on a tab border threw the cursor item' }
+Save-Screenshot 'tab-border-click-keeps-cursor' | Out-Null
+Gui-Click $h[0] $h[1]
 $mark = Get-LogMark
 Press-Key 'ESC'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null

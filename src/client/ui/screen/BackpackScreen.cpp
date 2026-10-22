@@ -504,9 +504,12 @@ void BackpackScreenLayer::rebuildTabs(cs::BackpackScreenModel const& m) {
     std::string sig = std::to_string(m.upgrades.size()) + "|";
     for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
         auto const& u = m.upgrades[i];
-        if (hasTab(u)) sig += std::to_string(i) + ":" + u.id + ";";
+        // SC updateWrappersAndCheckForReloadNeeded: a switched upgrade (enabled changed) is
+        // RELOAD_NEEDED: the tabs are rebuilt and the open one closes.
+        if (hasTab(u)) sig += std::to_string(i) + ":" + u.id + (u.enabled ? "+" : "-") + ";";
     }
     if (sig == mTabsSig && !mTabs.empty()) return;
+    if (mOpenTab >= 0) log().info("companion: upgrade tabs rebuilt, the open tab closed");
     mTabsSig = sig;
     mTabs.clear();
     mOpenTab = -1;
@@ -942,7 +945,17 @@ void BackpackScreenLayer::drawErrorOverlay(Painter& p, cs::BackpackScreenModel c
 void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const& m, float mx, float my) {
     std::vector<TooltipLine> lines;
     // Open tab widgets, controls.
-    if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.tooltip(mx, my, lines);
+    if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) {
+        auto const& t = mTabs[static_cast<std::size_t>(mOpenTab)];
+        t.widgets.tooltip(mx, my, lines);
+        // SC SettingsTabBase.renderTooltip -> Label.renderTooltip: a truncated title shows in full.
+        if (lines.empty() && t.slot >= 0 && t.slot < static_cast<int>(m.upgrades.size())) {
+            auto  label = tabLabel(m.upgrades[static_cast<std::size_t>(t.slot)]);
+            float maxW  = std::max(0.f, t.rect.w - 20 - 6);
+            Rect  r{t.rect.x + 20, t.rect.y + 8, maxW, 9};
+            if (p.textWidth(label) > maxW && r.contains(mx, my)) lines.push_back({label, 0xFFFFFF});
+        }
+    }
     mControls.tooltip(mx, my, lines);
     if (!lines.empty()) {
         drawTooltip(p, lines, mx, my);
@@ -1136,6 +1149,7 @@ int BackpackScreenLayer::dragSlotMax(cs::BackpackScreenModel const& m, SlotRef c
         int itemMax = carried.getMaxStackSize();
         return std::max(1, static_cast<int>(std::lround(static_cast<double>(m.baseSlotLimit) * itemMax / 64.0)));
     }
+    if (s.area == SlotRef::Area::Upgrade) return 1; // SC StorageUpgradeSlot: one upgrade per slot
     return carried.getMaxStackSize();
 }
 
@@ -1159,6 +1173,13 @@ bool BackpackScreenLayer::canDragTo(cs::BackpackScreenModel const& m, SlotRef co
         if (m.lockedSlot == s.index) return false;
         auto const& it = player->getInventory().getItem(s.index);
         return it.isNull() || (it.matchesItem(carried) && it.mCount <= it.getMaxStackSize());
+    }
+    if (s.area == SlotRef::Area::Upgrade) {
+        // An empty upgrade slot takes an upgrade item (the server checks mayPlace).
+        auto i = static_cast<std::size_t>(s.index);
+        if (i >= m.upgrades.size() || !m.upgrades[i].item.empty()) return false;
+        auto const& id = carried.getTypeName();
+        return id.starts_with("alleviatedbackpacks:") && !game::isBackpack(carried);
     }
     return false;
 }
@@ -1291,6 +1312,13 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         if (mDistButton >= 0 && (button == MouseButton::Right ? 1 : 0) == mDistButton) finishDistribution();
         return true;
     }
+    // Sort bound to a mouse button: SC handleGuiMouseKeyPress runs before the screen gets the click
+    // (tabs, search box, buttons), anywhere but over the player inventory (tryCallSort).
+    if (button != MouseButton::Left && input::mouseMatches(input::KeyAction::Sort, button)
+        && slotAt(*m, x, y).area != SlotRef::Area::Inventory) {
+        sortKey(); // click sound
+        return true;
+    }
     // Search box: left focuses, right clears (SC SearchBox); clicks elsewhere unfocus it.
     if (mSearch.rect.contains(x, y)) {
         if (button == MouseButton::Right) {
@@ -1363,16 +1391,23 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
             if (o->mouseDown(overlays, button, x, y)) return true;
         }
     }
-    // Middle mouse: Sort (anywhere but the player inventory, SC tryCallSort).
     auto slot = slotAt(*m, x, y);
-    if (button == MouseButton::Middle && input::mouseMatches(input::KeyAction::Sort, button)) {
-        if (slot.area != SlotRef::Area::Inventory) sortKey(); // SC handleGuiMouseKeyPress: click sound
-        return true;
-    }
     if (slot.area == SlotRef::Area::None) {
+        // SC hasClickedOutside: outside the image, the upgrade slots rectangle
+        // (getUpgradeSlotsRectangle) and every tab rectangle (getTabRectangles).
         Rect gui{mLeft, mTop, static_cast<float>(mLayout.imageWidth), static_cast<float>(mLayout.imageHeight)};
-        Rect upgrades{mLeft - 25, mTop, 29, static_cast<float>(mLayout.upgradeColumn.h)};
-        bool outside = !gui.contains(x, y) && !upgrades.contains(x, y);
+        bool switches = std::any_of(mLayout.upgradeSwitches.begin(), mLayout.upgradeSwitches.end(), [](auto const& r) { return r.w > 0; });
+        bool outside  = !gui.contains(x, y);
+        if (outside && !m->upgrades.empty()) {
+            float w = 21 + 4;
+            Rect  upgrades{mLeft - 21 - (switches ? 4.f : 0.f), mTop, w, static_cast<float>(mLayout.upgradeColumn.h)};
+            outside = !upgrades.contains(x, y);
+        }
+        if (outside) {
+            for (auto const& t : mTabs) {
+                if (t.rect.contains(x, y)) outside = false;
+            }
+        }
         auto* player = currentPlayer();
         if (outside && player && !player->mPlayerUIContainer->getItem(0).isNull() && button != MouseButton::Middle) {
             send({{"action", "dropCursor"}, {"all", button == MouseButton::Left}});
@@ -1395,7 +1430,7 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
     // With an item on the cursor the click happens on release: a drag over several slots
     // distributes the stack instead (vanilla quick craft).
     if (auto* pl = currentPlayer(); pl && !shift && !pl->mPlayerUIContainer->getItem(0).isNull()
-        && (slot.area == SlotRef::Area::Storage || slot.area == SlotRef::Area::Inventory)) {
+        && (slot.area == SlotRef::Area::Storage || slot.area == SlotRef::Area::Inventory || slot.area == SlotRef::Area::Upgrade)) {
         mDistButton = button == MouseButton::Right ? 1 : 0;
         mDistSlots  = {slot};
         return true;
@@ -1446,7 +1481,7 @@ bool BackpackScreenLayer::onMouseMove(float x, float y) {
     if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.mouseMove(x, y);
     if (mDistButton >= 0 && mView == View::Storage && m->kind != "menu") {
         auto s = slotAt(*m, x, y);
-        if ((s.area == SlotRef::Area::Storage || s.area == SlotRef::Area::Inventory)
+        if ((s.area == SlotRef::Area::Storage || s.area == SlotRef::Area::Inventory || s.area == SlotRef::Area::Upgrade)
             && std::find(mDistSlots.begin(), mDistSlots.end(), s) == mDistSlots.end() && canDragTo(*m, s)) {
             mDistSlots.push_back(s);
         }
@@ -1467,7 +1502,7 @@ void BackpackScreenLayer::finishDistribution() {
     }
     auto   slot     = mDistSlots.front();
     double t        = now();
-    bool   isDouble = button == 0 && slot == mLastClick && t - mLastClickAt < 0.25;
+    bool   isDouble = button == 0 && slot.area != SlotRef::Area::Upgrade && slot == mLastClick && t - mLastClickAt < 0.25;
     mLastClick      = slot;
     mLastClickAt    = isDouble ? -10 : t;
     mDistSlots.clear();

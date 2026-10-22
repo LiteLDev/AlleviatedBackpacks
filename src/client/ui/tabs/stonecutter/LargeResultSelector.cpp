@@ -139,9 +139,15 @@ public:
         Rect box{searchX(), searchY(), static_cast<float>(kSearchBoxW), static_cast<float>(kSearchHeight)};
         mSearch.rect        = box;
         mSearch.textColor   = mSearch.focused() ? 0xFFFFFF : 0xBBBBBB;
-        mSearch.placeholder = mSearch.focused() ? std::string{} : ctr("abp.stonecutter.search_hint", "Search");
+        mSearch.placeholder = {};
         p.fillRect(box, sb::color::SEARCH_BG);
         mSearch.render(p, f.time);
+        if (!mSearch.focused() && mSearch.text().empty()) {
+            // SC TextBox unfocusedEmptyHint: drawCenteredString at x + width / 2 + 2, text colour.
+            auto  hint = ctr("abp.stonecutter.search_hint", "Search");
+            float cx   = box.x + std::floor(box.w / 2) + 2;
+            p.text(hint, std::floor(cx - p.textWidth(hint) / 2), box.y, Color::rgb(0xBBBBBB), true);
+        }
         icon(p, Icon::Search, box.right(), box.y - static_cast<float>(kSearchIcon - kSearchHeight) / 2);
         p.flush();
         // Tooltips (SC renderTooltip).
@@ -179,8 +185,7 @@ public:
         }
         float sx = scrollX(), ry = resultsY();
         if (x >= sx && x < sx + kScrollbarW && y >= ry && y < ry + kResultsH) {
-            mDragging = true;
-            drag(y);
+            mDragging = true; // SC clickedOnScroll: the slider follows mouseDragged only
             return true;
         }
         Rect panel{mX, mY, static_cast<float>(kWidth), static_cast<float>(kHeight)};

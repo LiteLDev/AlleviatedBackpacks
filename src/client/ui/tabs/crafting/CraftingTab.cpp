@@ -179,7 +179,7 @@ public:
         auto& prev        = widgets.add(std::make_unique<StationButton>());
         prev.rect         = {x0 + 3 + 6, y0 + 118, 8, 12};
         prev.icon         = [](Painter& p, float x, float y) { icon(p, Icon::Previous, x, y); };
-        prev.tooltipLines = {{ctr("abp.crafting.previous_result", "Previous"), 0xFFFFFF}};
+        prev.tooltipLines = {{ctr("abp.crafting.previous_result", "Previous"), 0xFFFFFF, true}}; // SC LEFT_SIDE_TOOLTIP_POSITIONER
         prev.onClick      = [send](int button) {
             if (button == 0 && send) send({{"previous", true}});
         };
