@@ -41,8 +41,10 @@ function Set-E2EInstance([int]$Slot) {
     $script:LockFile     = if ($Slot -le 1) { Join-Path $script:LauncherData 'bei-e2e.lock' } else { Join-Path $script:LauncherData "hi$Slot-e2e.lock" }
     # LeviHeadlessInput control pipe of this instance's game.
     $script:HeadlessPipe = "LeviHeadlessInput-$script:VersionName"
+    # Child pwsh processes that source this file (helpers, scenario scripts) start on the same slot.
+    $env:ABP_E2E_INSTANCE_SLOT = "$Slot"
 }
-Set-E2EInstance 1
+Set-E2EInstance $(if ($env:ABP_E2E_INSTANCE_SLOT -match '^\d+$') { [int]$env:ABP_E2E_INSTANCE_SLOT } else { 1 })
 $script:WorldName    = 'ABP-Test'
 $script:Unit         = 'scratch'
 
@@ -493,7 +495,7 @@ function Start-LogSession {
     $script:LogPos = if (Test-Path $script:LogFile) { (Get-Item $script:LogFile).Length } else { 0L }
 }
 
-# Remote modes: the BDS console log (tools/e2e/server/out/client-host/server.log) is merged into
+# Remote modes: the BDS console log (tools/e2e/server/out/client-host-<unit>/server.log) is merged into
 # the session log (lines prefixed "[host] "), so scenarios wait for server-side lines the same
 # way in every mode.
 $script:HostLog    = $null
