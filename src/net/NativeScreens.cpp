@@ -288,7 +288,7 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
         bool        installing = content.empty() && !cursor.isNull();
         if (removing) {
             if (auto* type = upgrade::upgradeFor(content); type && !type->canRemove(upgrade::UpgradeContext(bp, index, &p), reason)) {
-                setError(s, reason, {index});
+                setError(s, reason, {index}, type->refusalStorageSlots(upgrade::UpgradeContext(bp, index, &p)));
                 return false;
             }
         } else if (installing) {
@@ -304,7 +304,7 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
             auto data = game::ItemConv::toData(cursor).withCount(1);
             auto* installed = upgrade::upgradeFor(content);
             if (installed && upgrade::upgradeFor(data) && !installed->canReplaceWith(upgrade::UpgradeContext(bp, index, &p), data, reason)) {
-                setError(s, reason, {index});
+                setError(s, reason, {index}, installed->refusalStorageSlots(upgrade::UpgradeContext(bp, index, &p)));
                 return false;
             }
         }
