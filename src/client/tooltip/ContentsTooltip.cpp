@@ -278,7 +278,10 @@ void appendUpgradeLines(::ItemStackBase const& stack, std::string& s) {
     if (!item) return;
     auto const& id = stack.getTypeName();
     if (!id.starts_with("alleviatedbackpacks:") || game::backpackTierOf(id)) return;
-    auto key  = item->getDescriptionId() + ".tooltip";
+    // Bedrock's description id already ends in ".name" (the lang key of the name).
+    auto key = item->getDescriptionId();
+    if (key.ends_with(".name")) key.resize(key.size() - 5);
+    key += ".tooltip";
     auto text = packText(key);
     static std::unordered_set<std::string> logged;
     if (logged.size() < 64 && logged.insert(id).second) log().info("tooltip: {} -> {} ({})", id, key, text ? "found" : "missing");

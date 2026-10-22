@@ -51,7 +51,9 @@ function Hotbar-Pos([int]$i) { @(($L.InvX + $i * 18 + 8), ($L.InvY + 12 + 54 + 4
 # ---- vanilla screen slots ---------------------------------------------------------------------------
 $script:V = $null
 function Read-VanillaSlots($mark) {
-    $line = Wait-LogLine 'stash: vanilla slots screen=' 15 -Since $mark
+    Wait-LogLine 'stash: vanilla slots screen=' 15 -Since $mark | Out-Null
+    Start-Sleep -Milliseconds 1500   # the positions are logged again while the screen settles: take the last
+    $line = (Get-LeviLog -Since $mark | Select-String -Pattern 'stash: vanilla slots screen=' | Select-Object -Last 1).Line
     if ($line -notmatch 'screen=(\S*) invGuiScale=([\d.]+)') { throw "unexpected slots line: $line" }
     $slots = @{}
     foreach ($m in [regex]::Matches($line, '(\w+:\d+)=(-?[\d.]+),(-?[\d.]+),([\d.]+)')) {

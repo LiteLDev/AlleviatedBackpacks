@@ -171,7 +171,7 @@ bool refreshItem(Player const& /*player*/, ItemStack& stack, std::shared_ptr<gam
     bool        ours    = !current.empty()
                   && std::all_of(current.begin(), current.end(), [](std::string const& l) { return l.starts_with("§r"); });
     if (ours) {
-        stack.setCustomLore({});
+        stack.clearCustomLore();
         changed = true;
     }
     return changed;

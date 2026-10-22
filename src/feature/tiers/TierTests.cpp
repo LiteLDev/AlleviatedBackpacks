@@ -25,6 +25,7 @@
 #include "feature/tiers/Tiers.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
+#include "game/PlayerScan.h"
 #include "game/Storage.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
@@ -274,7 +275,7 @@ ABP_REGISTER_SELFTEST("tiers.lore_and_tint", [](Context& ctx) {
     ctx.check(loreText(item).empty(), "legacy lore removed: " + loreText(item));
     item.setCustomLore({"A custom line"});
     ctx.check(!refreshItem(player, item, bp) && loreText(item) == "A custom line\n", "foreign lore kept");
-    item.setCustomLore({});
+    item.clearCustomLore();
     ctx.check(!item.mItem->hasCustomColor(item), "default colour: no tint");
 
     // Colours: lore line + tint.
@@ -321,30 +322,26 @@ ABP_REGISTER_SELFTEST("tiers.lore_refresh_carried", [](Context& ctx) -> ll::coro
     auto& mm     = ui::MenuManager::get();
     auto& player = ctx.player();
     auto  bp     = ctx.createBackpack(Tier::Copper);
-    ctx.require(ctx.give(player, ctx.backpackItem(*bp), 0) == 0, "give backpack");
+    auto legacy  = ctx.backpackItem(*bp);
+    legacy.setCustomLore(buildLore(player, Tier::Copper, bp.get()));
+    ctx.require(ctx.give(player, legacy, 0) == 0, "give backpack with phase-1 lore");
     co_await ctx.ticks(25);
     auto text = loreText(player.getInventory().getItem(0));
-    ctx.check(text.find("0/45") != std::string::npos, "carried backpack gets lore: " + text);
+    ctx.check(text.empty(), "carried backpack loses the phase-1 lore (SB has none): " + text);
 
-    // While the backpack is open the item is left alone; it refreshes after closing. (Driven
+    // While the backpack is open the item is left alone; it is cleaned after closing. (Driven
     // directly: a simulated player may drift away from the fake chest over many ticks.)
     ctx.require(ui::BackpackMenu::openFor(player, {game::ItemLocation::Kind::Inventory, 0}), "open");
     mm.forceShown(player);
-    bp->inventory().insert(data("minecraft:emerald", 5), kInternal);
+    ItemStack again = player.getInventory().getItem(0);
+    again.setCustomLore(buildLore(player, Tier::Copper, bp.get()));
+    game::setItemAt(player, {game::ItemLocation::Kind::Inventory, 0}, again);
     ctx.check(refreshPlayer(player) == 0, "nothing rewritten while open");
-    ctx.check(loreText(player.getInventory().getItem(0)).find("0/45") != std::string::npos, "lore unchanged while open");
     mm.close(player);
     ctx.check(refreshPlayer(player) == 1, "rewritten after close");
-    text = loreText(player.getInventory().getItem(0));
-    ctx.check(text.find("1/45") != std::string::npos, "refreshed after close: " + text);
+    ctx.check(loreText(player.getInventory().getItem(0)).empty(), "cleaned after close");
     ctx.check(refreshPlayer(player) == 0, "stable");
     ctx.check(game::backpackUuid(player.getInventory().getItem(0)) == bp->uuid(), "uuid intact");
-
-    // Changes while carried (e.g. pickup) refresh too.
-    bp->inventory().insert(data("minecraft:cobblestone", 64), kInternal);
-    co_await ctx.ticks(25);
-    text = loreText(player.getInventory().getItem(0));
-    ctx.check(text.find("2/45") != std::string::npos, "refreshed on change: " + text);
 });
 
 } // namespace

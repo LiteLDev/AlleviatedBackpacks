@@ -6,6 +6,7 @@
 #include "client/input/Stash.h"
 
 #include <array>
+#include <cmath>
 #include <format>
 #include <chrono>
 #include <optional>
@@ -210,61 +211,41 @@ std::unordered_map<std::string, Mark> gMarks; // drawn this frame (by slot)
 /// Where the open container screen draws its slots (GUI units), logged once per screen for the
 /// e2e harness ("stash: vanilla slots ...").
 struct SlotRects {
-    ContainerScreenController const*                             controller = nullptr;
-    double                                                       since      = 0;
-    bool                                                         logged     = false;
-    std::vector<std::pair<std::string, std::array<float, 3>>>    rects;
+    ContainerScreenController const*                          controller = nullptr;
+    std::string                                               screen;
+    double                                                    since    = 0;
+    double                                                    lastNote = 0;
+    int                                                       logs     = 0;
+    bool                                                      dirty    = false;
+    std::vector<std::pair<std::string, std::array<float, 3>>> rects;
 };
 SlotRects gRects;
-bool      gInnerMissed = false;
 
-/// One diagnostic line per container screen about the icons it draws (collections, positions).
-struct IconDiag {
-    ContainerScreenController const* controller = nullptr;
-    double                           since      = 0;
-    bool                             logged     = false;
-    int                              icons      = 0;
-    std::string                      seen;
-};
-IconDiag gIconDiag;
-
-void noteIcon(ContainerScreenController const* controller, std::string const& what) {
-    double t = now();
-    if (gIconDiag.controller != controller) gIconDiag = IconDiag{controller, t};
-    if (gIconDiag.logged) return;
-    ++gIconDiag.icons;
-    if (gIconDiag.seen.size() < 600 && gIconDiag.seen.find(what) == std::string::npos) gIconDiag.seen += " " + what;
-    if (t - gIconDiag.since < 1.0) return;
-    gIconDiag.logged = true;
-    log().info("stash: icons on this screen: {} draws;{}", gIconDiag.icons, gIconDiag.seen);
-}
-
+/// Logs the slot positions of the open screen (again whenever they change, a few times per
+/// screen): "stash: vanilla slots screen=<name> invGuiScale=<s> <area>:<slot>=<x>,<y>,<scale> ...".
 void noteSlotRect(ContainerScreenController const* controller, std::string const& key, float x, float y, float s) {
-    double t = now();
-    if (gRects.controller != controller) gRects = SlotRects{controller, t, false, {}};
-    if (gRects.logged) return;
-    bool known = false;
-    for (auto& [k, r] : gRects.rects) {
-        if (k == key) {
-            r     = {x, y, s};
-            known = true;
-        }
+    double t      = now();
+    auto*  client = currentClient();
+    auto   screen = client ? client->getScreenName() : std::string{};
+    // A new screen (or the same controller object reused after a pause in drawing).
+    if (gRects.controller != controller || gRects.screen != screen || t - gRects.lastNote > 0.5) {
+        gRects = SlotRects{controller, screen, t, t};
     }
-    if (!known) gRects.rects.emplace_back(key, std::array<float, 3>{x, y, s});
-    if (t - gRects.since < 0.8) return;
-    gRects.logged = true;
+    gRects.lastNote = t;
+    bool known      = false;
+    for (auto& [k, r] : gRects.rects) {
+        if (k != key) continue;
+        known = true;
+        if (std::abs(r[0] - x) > 0.5f || std::abs(r[1] - y) > 0.5f) r = {x, y, s}, gRects.dirty = true;
+    }
+    if (!known) gRects.rects.emplace_back(key, std::array<float, 3>{x, y, s}), gRects.dirty = true;
+    if (!gRects.dirty || t - gRects.since < 0.8 || gRects.logs >= 6) return;
+    gRects.dirty = false;
+    ++gRects.logs;
     std::string line;
     for (auto const& [k, r] : gRects.rects) line += std::format(" {}={:.1f},{:.1f},{:.2f}", k, r[0], r[1], r[2]);
-    auto* client = currentClient();
-    log().info(
-        "stash: vanilla slots screen={} invGuiScale={:.4f} inner={}{}",
-        client ? client->getScreenName() : std::string{},
-        detail::snapshot().invGuiScale.load(),
-        gInnerMissed ? "no" : "yes",
-        line
-    );
+    log().info("stash: vanilla slots screen={} invGuiScale={:.4f}{}", screen, detail::snapshot().invGuiScale.load(), line);
 }
-
 /// Right click with an item on the cursor on a vanilla slot (place one / take-place).
 bool vanillaRightClick(ContainerScreenController const& controller, std::string const& collection, int index) {
     if (!active() || ui::nativeScreenActive()) return false;
@@ -402,18 +383,14 @@ LL_TYPE_INSTANCE_HOOK(
             if (owner.mCachedPositionDirty) owner._setCachedPosition();
             drawn.x = owner.mCachedPosition.get().x;
             drawn.y = owner.mCachedPosition.get().y;
-            gInnerMissed = true;
         }
         // The slot this icon belongs to (the callback's index is not the slot index; the
         // collection index is looked up by name).
         std::optional<std::pair<std::string, int>> slot;
-        std::string                                names;
         owner.findAllCollectionIndices([&](std::string const& name, int) {
             int index = owner.findCollectionIndex(name);
-            names += name + "#" + std::to_string(index) + ",";
             if (!slot && locationOf(name, index)) slot = std::pair<std::string, int>{name, index};
         });
-        noteIcon(controller, std::string(*owner.mName) + "[" + names + (drawn.got ? "inner" : "cached") + "]");
         if (!slot) return;
         auto  loc  = locationOf(slot->first, slot->second);
         auto  key  = keyOf(loc->first, loc->second);
