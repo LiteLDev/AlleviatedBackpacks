@@ -1,8 +1,11 @@
 #pragma once
 
+#include "api/abp/Fluid.h"
 #include "core/BackpackInventory.h"
 #include "core/Filter.h"
+#include "upgrade/filter/FilterTab.h"
 #include "upgrade/IUpgrade.h"
+#include "upgrade/void/VoidRules.h"
 
 namespace abp::upgrade::voiding {
 
@@ -12,11 +15,28 @@ inline constexpr std::string_view kAdvancedId = "advanced_void";
 
 /// Settings keys in the upgrade's settings JSON.
 inline constexpr std::string_view kFilterKey    = "filter";
-inline constexpr std::string_view kOverflowKey  = "overflow";  ///< advanced only: void only what doesn't fit
-inline constexpr std::string_view kWorkInGuiKey = "workInGui"; ///< void manual inserts in the GUI too
+inline constexpr std::string_view kVoidTypeKey  = "voidType";  ///< "always" | "slot_overflow" | "storage_overflow"
+inline constexpr std::string_view kWorkInGuiKey = "workInGui"; ///< SC SHOULD_WORK_IN_GUI (default false)
 
-inline constexpr int kBasicSlots    = 9;
-inline constexpr int kAdvancedSlots = 16;
+/// SB `VoidUpgradeConfig` of one tier.
+struct VoidTierConfig {
+    int  filterSlots       = 9;    ///< Number of filter slots (1..20)
+    int  slotsInRow        = 3;    ///< Number of filter slots displayed in a row (1..6)
+    bool voidAlwaysEnabled = true; ///< Determines whether void upgrade allows voiding always or it only has overflow options
+};
+
+/// `config/void.json` (SB server config sections `voidUpgrade` / `advancedVoidUpgrade`).
+struct VoidConfig {
+    int            version             = 1;
+    VoidTierConfig voidUpgrade         = {9, 3, true};
+    VoidTierConfig advancedVoidUpgrade = {16, 4, true};
+};
+
+[[nodiscard]] VoidTierConfig tierConfig(bool advanced);
+/// The shared filter control (SC VoidFilterLogicControl: Allow / Block, advanced match options).
+[[nodiscard]] filtering::FilterSpec filterSpec(bool advanced);
+/// SC FilterLogic with `setAllowByDefault(true)`: a new filter is an (empty) allow list.
+[[nodiscard]] core::Filter readFilter(nlohmann::json const& settings, bool advanced);
 
 /// Runs after the foundation rules (priority 1000) and after other upgrades' filters, so a Deny
 /// from them (e.g. a Filter upgrade) wins over voiding.
@@ -25,20 +45,28 @@ inline constexpr int kInsertPriority = 1001;
 /// Parsed settings of one installed Void upgrade.
 struct VoidSettings {
     core::Filter filter;
-    bool         advanced  = false;
-    bool         overflow  = false;
-    bool         workInGui = false;
+    bool         advanced          = false;
+    VoidType     storedType        = VoidType::Always; ///< as stored
+    bool         voidAlwaysEnabled = true;
+    bool         workInGui         = false;
+
+    /// SC `getVoidType`.
+    [[nodiscard]] VoidType type() const { return effective(storedType, voidAlwaysEnabled); }
+    /// SC `shouldVoidOverflow`.
+    [[nodiscard]] bool shouldVoidOverflow() const { return !voidAlwaysEnabled || storedType != VoidType::Always; }
+    /// SC `filterLogic.matchesFilter` (allow list by default; an empty allow list matches nothing,
+    /// an empty block list everything).
+    [[nodiscard]] bool matches(core::ItemStackData const& item) const;
+    /// SC `shouldVoidFluid` for this upgrade's own type: buckets and other filled containers in
+    /// the filter stand for their fluid.
+    [[nodiscard]] bool voidsFluid(api::FluidStack const& fluid) const;
+    [[nodiscard]] VoidRules rules() const;
 
     [[nodiscard]] static VoidSettings read(UpgradeContext const& ctx);
 };
 
-/// True if `item` may ever be voided: never backpacks or upgrade items.
-[[nodiscard]] bool isProtected(core::ItemStackData const& item);
-
-/// True if the settings say `item` should be voided (filter match, not protected).
-[[nodiscard]] bool matches(VoidSettings const& s, core::ItemStackData const& item);
-
-/// The insert verdict a Void upgrade with settings `s` gives for `q`.
-[[nodiscard]] core::InsertVerdict verdict(VoidSettings const& s, core::InsertQuery const& q);
+/// The fluid one filter item stands for (SC `FluidFilterContainer.getContainedFluid`: what its
+/// item fluid handler would drain, up to a bucket). Empty for anything else.
+[[nodiscard]] api::FluidStack containedFluid(core::ItemStackData const& item);
 
 } // namespace abp::upgrade::voiding
