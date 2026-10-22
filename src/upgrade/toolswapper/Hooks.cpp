@@ -1,9 +1,9 @@
-// Game hooks that drive the Tool Swapper:
+// Game hooks that drive the Tool Swapper (SB: LeftClickBlock -> onBlockClick, AttackEntity ->
+// onAttackEntity):
 // - start of block breaking (GameMode / SurvivalMode::startDestroyBlock and the server-authoritative
 //   ServerPlayerBlockUseHandler::onStartDestroyBlock) -> best tool;
-// - attacks (GameMode / SurvivalMode::attack, plus LeviLamina's PlayerAttackEvent) -> best weapon;
-// - empty-hand interaction with a shearable mob, or sneak-use of a log/dirt/... block with an empty
-//   hand -> shears/axe/hoe/shovel.
+// - attacks (GameMode / SurvivalMode::attack, plus LeviLamina's PlayerAttackEvent) -> best weapon.
+// The tool swap key (wrench-like tools) is a key action: see onSwapKey.
 //
 // The hooks only record what happened; the swap itself runs at the start of the next server tick.
 // Swapping inside the hook is not safe on a real client: the input packet being processed still
@@ -40,7 +40,7 @@ namespace abp::upgrade::toolswapper {
 
 namespace {
 
-enum class Action : int { Break = 0, Attack = 1, UseBlock = 2, UseEntity = 3 };
+enum class Action : int { Break = 0, Attack = 1 };
 
 struct Pending {
     std::int64_t player = 0;
@@ -54,7 +54,7 @@ std::vector<Pending> gPending; // served on the next tick, in order
 std::set<std::tuple<std::int64_t, int, int, int, int>> gSeenThisTick;
 bool                                                   gInstalled = false;
 
-/// Cheap pre-filter; `swapBest` does the full checks (alive, creative, open menu, config).
+/// Cheap pre-filter; the triggers do the full checks (alive, creative, config).
 bool eligible(Player& p) { return gInstalled && !p.isClientSide(); }
 
 void queue(Player& p, Action action, BlockPos const& pos = {}, std::int64_t actor = 0) {
@@ -67,33 +67,16 @@ void onStartBreak(Player& p, BlockPos const& pos) {
     if (eligible(p)) queue(p, Action::Break, pos);
 }
 
-void onAttack(Player& p) {
+void queueAttack(Player& p) {
     if (eligible(p)) queue(p, Action::Attack);
 }
 
-void onUseBlock(Player& p, ItemStack const& item, BlockPos const& pos, Block const* block) {
-    if (!eligible(p) || !item.isNull() || !p.isSneaking()) return;
-    Block const& b = block ? *block : p.getDimensionBlockSourceConst().getBlock(pos);
-    if (!useToolFor(b).empty()) queue(p, Action::UseBlock, pos);
-}
-
-void onInteractEntity(Player& p, Actor& target) {
-    if (!eligible(p) || !p.getSelectedItem().isNull() || !isShearable(target)) return;
-    queue(p, Action::UseEntity, {}, target.getOrCreateUniqueID().rawID);
-}
-
-bool serve(Level& level, Player& p, Pending const& job) {
-    auto const& region = p.getDimensionBlockSourceConst();
+bool serve(Level&, Player& p, Pending const& job) {
     switch (job.action) {
     case Action::Break:
-        return swapForBlock(p, region.getBlock(job.pos));
+        return onBlockClick(p, job.pos);
     case Action::Attack:
-        return swapForAttack(p);
-    case Action::UseBlock:
-        return swapForBlockUse(p, region.getBlock(job.pos));
-    case Action::UseEntity:
-        if (auto* target = level.fetchEntity(ActorUniqueID{job.actor}, false)) return swapForEntityUse(p, *target);
-        return false;
+        return toolswapper::onAttack(p);
     }
     return false;
 }
@@ -172,7 +155,7 @@ LL_TYPE_INSTANCE_HOOK(
     Actor&      entity,
     Vec3 const& hitPosition
 ) {
-    onAttack(this->mPlayer);
+    queueAttack(this->mPlayer);
     return origin(entity, hitPosition);
 }
 
@@ -185,74 +168,8 @@ LL_TYPE_INSTANCE_HOOK(
     Actor&      entity,
     Vec3 const& hitPosition
 ) {
-    onAttack(this->mPlayer);
+    queueAttack(this->mPlayer);
     return origin(entity, hitPosition);
-}
-
-// ---- interactions ------------------------------------------------------------------------------
-
-LL_TYPE_INSTANCE_HOOK(
-    TsGameModeUseItemOnHook,
-    ll::memory::HookPriority::Normal,
-    GameMode,
-    &GameMode::$useItemOn,
-    InteractionResult,
-    ItemStack&      item,
-    BlockPos const& at,
-    uchar           face,
-    Vec3 const&     hit,
-    HandSlot        handSlot,
-    Block const*    targetBlock,
-    bool            isFirstEvent
-) {
-    if (isFirstEvent) onUseBlock(this->mPlayer, item, at, targetBlock);
-    return origin(item, at, face, hit, handSlot, targetBlock, isFirstEvent);
-}
-
-LL_TYPE_INSTANCE_HOOK(
-    TsSurvivalUseItemOnHook,
-    ll::memory::HookPriority::Normal,
-    SurvivalMode,
-    &SurvivalMode::$useItemOn,
-    InteractionResult,
-    ItemStack&      item,
-    BlockPos const& at,
-    uchar           face,
-    Vec3 const&     hit,
-    HandSlot const  handSlot,
-    Block const*    targetBlock,
-    bool            isFirstEvent
-) {
-    if (isFirstEvent) onUseBlock(this->mPlayer, item, at, targetBlock);
-    return origin(item, at, face, hit, handSlot, targetBlock, isFirstEvent);
-}
-
-LL_TYPE_INSTANCE_HOOK(
-    TsGameModeInteractHook,
-    ll::memory::HookPriority::Normal,
-    GameMode,
-    &GameMode::$interact,
-    bool,
-    Actor&      entity,
-    Vec3 const& location,
-    HandSlot    handSlot
-) {
-    onInteractEntity(this->mPlayer, entity);
-    return origin(entity, location, handSlot);
-}
-
-LL_TYPE_INSTANCE_HOOK(
-    TsSurvivalInteractHook,
-    ll::memory::HookPriority::Normal,
-    SurvivalMode,
-    &SurvivalMode::$interact,
-    bool,
-    Actor&         entity,
-    Vec3 const&    location,
-    HandSlot const handSlot
-) {
-    onInteractEntity(this->mPlayer, entity);
-    return origin(entity, location, handSlot);
 }
 
 #pragma clang diagnostic pop
@@ -267,13 +184,9 @@ public:
         TsServerStartDestroyHook::hook();
         TsGameModeAttackHook::hook();
         TsSurvivalAttackHook::hook();
-        TsGameModeUseItemOnHook::hook();
-        TsSurvivalUseItemOnHook::hook();
-        TsGameModeInteractHook::hook();
-        TsSurvivalInteractHook::hook();
         auto& bus = ll::event::EventBus::getInstance();
         mListeners.push_back(bus.emplaceListener<ll::event::PlayerAttackEvent>(
-            [](ll::event::PlayerAttackEvent& ev) { onAttack(ev.self()); },
+            [](ll::event::PlayerAttackEvent& ev) { queueAttack(ev.self()); },
             ll::event::EventPriority::High
         ));
         mListeners.push_back(bus.emplaceListener<ll::event::ServerLevelTickEvent>(
@@ -294,10 +207,6 @@ public:
         TsServerStartDestroyHook::unhook();
         TsGameModeAttackHook::unhook();
         TsSurvivalAttackHook::unhook();
-        TsGameModeUseItemOnHook::unhook();
-        TsSurvivalUseItemOnHook::unhook();
-        TsGameModeInteractHook::unhook();
-        TsSurvivalInteractHook::unhook();
     }
 
 private:

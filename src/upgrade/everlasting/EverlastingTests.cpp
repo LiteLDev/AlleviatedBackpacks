@@ -6,6 +6,7 @@
 #include "mc/deps/core/math/Vec3.h"
 #include "mc/deps/core/string/HashedString.h"
 #include "mc/deps/shared_types/legacy/actor/ActorDamageCause.h"
+#include "mc/world/actor/ActorFlags.h"
 #include "mc/world/actor/ActorType.h"
 #include "mc/world/actor/item/ItemActor.h"
 #include "mc/world/actor/player/Inventory.h"
@@ -246,33 +247,74 @@ ABP_REGISTER_SELFTEST("everlasting.never_despawns", [](Context& ctx) -> ll::coro
     ctx.check(drops.get(n) == nullptr, "plain backpack despawned");
 });
 
-ABP_REGISTER_SELFTEST("everlasting.void_rescue", [](Context& ctx) -> ll::coro::CoroTask<> {
+// SB: below `minY + 1` the backpack counts as in water: it floats up to the bottom of the world
+// and then hovers there (no gravity, no motion) instead of being lost.
+ABP_REGISTER_SELFTEST("everlasting.void_float", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
     co_await ctx.ticks(10); // let the simulated player and its chunks load
     auto  p = makePair(ctx);
     Drops drops(player);
     auto  e = drops.spawn(ctx.backpackItem(*p.everlasting), 2.0f);
     ctx.require(drops.get(e) != nullptr, "spawned");
-    float minY = static_cast<float>(player.getDimensionBlockSource().getMinHeight());
-    // Below the world: the periodic check brings it back.
-    auto pos = drops.get(e)->getPosition();
-    drops.get(e)->teleport(Vec3{pos.x, minY - 20.0f, pos.z}, drops.get(e)->getDimensionId());
-    co_await ctx.ticks(15);
-    ctx.require(drops.get(e) != nullptr, "survived the void");
-    ctx.check(
-        drops.get(e)->getPosition().y >= minY,
-        "back inside the world (y=" + std::to_string(drops.get(e)->getPosition().y) + ")"
-    );
-    // The out-of-world kill itself is intercepted too.
+    co_await ctx.ticks(6); // tracked by the module
+    auto&      region = player.getDimensionBlockSource();
+    float      minY   = static_cast<float>(region.getMinHeight());
+    auto       pos    = drops.get(e)->getPosition();
+    // A void column: the flat test world has bedrock at the bottom, dig a hole through the floor.
+    TempBlocks hole(region);
+    int        bx = static_cast<int>(std::floor(pos.x)), bz = static_cast<int>(std::floor(pos.z));
+    for (int y = region.getMinHeight(); y < region.getMinHeight() + 4; ++y) (void)hole.set(BlockPos{bx, y, bz}, "minecraft:air");
+    drops.get(e)->teleport(Vec3{static_cast<float>(bx) + 0.5f, minY - 6.0f, static_cast<float>(bz) + 0.5f}, drops.get(e)->getDimensionId());
+    // The out-of-world kill is ignored.
     drops.get(e)->outOfWorld();
     co_await ctx.ticks(2);
-    ctx.check(drops.get(e) != nullptr, "outOfWorld() doesn't remove it");
+    ctx.require(drops.get(e) != nullptr, "outOfWorld() doesn't remove it");
+    bool hovering = false;
+    for (int i = 0; i < 40 && !hovering; ++i) {
+        co_await ctx.ticks(5);
+        auto* a = drops.get(e);
+        ctx.require(a != nullptr, "survived the void");
+        hovering = !a->getStatusFlag(ActorFlags::HasGravity);
+    }
+    auto* a = drops.get(e);
+    ctx.check(hovering, "hovers (no gravity) once it floated out of the void");
+    ctx.check(a->getPosition().y >= minY + 0.9f, "floated up to minY + 1 (y=" + std::to_string(a->getPosition().y) + ")");
+    float y = a->getPosition().y;
+    co_await ctx.ticks(20);
+    ctx.check(drops.get(e) && std::abs(drops.get(e)->getPosition().y - y) < 0.05f, "stays where it hovers (y " + std::to_string(y) + " -> " + std::to_string(drops.get(e) ? drops.get(e)->getPosition().y : -999.0f) + ")");
     // Control: a plain backpack is killed by outOfWorld().
     auto n = drops.spawn(ctx.backpackItem(*p.plain), -2.0f);
     ctx.require(drops.get(n) != nullptr, "control spawned");
     drops.get(n)->outOfWorld();
     co_await ctx.ticks(2);
     ctx.check(drops.get(n) == nullptr, "plain backpack is lost in the void");
+});
+
+// SB: in water or lava it rises; out of it, it hovers.
+ABP_REGISTER_SELFTEST("everlasting.liquid_float", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& player = ctx.player();
+    co_await ctx.ticks(10);
+    auto       p = makePair(ctx);
+    Drops      drops(player);
+    TempBlocks blocks(player.getDimensionBlockSource());
+    auto const& pp   = player.getPosition();
+    int         bx   = static_cast<int>(std::floor(pp.x)) - 8;
+    int         bz   = static_cast<int>(std::floor(pp.z)) + 8;
+    int         top  = player.getDimensionBlockSource().getAboveTopSolidBlock(bx, bz, false, false);
+    BlockPos    lava{bx, top, bz};
+    ctx.require(blocks.set(lava, "minecraft:lava"), "lava placed: " + blocks.error);
+    auto id = drops.spawn(ctx.backpackItem(*p.everlasting), 0.0f);
+    ctx.require(drops.get(id) != nullptr, "spawned");
+    drops.get(id)->teleport(Vec3{static_cast<float>(bx) + 0.5f, static_cast<float>(top) + 0.1f, static_cast<float>(bz) + 0.5f}, drops.get(id)->getDimensionId());
+    bool hovering = false;
+    for (int i = 0; i < 40 && !hovering; ++i) {
+        co_await ctx.ticks(5);
+        auto* a = drops.get(id);
+        ctx.require(a != nullptr, "survives the lava");
+        hovering = !a->getStatusFlag(ActorFlags::HasGravity);
+    }
+    ctx.check(hovering, "floats out of the lava and hovers");
+    if (auto* a = drops.get(id)) ctx.check(a->getPosition().y > static_cast<float>(top) + 0.15f, "rose in the lava (y=" + std::to_string(a->getPosition().y) + ")");
 });
 
 ABP_REGISTER_SELFTEST("everlasting.death_drop", [](Context& ctx) -> ll::coro::CoroTask<> {
