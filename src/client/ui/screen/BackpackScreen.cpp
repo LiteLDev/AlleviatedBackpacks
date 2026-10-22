@@ -344,7 +344,9 @@ bool hasTab(cs::UpgradeView const& u) {
 } // namespace
 
 void BackpackScreenLayer::rebuildTabs(cs::BackpackScreenModel const& m) {
-    std::string sig;
+    // The upgrade count is part of the signature: a screen without upgrade tabs (e.g. a nested
+    // backpack) must not keep the previous screen's tabs (its signature is empty too).
+    std::string sig = std::to_string(m.upgrades.size()) + "|";
     for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
         auto const& u = m.upgrades[i];
         if (hasTab(u)) sig += std::to_string(i) + ":" + u.id + ";";

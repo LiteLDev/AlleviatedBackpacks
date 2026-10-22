@@ -48,6 +48,25 @@ function Open-Backpack {
     if ((Get-LeviLog -Since $m) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
 }
 
+# ---- Tool Swapper in the world: mining grass with the pickaxe takes the shovel ----------------------
+Invoke-Chat '/tp @s ~ ~ ~ 0 90'
+Start-Sleep -Milliseconds 600
+Press-Key '5'                                                          # iron pickaxe (hotbar 5)
+Start-Sleep -Milliseconds 400
+$mark = Get-LogMark
+Click 0.5 0.5 -Relative
+Wait-LogLine 'tool swapper: .* swapped minecraft:iron_pickaxe for minecraft:diamond_shovel' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 600
+Save-Screenshot 'toolswapper-mined' | Out-Null
+# The tool swap key (G, bound by the prelaunch script): the shovel flattens grass, the backpack has
+# no other tool for it.
+$mark = Get-LogMark
+Press-Key 'G'
+Start-Sleep -Milliseconds 800
+$key = (Get-LeviLog -Since $mark) | Select-String 'key action: .* tool swap -> (\d)' | Select-Object -Last 1
+if ($key) { Write-Step "tool swap key: $($key.Line)" } else { Write-Step 'tool swap key: not bound in this client (skipped)' }
+Save-Screenshot 'toolswapper-key' | Out-Null
+
 # ---- the backpack screen with its tabs -------------------------------------------------------------
 Open-Backpack
 if ($L.Tabs -ne 5) { throw "expected 5 tabs (settings, jukebox, refill, tool swapper, inception; no Everlasting tab), got $($L.Tabs)" }
@@ -136,48 +155,16 @@ Start-Sleep -Milliseconds 600
 Save-Screenshot 'inception-incepted-first' | Out-Null
 Gui-Click $p[0] $p[1]
 Tab-Toggle 4
-
-# ---- B over the backpack stored inside opens it; B again goes back ----------------------------------
-$s0 = Storage-Pos 0
-Gui-Move $s0[0] $s0[1]
-Start-Sleep -Milliseconds 400
-$mark = Get-LogMark
-Press-Key 'B'
-Wait-LogLine 'native screen action: openNested by' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 900
-Save-Screenshot 'nested-open' | Out-Null
-Gui-Move ($L.Width / 2) ($L.Height + 30)
-$mark = Get-LogMark
-Press-Key 'B'
-Wait-LogLine 'native screen action: back by' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 900
-Save-Screenshot 'nested-back' | Out-Null
 $mark = Get-LogMark
 Press-Key 'E'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 600
 
-# ---- Tool Swapper in the world: mining grass with the pickaxe takes the shovel ----------------------
-Invoke-Chat '/tp @s ~ ~ ~ 0 90'
-Start-Sleep -Milliseconds 600
-Press-Key '5'                                                          # iron pickaxe
-Start-Sleep -Milliseconds 400
-$mark = Get-LogMark
-Click 0.5 0.5 -Relative
-Wait-LogLine 'tool swapper: .* swapped minecraft:iron_pickaxe for minecraft:diamond_shovel' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 600
-Save-Screenshot 'toolswapper-mined' | Out-Null
-# The tool swap key (G, bound by the prelaunch script): the shovel flattens grass, the backpack has
-# no other tool for it.
-$mark = Get-LogMark
-Press-Key 'G'
-Start-Sleep -Milliseconds 800
-$key = (Get-LeviLog -Since $mark) | Select-String 'key action: .* tool swap -> (\d)' | Select-Object -Last 1
-if ($key) { Write-Step "tool swap key: $($key.Line)" } else { Write-Step 'tool swap key: not bound in this client (skipped)' }
-Save-Screenshot 'toolswapper-key' | Out-Null
-
 # ---- Jukebox in the world: the record follows the carrier; dropping the backpack stops it ------------
+# (B is also the game's emote key: its hotkey list takes the number keys for a few seconds.)
+Start-Sleep -Seconds 6
 Press-Key '1'
+Start-Sleep -Milliseconds 500
 Open-Backpack
 Tab-Toggle 1
 $mark = Get-LogMark
@@ -193,4 +180,32 @@ Wait-LogLine 'jukebox: stopped in backpack .*no longer playable' 10 -Since $mark
 Wait-LogLine 'jukebox: stopping the sound of backpack' 10 -Since $mark | Out-Null
 Start-Sleep -Seconds 3
 Save-Screenshot 'everlasting-dropped' | Out-Null                       # happy villager particles
+
+# ---- B over the backpack stored inside opens it; ESC goes back -------------------------------------
+# (Last: B inside the screen may also reach the game's emote wheel.) A fresh setup: the first
+# backpack was dropped.
+$mark = Get-LogMark
+Invoke-Chat '/backpack misc setup'
+Wait-LogLine 'misc setup: gave netherite backpack' 15 -Since $mark | Out-Null
+Start-Sleep -Seconds 6
+Press-Key '1'
+Start-Sleep -Milliseconds 600
+Open-Backpack
+$s0 = Storage-Pos 0
+Gui-Move $s0[0] $s0[1]
+Start-Sleep -Milliseconds 400
+$mark = Get-LogMark
+Press-Key 'B'
+Wait-LogLine 'native screen action: openNested by' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 900
+Save-Screenshot 'nested-open' | Out-Null                               # only the settings tab
+$mark = Get-LogMark
+Press-Key 'ESC'
+Wait-LogLine 'native screen action: back by' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 900
+Save-Screenshot 'nested-back' | Out-Null
+$mark = Get-LogMark
+Press-Key 'E'
+Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 600
 Assert-NoErrors
