@@ -72,18 +72,33 @@ function Assert-Filter([int]$slot, [scriptblock]$check, [string]$what) {
     Write-Step "ok: $what"
 }
 
+# SC "keep tab open" (on by default): a reopened backpack shows the tab that was open last.
+$script:KeptTab = 0
+$script:OpenMark = 0
 function Open-Backpack {
     $mark = Get-LogMark
+    $script:OpenMark = $mark
     Press-Key 'B'
     Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $mark | Out-Null
     Read-Layout $mark
     Start-Sleep -Milliseconds 600
     if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
 }
+function Close-Tab([int]$tab) { Tab-Click $tab; $script:KeptTab = 0 }
 function Open-FilterTab([int]$tab, [string]$extra = '') {
+    if ($script:KeptTab -eq $tab -and $script:OpenMark -gt 0) {
+        # Reopened with this tab kept open.
+        Read-Control $script:OpenMark $extra
+        $script:OpenMark = 0
+        Start-Sleep -Milliseconds 300
+        return
+    }
+    if ($script:KeptTab -gt 0) { Close-Tab $script:KeptTab }
+    $script:OpenMark = 0
     $mark = Get-LogMark
     Tab-Click $tab
     Read-Control $mark $extra
+    $script:KeptTab = $tab
     Start-Sleep -Milliseconds 500
 }
 
@@ -237,25 +252,25 @@ Button-Move 0
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'deposit-inventory' | Out-Null
 Button-Click 0
-Tab-Click 3
+Close-Tab 3
 
 # ---- Advanced Restock and the basic tabs ------------------------------------------------------------
 Open-FilterTab 4
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'adv-restock-tab' | Out-Null
-Tab-Click 4
+Close-Tab 4
 Open-FilterTab 5
 if ($C.Slots -ne 9 -or $C.PerRow -ne 3 -or $C.W -ne 54) { throw "basic pickup: expected 9 slots in rows of 3 (54 wide), got $($C.Slots)/$($C.PerRow) $($C.W)" }
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'pickup-tab' | Out-Null
-Tab-Click 5
+Close-Tab 5
 Open-FilterTab 6
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'filter-tab' | Out-Null
-Tab-Click 6
+Close-Tab 6
 Open-FilterTab 7
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
