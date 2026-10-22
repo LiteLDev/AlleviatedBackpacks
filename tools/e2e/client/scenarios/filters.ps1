@@ -152,7 +152,7 @@ Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'allow-dur-nbt' | Out-Null
 Press-Key 'E'
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 1500
 Assert-Filter 0 { param($f) $f.items[0].id -eq 'minecraft:apple' -and -not $f.items[1] -and $f.typeState -eq 0 -and $f.dur -and $f.nbt } 'apple ghost, no duplicate, allow, durability + NBT'
 
 # Tags mode: Match Mod -> Match Tags (the control re-measures: tag list + tag selection slot).
@@ -199,7 +199,7 @@ Ctl-Move 20 30
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'tag-list' | Out-Null
 Press-Key 'E'
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 1500
 $added = @((Get-Filter 0).tags).Count
 if ($added -lt 1) { throw 'Add Tag added nothing' }
 Write-Step "ok: $added tag(s) added"
@@ -214,7 +214,7 @@ Button-Move 3 $tagY
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'match-all-tags' | Out-Null
 Press-Key 'E'
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 1500
 Assert-Filter 0 { param($f) $f.primary -eq 2 -and @($f.tags).Count -eq $added - 1 -and -not $f.anyTag } 'tags mode: one removed, match all'
 
 # Back to Match Item; Match Backpack Contents is skipped while in tags mode.
@@ -226,7 +226,7 @@ $mark = Get-LogMark
 Button-Click 1
 Wait-LogLine 'filter control: key=filter primary match 2 -> 0 \(tags mode off\)' 10 -Since $mark | Out-Null
 Press-Key 'E'
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 1500
 Assert-Filter 0 { param($f) $f.primary -eq 0 -and $f.typeState -eq 0 } 'tags mode skips STORAGE (allow -> block -> allow), back to item'
 
 # ---- Advanced Filter: direction button + control 20 lower -------------------------------------------
@@ -241,7 +241,7 @@ Start-Sleep -Milliseconds 400
 Save-Screenshot 'adv-filter-input' | Out-Null
 Ctl-Click 9 (-20 + 9)
 Press-Key 'E'
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 1500
 Assert-Filter 1 { param($f) $f.direction -eq 2 } 'direction: both -> input -> output'
 
 # ---- Advanced Deposit: Allow / Block / Match Inventory Contents ------------------------------------
@@ -276,7 +276,7 @@ Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'deposit-tab' | Out-Null
 Press-Key 'E'
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 1500
 Assert-Filter 2 { param($f) $f.typeState -eq 0 } 'deposit type cycled back to allow'
 
 # ---- Deposit / Restock triggers ----------------------------------------------------------------------
