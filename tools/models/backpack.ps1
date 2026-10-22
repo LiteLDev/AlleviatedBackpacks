@@ -306,14 +306,14 @@ function Render-Config([bool]$battery, [bool]$ltank, [bool]$rtank, [string]$tier
     foreach ($b in $boxes) { if ($b.mat -eq 'glass' -and $parts -contains $b.part) { Quads-For $b 5 $samplers.glass $false } }
 }
 
-function Save-Layer([int]$layer, [string]$path, [switch]$Over) {
+function Save-Layer([int]$layer, [string]$path, [switch]$Over, [switch]$Always) {
     $out = New-Object 'uint32[]' ($N * $N)
     $any = $false
     for ($i = 0; $i -lt $out.Length; $i++) {
         if ($Over) { if ($ras.Over[$i] -ne 0) { $out[$i] = $ras.Over[$i]; $any = $true } }
         elseif ($ras.Owner[$i] -eq $layer) { $out[$i] = $ras.Color[$i]; $any = $true }
     }
-    if ($any) { Save-Buf $out $path $N $N }
+    if ($any -or $Always) { Save-Buf $out $path $N $N }
     return $any
 }
 
@@ -332,7 +332,7 @@ foreach ($bat in $false, $true) { foreach ($lt in $false, $true) { foreach ($rt 
     Render-Config $bat $lt $rt 'leather' 0 0 0
     Save-Layer 0 (Join-Path $iconDir "$($key)_cloth.png") | Out-Null
     Save-Layer 1 (Join-Path $iconDir "$($key)_border.png") | Out-Null
-    $info.glass = [bool](Save-Layer 0 (Join-Path $iconDir "$($key)_glass.png") -Over)
+    $info.glass = [bool](Save-Layer 0 (Join-Path $iconDir "$($key)_glass.png") -Over -Always)
     foreach ($t in $tiers) {
         Render-Config $bat $lt $rt $t 0 0 0
         Save-Layer 2 (Join-Path $iconDir "$($key)_fixed_$t.png") | Out-Null
@@ -340,7 +340,7 @@ foreach ($bat in $false, $true) { foreach ($lt in $false, $true) { foreach ($rt 
     if ($bat) {
         for ($k = 1; $k -le $BatteryCharge.steps; $k++) {
             Render-Config $bat $lt $rt 'leather' 0 0 $k
-            if (Save-Layer 4 (Join-Path $iconDir "$($key)_charge_$k.png")) { $info.charge += $k }
+            if (Save-Layer 4 (Join-Path $iconDir "$($key)_charge_$k.png") -Always) { $info.charge += $k }
         }
     }
     foreach ($side in 'l', 'r') {
@@ -349,7 +349,7 @@ foreach ($bat in $false, $true) { foreach ($lt in $false, $true) { foreach ($rt 
         for ($k = 1; $k -le 10; $k++) {
             $lf = if ($side -eq 'l') { $k } else { 0 }; $rf = if ($side -eq 'r') { $k } else { 0 }
             Render-Config $bat $lt $rt 'leather' $lf $rf 0
-            if (Save-Layer 3 (Join-Path $iconDir "$($key)_fluid_$($side)_$k.png")) { $levels += $k }
+            if (Save-Layer 3 (Join-Path $iconDir "$($key)_fluid_$($side)_$k.png") -Always) { $levels += $k }
         }
         $info.fluid[$side] = $levels
     }

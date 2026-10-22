@@ -382,6 +382,7 @@ void PlacedBackpacks::erase(BlockLocation const& loc) {
     auto it = mEntries.find(loc);
     if (it == mEntries.end()) return;
     if (auto u = mByUuid.find(it->second.uuid); u != mByUuid.end() && u->second == loc) mByUuid.erase(u);
+    mSignals.erase(loc);
     // Its jukeboxes stop playing at the block (picked up, broken, dropped).
     upgrade::jukebox::Service::get().stopAll(it->second.uuid);
     // The entity drawing it goes too.
@@ -746,6 +747,12 @@ void PlacedBackpacks::maintain(BlockSource& region, PlacedEntry const& e, std::s
             BlockChangeContext ctx{};
             region.setBlock(pos, *block, kUpdateAll, nullptr, ctx);
         }
+    }
+    // Comparators next to it re-read the fill level when it changes.
+    int signal = core::comparatorSignal(bp->inventory());
+    if (auto it = mSignals.find(e.loc); it == mSignals.end() || it->second != signal) {
+        mSignals[e.loc] = signal;
+        region.updateNeighborsAt(pos);
     }
     // The display entity wearing the backpack and holding the displayed item.
     auto                     item = itemOf(e);

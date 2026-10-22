@@ -37,7 +37,6 @@ constexpr std::string_view kDyeFallbacks[]  = {
 };
 
 std::uint32_t const kDefaultMain   = core::BackpackData().mainColor;
-std::uint32_t const kDefaultAccent = core::BackpackData().accentColor;
 
 std::string tierLabel(Player const& player, core::Tier tier) {
     auto i = static_cast<std::size_t>(tier);
@@ -78,7 +77,9 @@ bool syncTint(ItemStack& stack, game::Backpack& bp) {
         data.mainColor = current < 0 ? kDefaultMain : (0xFF000000u | static_cast<std::uint32_t>(current));
         bp.markDirty();
     }
-    int expected = data.mainColor == kDefaultMain ? -1 : static_cast<int>(data.mainColor & 0xFFFFFFu);
+    // Always tinted (also with the default colour): the item colour is the main colour the
+    // backpack model's cloth is drawn with (P2-11; vanilla clients get it this way too).
+    int expected = static_cast<int>(data.mainColor & 0xFFFFFFu);
     bool changed = false;
     if (expected != current) {
         if (expected < 0) item->clearColor(stack);
@@ -134,18 +135,8 @@ std::vector<std::string> buildLore(Player const& player, core::Tier tier, game::
     }
     lore.push_back("§r" + trFor(player, "abp.tiers.lore.upgrades", "§7Upgrades: §f{}/{}", installed, upgradeSlots));
     lore.insert(lore.end(), upgradeLines.begin(), upgradeLines.end());
-    if (bp && (bp->data().mainColor != kDefaultMain || bp->data().accentColor != kDefaultAccent)) {
-        lore.push_back(
-            "§r"
-            + trFor(
-                player,
-                "abp.tiers.lore.colors",
-                "§7Colors: §f{} §7/ §f{}",
-                colorLabel(player, bp->data().mainColor),
-                colorLabel(player, bp->data().accentColor)
-            )
-        );
-    }
+    // The colours show on the 3D model and icon (SB has no colour lore).
+
     return lore;
 }
 

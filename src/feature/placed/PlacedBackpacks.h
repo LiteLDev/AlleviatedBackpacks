@@ -185,6 +185,7 @@ private:
     };
     std::vector<Protected> mRestore;
     std::int64_t           mLastPurge = 0;
+    std::map<BlockLocation, int> mSignals; ///< last comparator signal per placed backpack
 
     std::map<BlockLocation, PlacedEntry>           mEntries;
     std::unordered_map<std::string, BlockLocation> mByUuid;

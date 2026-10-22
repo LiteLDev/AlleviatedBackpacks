@@ -1,6 +1,8 @@
 // Selftests of P2-11 (model render state, placed block behaviour from SB's BackpackBlock):
 // model.* and placed.* (`/backpack selftest "model.*"`).
 
+#include <limits>
+
 #include "mc/deps/shared_types/legacy/actor/ArmorSlot.h"
 #include "mc/server/SimulatedPlayer.h"
 #include "mc/world/actor/Actor.h"
@@ -223,5 +225,96 @@ ABP_REGISTER_SELFTEST("placed.creative_clone", [](Context& ctx) -> ll::coro::Cor
     game::Storage::get().erase(e->uuid);
 });
 
+} // namespace
+} // namespace abp::placed::test
+
+namespace abp::placed::test {
+namespace {
+// A real comparator behind a placed backpack reads its fill level (vanilla circuit system).
+ABP_REGISTER_SELFTEST("placed.comparator_block", [](selftest::Context& ctx) -> ll::coro::CoroTask<> {
+    auto& sp = ctx.spawnPlayer();
+    co_await toGround(ctx, sp);
+    Site site(sp, 12);
+    auto pos  = site.at(0, 1);
+    auto comp = site.at(0, 1, 1);
+    auto wire = site.at(0, 1, 2);
+    for (auto const& p : {pos, comp, wire}) site.set(p, "minecraft:air");
+    site.set(site.at(0, 0, 1), "minecraft:stone");
+    site.set(site.at(0, 0, 2), "minecraft:stone");
+    auto bp = ctx.createBackpack(core::Tier::Leather);
+    for (int s = 0; s < bp->inventory().size(); ++s) bp->inventory().set(s, core::ItemStackData::of("minecraft:cobblestone", 64));
+    placeAt(ctx, site, *bp, pos);
+    auto run = [&](std::string const& c) {
+        ServerCommandOrigin origin("abp-selftest", site.region().getLevel().asServer(), CommandPermissionLevel::Owner, sp.getDimensionId());
+        (void)ll::command::CommandRegistrar::getServerInstance().executeCommand(c, origin);
+    };
+    run("setblock " + std::to_string(comp.x) + " " + std::to_string(comp.y) + " " + std::to_string(comp.z)
+        + " unpowered_comparator [\"minecraft:cardinal_direction\"=\"north\"]");
+    run("setblock " + std::to_string(wire.x) + " " + std::to_string(wire.y) + " " + std::to_string(wire.z) + " redstone_wire");
+    site.touch(comp);
+    site.touch(wire);
+    co_await ctx.ticks(10);
+    auto signalOf = [&]() {
+        auto const& w = site.region().getBlock(wire);
+        auto const* s = w.getBlockType().getBlockState(HashedString("redstone_signal"));
+        if (!s) return -1;
+        auto v = w.getState<int>(*s);
+        return static_cast<int>(v ? *v : -1);
+    };
+    ctx.check(PlacedBackpacks::get().comparatorSignal(site.region(), pos) == 15, "full backpack: signal 15");
+    ctx.check(signalOf() == 15, "the comparator outputs 15, got " + std::to_string(signalOf()));
+    for (int s = 0; s < bp->inventory().size(); ++s) bp->inventory().set(s, {});
+    co_await ctx.ticks(10);
+    ctx.check(signalOf() == 0, "empty backpack: off, got " + std::to_string(signalOf()));
+});
+} // namespace
+} // namespace abp::placed::test
+
+namespace abp::placed::test {
+namespace {
+// SB push reaction DESTROY: a piston breaks the block and the backpack drops (never lost).
+// Netherite: blast resistance 1200 (SB), a small explosion leaves it.
+ABP_REGISTER_SELFTEST("placed.piston_and_netherite", [](selftest::Context& ctx) -> ll::coro::CoroTask<> {
+    auto& sp = ctx.spawnPlayer();
+    co_await toGround(ctx, sp);
+    Site site(sp, 14);
+    // Piston in the middle (powered from below), a backpack on both sides along x: whichever way
+    // its facing_direction points, one gets pushed.
+    auto piston = site.at(0, 1);
+    auto east   = site.at(1, 1);
+    auto west   = site.at(-1, 1);
+    auto power  = site.at(0, 0);
+    for (auto const& p : {piston, east, west, site.at(2, 1), site.at(-2, 1)}) site.set(p, "minecraft:air");
+    auto bpE = ctx.createBackpack(core::Tier::Copper);
+    auto bpW = ctx.createBackpack(core::Tier::Copper);
+    placeAt(ctx, site, *bpE, east);
+    placeAt(ctx, site, *bpW, west);
+    auto run = [&](std::string const& c) {
+        ServerCommandOrigin origin("abp-selftest", site.region().getLevel().asServer(), CommandPermissionLevel::Owner, sp.getDimensionId());
+        (void)ll::command::CommandRegistrar::getServerInstance().executeCommand(c, origin);
+    };
+    auto at = [](BlockPos const& p) { return std::to_string(p.x) + " " + std::to_string(p.y) + " " + std::to_string(p.z); };
+    run("setblock " + at(piston) + " piston [\"facing_direction\"=5]");
+    site.touch(piston);
+    run("setblock " + at(power) + " redstone_block");
+    site.touch(power);
+    co_await ctx.ticks(12);
+    bool eastGone = !PlacedBackpacks::isBackpackBlock(site.region().getBlock(east));
+    bool westGone = !PlacedBackpacks::isBackpackBlock(site.region().getBlock(west));
+    ctx.check(eastGone != westGone, "the piston destroyed one block");
+    auto const& gone = eastGone ? bpE : bpW;
+    ctx.check(!PlacedBackpacks::get().findUuid(gone->uuid()).has_value(), "no longer placed");
+    ctx.check(site.collectBackpackDrops(eastGone ? east : west, gone->uuid()) == 1, "the backpack dropped");
+    site.set(power, "minecraft:stone");
+    site.set(piston, "minecraft:air");
+    for (auto const& p : {east, west, site.at(2, 1), site.at(-2, 1)}) site.set(p, "minecraft:air");
+    auto pos2 = site.at(0, 1, 3);
+    site.set(pos2, "minecraft:air");
+    auto nbp = ctx.createBackpack(core::Tier::Netherite);
+    placeAt(ctx, site, *nbp, pos2);
+    site.region().getLevel().explode(site.region(), nullptr, site.at(1, 1, 3).center(), 2.0f, false, true, std::numeric_limits<float>::max(), false);
+    co_await ctx.ticks(3);
+    ctx.check(PlacedBackpacks::isBackpackBlock(site.region().getBlock(pos2)), "a netherite backpack resists a small explosion");
+});
 } // namespace
 } // namespace abp::placed::test

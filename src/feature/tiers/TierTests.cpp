@@ -272,15 +272,15 @@ ABP_REGISTER_SELFTEST("tiers.lore_and_tint", [](Context& ctx) {
     ctx.check(text.find("2/27") != std::string::npos, "used/total slots in lore: " + text);
     ctx.check(text.find("4%") != std::string::npos, "fill % in lore (74/1728 -> 4%): " + text);
     ctx.check(text.find("0/1") != std::string::npos, "upgrade slots in lore");
-    ctx.check(!item.mItem->hasCustomColor(item), "default colour: no tint");
+    ctx.check(item.mItem->hasCustomColor(item), "default colour: tinted with SB's default main colour (model cloth)");
 
-    // Colours: lore line + tint.
+    // Colours: tint only (SB shows colours on the model, not in the tooltip).
     bp->data().mainColor   = core::dyeInfo(core::DyeColor::Blue).argb;
     bp->data().accentColor = core::dyeInfo(core::DyeColor::Yellow).argb;
     bp->markDirty();
     ctx.check(refreshItem(player, item, bp), "colour change refreshes");
     text = loreText(item);
-    ctx.check(text.find(colorLabel(player, core::dyeInfo(core::DyeColor::Blue).argb)) != std::string::npos, "main colour in lore");
+    ctx.check(text.find(colorLabel(player, core::dyeInfo(core::DyeColor::Blue).argb)) == std::string::npos, "no colour lore line");
     ctx.check(item.mItem->hasCustomColor(item), "tinted");
     auto c = item.getColor();
     ctx.check(std::abs(c.b - (0xAA / 255.0f)) < 0.01f && std::abs(c.r - (0x3C / 255.0f)) < 0.01f, "tint = blue");

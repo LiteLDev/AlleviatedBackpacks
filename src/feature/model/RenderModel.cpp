@@ -133,6 +133,7 @@ core::render::BackpackModel buildModel(game::Backpack& backpack) {
             }
         }
     });
+    applyTestOverrides(backpack, m);
     return m;
 }
 
