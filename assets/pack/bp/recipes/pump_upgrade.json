@@ -8,22 +8,25 @@
       "crafting_table"
     ],
     "pattern": [
-      "GPG",
-      "GBG",
-      "GRG"
+      "GUG",
+      "PBS",
+      "GUG"
     ],
     "key": {
       "G": {
         "item": "minecraft:glass"
       },
+      "U": {
+        "item": "minecraft:bucket"
+      },
       "P": {
         "item": "minecraft:piston"
       },
+      "S": {
+        "item": "minecraft:sticky_piston"
+      },
       "B": {
         "item": "alleviatedbackpacks:upgrade_base"
-      },
-      "R": {
-        "item": "minecraft:redstone"
       }
     },
     "unlock": [

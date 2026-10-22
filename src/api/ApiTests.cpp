@@ -145,13 +145,17 @@ ABP_REGISTER_SELFTEST("api.backpack_tanks", [](Context& ctx) {
     auto h = caps.backpackFluid(bp->uuid());
     ctx.require(h != nullptr && h->tanks() == 2, "two tanks combined");
     ctx.check(h->tankCapacity(0) == upgrade::tank::capacity(*bp), "tank capacity");
-    // SB: fill pours into each tank in slot order.
-    ctx.check(h->fill({"minecraft:water", 30000}, false) == 30000, "fill 30000 mB water");
-    ctx.check(h->fluidInTank(0).amount == 24000 && h->fluidInTank(1).amount == 6000, "first tank first");
+    // SB: fill pours into each tank in slot order, each tank moving at most
+    // max(1000, 20 mB x 6 rows) per operation.
+    ctx.check(h->fill({"minecraft:water", 30000}, false) == 2000, "one operation: a bucket per tank");
+    ctx.check(h->fluidInTank(0).amount == 1000 && h->fluidInTank(1).amount == 1000, "both tanks got a bucket");
+    for (int i = 0; i < 100 && h->fill({"minecraft:water", 30000}, false) > 0; ++i) {}
+    ctx.check(h->fluidInTank(0).amount == 24000 && h->fluidInTank(1).amount == 24000, "both tanks full (24000 mB)");
     ctx.check(h->fill({"minecraft:lava", 1000}, true) == 0, "no room for lava");
-    ctx.check(upgrade::tank::amountOf(bp, "water") == 30000, "the tank upgrade sees the same water");
-    ctx.check(h->drain({"minecraft:water", 25000}, false) == FluidStack{"minecraft:water", 25000}, "drain 25000 across tanks");
-    ctx.check(h->drainAny(10000, false) == FluidStack{"minecraft:water", 5000}, "drainAny drains the first non-empty tank");
+    ctx.check(upgrade::tank::amountOf(bp, "water") == 48000, "the tank upgrade sees the same water");
+    ctx.check(h->drain({"minecraft:water", 25000}, false) == FluidStack{"minecraft:water", 2000}, "drain collects a bucket from each tank");
+    ctx.check(h->drainAny(10000, false) == FluidStack{"minecraft:water", 1000}, "drainAny drains the first non-empty tank");
+    for (int i = 0; i < 100 && !h->drainAny(10000, false).empty(); ++i) {}
     ctx.check(upgrade::tank::amountOf(bp, "water") == 0, "everything drained");
     // Potions keep their type through the phase-1 storage format.
     FluidStack potion{"minecraft:potion", 500, "{\"potion\":7}"};
@@ -240,8 +244,8 @@ ABP_REGISTER_SELFTEST("api.placed_backpack", [](Context& ctx) -> ll::coro::CoroT
     auto h = caps.blockFluid(site.region(), pos, Side::Up);
     ctx.require(h != nullptr, "the placed backpack has a fluid capability");
     ctx.check(h->tanks() == 1, "one tank");
-    ctx.check(h->fill({"minecraft:lava", 3000}, false) == 3000, "a pipe fills 3000 mB lava");
-    ctx.check(upgrade::tank::amountOf(bp, "lava") == 3000, "the lava is in the backpack's tank");
+    ctx.check(h->fill({"minecraft:lava", 3000}, false) == 1000, "a pipe fills a bucket per operation (SB maxInputOutput)");
+    ctx.check(upgrade::tank::amountOf(bp, "lava") == 1000, "the lava is in the backpack's tank");
     ctx.check(h->drain({"minecraft:lava", 1000}, false).amount == 1000, "and drains it");
     ctx.check(caps.blockEnergy(site.region(), pos) == nullptr, "no battery: no energy capability");
     ctx.check(caps.blockFluid(site.region(), site.at(0, 0)) == nullptr, "stone has none");

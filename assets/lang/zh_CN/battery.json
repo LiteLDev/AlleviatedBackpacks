@@ -1,0 +1,11 @@
+{
+  "abp.battery.name": "电池升级",
+  "abp.battery.tab": "电池",
+  "abp.battery.tab.tooltip": "电池",
+  "abp.battery.contents_tooltip": "{} FE / {} FE",
+  "abp.battery.slot.input": "输入",
+  "abp.battery.slot.output": "输出",
+  "abp.battery.tooltip.energy": "{} FE",
+  "abp.battery.error.exists": "其他升级槽中已经有一个电池升级",
+  "abp.battery.error.energy_high": "背包容纳不下这个电池升级。请升级背包或增加堆叠倍率，使最大能量至少提高到 {} 倍"
+}

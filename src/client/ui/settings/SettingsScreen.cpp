@@ -17,6 +17,7 @@
 #include "client/ui/settings/ItemTransform.h"
 #include "client/tooltip/ContentsTooltip.h"
 #include "client/ui/gfx/Painter.h"
+#include "client/ui/screen/InventoryParts.h"
 #include "client/ui/settings/SettingsIcons.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "client/ui/widgets/TextBox.h"
@@ -706,6 +707,7 @@ void SettingsScreen::render(Painter& p, core::screen::BackpackScreenModel const&
     cs::LayoutInput in;
     in.storageSlots = m.storageSlots;
     in.upgradeSlots = 0;
+    in.columnsTaken = inventoryColumnsTaken(m); // SC SettingsScreen: slots on line - columns taken
     in.screenHeight = static_cast<int>(f.screen.h);
     in.sortButtons  = cs::SortButtonsPosition::Hidden;
     d.layout        = cs::computeLayout(in);
@@ -717,9 +719,9 @@ void SettingsScreen::render(Painter& p, core::screen::BackpackScreenModel const&
     if (!d.layoutLogged) {
         d.layoutLogged = true;
         log().info(
-            "settings screen: layout left={} top={} width={} height={} invLabel={},{} tabs={} scroll={}",
+            "settings screen: layout left={} top={} width={} height={} invLabel={},{} tabs={} scroll={} cols={}",
             d.left, d.top, d.layout.imageWidth, d.layout.imageHeight, d.layout.inventoryLabelX, d.layout.inventoryLabelY, d.tabs.size(),
-            d.layout.scroll
+            d.layout.scroll, d.layout.storageColumns
         );
     }
 

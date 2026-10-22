@@ -18,10 +18,10 @@ Start-Sleep -Milliseconds 600
 $script:S = $null
 function Read-SettingsLayout($mark) {
     $line = Wait-LogLine 'settings screen: layout left=' 15 -Since $mark
-    if ($line -notmatch 'left=([\d.]+) top=([\d.]+) width=(\d+) height=(\d+) invLabel=(\d+),(\d+) tabs=(\d+) scroll=(\w+)') { throw "unexpected settings layout line: $line" }
+    if ($line -notmatch 'left=([\d.]+) top=([\d.]+) width=(\d+) height=(\d+) invLabel=(\d+),(\d+) tabs=(\d+) scroll=(\w+) cols=(\d+)') { throw "unexpected settings layout line: $line" }
     $script:S = [pscustomobject]@{
         Left = [double]$Matches[1]; Top = [double]$Matches[2]; Width = [int]$Matches[3]; Height = [int]$Matches[4]
-        InvX = [int]$Matches[5]; InvY = [int]$Matches[6]; Tabs = [int]$Matches[7]; Inv = 1.0
+        InvX = [int]$Matches[5]; InvY = [int]$Matches[6]; Tabs = [int]$Matches[7]; Cols = [int]$Matches[9]; Inv = 1.0
     }
     $l = Wait-LogLine 'companion: screen layout session=' 15
     if ($l -match 'invGuiScale=([\d.]+)') { $script:S.Inv = [double]$Matches[1] }
@@ -31,7 +31,7 @@ function Px([double]$gx) { ($S.Left + $gx) / $S.Inv }
 function Py([double]$gy) { ($S.Top + $gy) / $S.Inv }
 function S-Move([double]$gx, [double]$gy) { Move-Mouse (Px $gx) (Py $gy) }
 function S-Click([double]$gx, [double]$gy, [switch]$Right) { Click (Px $gx) (Py $gy) -Right:$Right; Start-Sleep -Milliseconds 350 }
-function Slot-Pos([int]$i) { $cols = if ($S.Width -ge 230) { 12 } else { 9 }; @((8 + ($i % $cols) * 18 + 8), (18 + [math]::Floor($i / $cols) * 18 + 8)) }
+function Slot-Pos([int]$i) { $cols = $S.Cols; @((8 + ($i % $cols) * 18 + 8), (18 + [math]::Floor($i / $cols) * 18 + 8)) }
 # Tab i (0 = Back To Backpack): icon centre.
 function Tab-Icon([int]$i) { @(($S.Width + 1 + 8), (4 + 25 * $i + 4 + 8)) }
 # An open tab covers the tab icons below it (SettingsTabControl): close it first, like a player would.

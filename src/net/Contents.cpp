@@ -137,6 +137,10 @@ core::screen::RenderInfo buildRenderInfo(game::Backpack const& backpack) {
         if (s.empty() || !s.enabled) continue;
         if (auto* type = upgrade::upgradeFor(s.item)) r.upgrades.push_back(type->info().id);
     }
+    // Providers only read (the backpack's capacities need non-const accessors).
+    for (auto const& provider : RenderInfoRegistry::entries()) {
+        if (provider) provider(const_cast<game::Backpack&>(backpack), r.extra);
+    }
     return r;
 }
 
