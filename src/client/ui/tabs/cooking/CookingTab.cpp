@@ -15,7 +15,7 @@
 
 #include "client/Client.h"
 #include "client/ui/screen/Tabs.h"
-#include "client/ui/tabs/cooking/CookingFilter.h"
+#include "client/ui/widgets/FilterControl.h"
 #include "client/ui/tabs/crafting/StationWidgets.h"
 #include "client/ui/widgets/SbStyle.h"
 
@@ -81,10 +81,15 @@ public:
         float x    = area.x + 3;
         float y    = area.y + 24;
         float w    = 68;
+        mInput = mFuel = nullptr;
         if (mAuto) {
-            float h = mInput.build(widgets, x, y, send);
-            w       = std::max(w, mInput.width());
-            y      += h + 3;
+            // The shared FilterControl (SC FilterLogicControl.Advanced) for the input filter.
+            mInput = &widgets.add(std::make_unique<FilterControl>("input", send));
+            mInput->setPosition(x, y);
+            mInput->setState(ctx.upgrade.tab.value("inputFilter", nlohmann::json::object()));
+            (void)mInput->consumeSizeChange();
+            w  = std::max(w, mInput->width());
+            y += mInput->height() + 3;
         }
         auto& control = widgets.add(std::make_unique<FurnaceControl>());
         control.rect  = {x, y, 68, 54};
@@ -106,20 +111,27 @@ public:
         }
         y += 54;
         if (mAuto) {
-            y      += 4;
-            float h = mFuel.build(widgets, x, y, send);
-            w       = std::max(w, mFuel.width());
-            y      += h;
+            y    += 4;
+            mFuel = &widgets.add(std::make_unique<FilterControl>("fuel", send));
+            mFuel->setPosition(x, y);
+            mFuel->setState(ctx.upgrade.tab.value("fuelFilter", nlohmann::json::object()));
+            (void)mFuel->consumeSizeChange();
+            w  = std::max(w, mFuel->width());
+            y += mFuel->height();
         }
-        mInput.refresh();
-        mFuel.refresh();
         return {3 + w + 6, y + 6 - area.y};
     }
 
     void update(TabContext const& ctx) override {
         readData(ctx);
-        mInput.refresh();
-        mFuel.refresh();
+        if (mInput) mInput->setState(ctx.upgrade.tab.value("inputFilter", nlohmann::json::object()));
+        if (mFuel) mFuel->setState(ctx.upgrade.tab.value("fuelFilter", nlohmann::json::object()));
+    }
+
+    bool needsRebuild() override {
+        bool a = mInput && mInput->consumeSizeChange();
+        bool b = mFuel && mFuel->consumeSizeChange();
+        return a || b;
     }
 
 private:
@@ -140,16 +152,12 @@ private:
             next.receivedAt = nowSeconds();
         }
         mData = std::move(next);
-        if (mAuto) {
-            mInput.setData(t.value("inputFilter", nlohmann::json::object()));
-            mFuel.setData(t.value("fuelFilter", nlohmann::json::object()));
-        }
     }
 
     bool          mAuto;
     FurnaceData   mData;
-    FilterControl mInput{"input", true};
-    FilterControl mFuel{"fuel", false};
+    FilterControl* mInput = nullptr; ///< owned by the tab's widget group (valid while open)
+    FilterControl* mFuel  = nullptr;
 };
 
 } // namespace

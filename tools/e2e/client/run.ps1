@@ -5,8 +5,17 @@
 .DESCRIPTION
   1. (-Build) builds bin/client/AlleviatedBackpacks via tools/build.ps1 -Target client (before
      taking the lock, so the game is not held while compiling).
-  2. Takes the machine-wide game lock (%APPDATA%\levilauncher.exe\bei-e2e.lock, shared with
-     BEI's harness; waits while another run holds it).
+  2. Takes a game lock: slot 1 (the LeviLauncher instance) uses
+     %APPDATA%\levilauncher.exe\bei-e2e.lock, shared with BEI's and BeetrootSkin's harnesses;
+     slots 2.. (-Slot, headless only) are clone instances with a lock each. Waits while every
+     allowed slot is busy; gives up after -LockTimeoutMinutes with exit code 2. Remote modes
+     start the BDS host only after that, so a queued run holds no server slot.
+
+  Input is headless by default: the LeviHeadlessInput mod (https://github.com/LiteLDev/LeviHeadlessInput,
+  %USERPROFILE%\Desktop\LeviHeadlessInput; $env:LEVI_HEADLESS_INPUT_DIR overrides its bin folder) is
+  deployed with ours and every click, key, text and screenshot goes through its control pipe. The
+  game stays in the background and never takes the real mouse, keyboard or foreground, so the PC
+  stays usable during a run. -Foreground uses real SendInput as before (slot 1 only).
   3. Closes a running game, restores mods a killed run left aside, deploys the mod to
      mods\AlleviatedBackpacks, moves every other mod (e.g. BEI) aside, installs the ABP-Test world.
   4. Runs optional scenarios/<name>.prelaunch.ps1, launches the game, waits for
@@ -39,10 +48,32 @@ param(
     [switch]$KeepOpen,          # leave the game running; the harness waits until you close it, then cleans up
     [switch]$KeepOtherMods,     # do not move other mods (BEI, ...) aside
     [string]$ModDir,            # default: <repo>/bin/client/AlleviatedBackpacks
-    [ValidateSet('local', 'remote-mod', 'remote-vanilla')][string]$Mode = 'local'
+    [ValidateSet('local', 'remote-mod', 'remote-vanilla')][string]$Mode = 'local',
+    [int]$LockTimeoutMinutes = 120,  # give up (exit 2, "NOT RUN") if the game lock is not free by then; 0 = wait forever
+    [int]$SlotWaitMinutes = 3,       # remote modes: no server slot by then -> release the game lock and queue again
+    [int]$HostTimeoutMinutes = 15,   # remote modes: max wait for the BDS host (slot + boot), game lock held
+    [switch]$Foreground,             # real SendInput, game in the foreground (takes over the PC); slot 1 only
+    # Game instances this run may use (headless only); the first free one is taken. Default:
+    # $env:LEVI_E2E_SLOTS ("1,2,3") or 1. Slots 2.. are clones (versions\<base>-hi<N>) made on first
+    # use, so several runs can play at once.
+    [int[]]$Slot
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/lib.ps1"
+
+if (-not $Foreground) {
+    $shim = Join-Path $script:HeadlessInputDir 'harness-shim.ps1'
+    if (-not (Test-Path $shim)) {
+        throw "LeviHeadlessInput is not built ($shim missing). Build it (xmake in its project folder), set `$env:LEVI_HEADLESS_INPUT_DIR, or pass -Foreground to use the real mouse and keyboard."
+    }
+    # Replaces Click/Press-Key/Type-Text/Scroll/Move-Mouse/Focus-Game/Assert-GameForeground/
+    # Set-GameWindowSize and routes [AbpE2E.Native]::Key/MouseButton/... (used by scenarios)
+    # through the mod's pipe.
+    . $shim
+    Register-HeadlessNative ([AbpE2E.Native])
+}
+$slots = if ($Foreground) { @(1) } elseif ($Slot) { $Slot } elseif ($env:LEVI_E2E_SLOTS) {
+    @($env:LEVI_E2E_SLOTS -split '[,; ]+' | Where-Object { $_ } | ForEach-Object { [int]$_ }) } else { @(1) }
 
 $scenarioFile = Join-Path $PSScriptRoot "scenarios/$Scenario.ps1"
 if (-not (Test-Path $scenarioFile)) { throw "Unknown scenario: $scenarioFile" }
@@ -55,32 +86,82 @@ New-Item -ItemType Directory -Force $outDir | Out-Null
 $failures = [System.Collections.Generic.List[string]]::new()
 $script:Mode   = $Mode
 $remote        = $Mode -ne 'local'
-$hostProc      = $null
+$hostInfo      = $null
+$lockTimeout   = $null   # set when the run could not start: "NOT RUN", exit 2
+$lockAcquired  = $false
 $script:HostDir = $null
+
+# Starts the BDS host (server harness, scenario client-host) in a free server slot and waits until
+# it is ready. Called with the game lock held, so a queued run does not hold a slot meanwhile.
+# Returns $null (host killed) when no slot became free within -SlotWaitMinutes: the caller then
+# gives the game lock back instead of blocking the game while every slot is busy.
+function Start-RemoteHost {
+    $script:HostDir = Join-Path $outDir 'host'
+    New-Item -ItemType Directory -Force $script:HostDir | Out-Null
+    $env:ABP_E2E_HOST_DIR = $script:HostDir
+    $env:ABP_E2E_HOST_OWNER_PID = "$PID"
+    $serverRun = Join-Path $PSScriptRoot '../server/run.ps1'
+    $harnessLog = Join-Path $outDir 'host-harness.log'
+    $script:HostProc = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', $serverRun, '-Scenario', 'client-host', '-Quiet', '-TimeoutSec', '7200') `
+        -PassThru -WindowStyle Hidden -RedirectStandardOutput $harnessLog -RedirectStandardError (Join-Path $outDir 'host-harness.err')
+    Write-Step "starting the BDS host (pid $($script:HostProc.Id))"
+    $ready = Join-Path $script:HostDir 'ready.json'
+    $start = Get-Date
+    $deadline = $start.AddMinutes($HostTimeoutMinutes)
+    $slotDeadline = $start.AddMinutes($SlotWaitMinutes)
+    $nextReport = $start.AddSeconds(60)
+    while (-not (Test-Path $ready)) {
+        if ($script:HostProc.HasExited) { throw "the BDS host exited early (see $harnessLog)" }
+        if ((Get-Date) -gt $slotDeadline -and -not (Select-String -Path $harnessLog -Pattern 'acquired server slot' -Quiet -ErrorAction SilentlyContinue)) {
+            Write-Step "no free server slot within $SlotWaitMinutes min; stopping the host"
+            $script:HostProc.Kill($true); $script:HostProc.WaitForExit(15000) | Out-Null
+            $script:HostProc = $null
+            return $null
+        }
+        if ((Get-Date) -gt $deadline) { throw "the BDS host did not get ready in $HostTimeoutMinutes min (see $harnessLog)" }
+        if ((Get-Date) -ge $nextReport) {
+            $last = Get-Content $harnessLog -Tail 1 -ErrorAction SilentlyContinue
+            Write-Step ("waiting for the BDS host ({0:N1} min): {1}" -f ((Get-Date) - $start).TotalMinutes, $last)
+            $nextReport = (Get-Date).AddSeconds(60)
+        }
+        Start-Sleep -Seconds 2
+    }
+    $info = Get-Content $ready -Raw | ConvertFrom-Json
+    if (-not $info.port) { throw "bad $ready" }
+    $script:HostLog = Join-Path $PSScriptRoot '../server/out/client-host/server.log'
+    Write-Step "BDS host ready on port $($info.port) (slot $($info.slot))"
+    return $info
+}
+
+# Asks the host to stop (it shuts the server down and releases its slot); does not wait.
+function Request-HostStop {
+    if ($script:HostProc -and $script:HostDir -and -not $script:HostProc.HasExited) {
+        Set-Content -Path (Join-Path $script:HostDir 'stop') -Value 'stop'
+    }
+}
+
+$script:HostProc = $null
+$script:HostSlotTimedOut = $false
 try {
     if ($Build) { Invoke-ModBuild client; if ($remote) { Invoke-ModBuild server } }
-    if ($remote) {
-        # A BDS slot with the server build; it runs until we write <hostDir>\stop.
-        $script:HostDir = Join-Path $outDir 'host'
-        New-Item -ItemType Directory -Force $script:HostDir | Out-Null
-        $env:ABP_E2E_HOST_DIR = $script:HostDir
-        $serverRun = Join-Path $PSScriptRoot '../server/run.ps1'
-        $hostProc  = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', $serverRun, '-Scenario', 'client-host', '-Quiet', '-TimeoutSec', '7200') `
-            -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $outDir 'host-harness.log') -RedirectStandardError (Join-Path $outDir 'host-harness.err')
-        Write-Step "starting the BDS host (pid $($hostProc.Id))"
-        $ready = Join-Path $script:HostDir 'ready.json'
-        $deadline = (Get-Date).AddMinutes(10)
-        while (-not (Test-Path $ready)) {
-            if ($hostProc.HasExited) { throw "the BDS host exited early (see $outDir\host-harness.log)" }
-            if ((Get-Date) -gt $deadline) { throw 'the BDS host did not get ready in 10 min' }
-            Start-Sleep -Seconds 2
-        }
-        $hostInfo = Get-Content $ready -Raw | ConvertFrom-Json
-        $script:HostLog = Join-Path $PSScriptRoot '../server/out/client-host/server.log'
-        Write-Step "BDS host ready on port $($hostInfo.port)"
+    # Game lock first, then the BDS host: a run queued for the game holds no server slot. If no
+    # slot is free, give the game lock back and queue again (until -LockTimeoutMinutes).
+    $lockDeadline = if ($LockTimeoutMinutes -gt 0) { (Get-Date).AddMinutes($LockTimeoutMinutes) } else { [datetime]::MaxValue }
+    while ($true) {
+        $left = if ($LockTimeoutMinutes -gt 0) { [Math]::Max(1, [int][Math]::Ceiling(($lockDeadline - (Get-Date)).TotalMinutes)) } else { 0 }
+        Enter-E2ELock -TimeoutMinutes $left -Slots $slots
+        if (-not $remote) { break }
+        try { $hostInfo = Start-RemoteHost } catch { Exit-E2ELock; throw }
+        if ($hostInfo) { break }
+        Exit-E2ELock
+        if ((Get-Date) -gt $lockDeadline) { $script:HostSlotTimedOut = $true; throw "no free server slot whenever the game lock was ours (within $LockTimeoutMinutes min)" }
+        Write-Step "released the game lock; queueing again in 30 s"
+        Start-Sleep -Seconds 30
     }
-    Enter-E2ELock
+    $lockAcquired = $true
     try {
+        # A clone instance is made on first use (cheap: hard links); it keeps its own mods and data.
+        if ($script:InstanceSlot -gt 1) { & (Join-Path $script:HeadlessInputDir 'clone-instance.ps1') -Slot $script:InstanceSlot -Source $script:BaseVersion }
         if (Get-GameProcess) { Write-Step "closing a running game first"; Stop-Game }
         Restore-OtherMods
         if ($Mode -eq 'remote-vanilla') {
@@ -89,7 +170,14 @@ try {
             Deploy-Mod $ModDir
         }
         if (-not $KeepOtherMods) { Move-OtherModsAside }
-        if ($remote) { Set-ExternalServer $hostInfo.port } else { Restore-TestWorld }
+        Remove-HeadlessInputLeftover   # of a killed run
+        if ($script:Headless) { Install-HeadlessInputMod -ModsDir $script:ModsDir -PipeName $script:HeadlessPipe }
+        if ($remote) { Set-ExternalServer $hostInfo.port } else {
+            Restore-TestWorld
+            # Single-player test world: games of all slots share one signaling-service ID, and
+            # worlds opened for multiplayer knock each other out ("An error has occurred", "Blaze").
+            if ($script:Headless) { Set-WorldSinglePlayer (Join-Path (Get-WorldsDir) $script:WorldName) }
+        }
         Reset-CameraPerspective
         $prelaunch = Join-Path $PSScriptRoot "scenarios/$Scenario.prelaunch.ps1"
         if (Test-Path $prelaunch) { . $prelaunch }
@@ -129,26 +217,49 @@ try {
     } finally {
         if ($KeepOpen -and (Get-GameProcess)) {
             Write-Step "-KeepOpen: the game stays open; close it to finish the run (lock still held)"
+            if ($script:Headless) {
+                # Hand the game to the human: real mouse and keyboard work again.
+                try { Set-HeadlessBackground $false | Out-Null; Write-Step "headless input off: the game takes real input again" } catch {}
+            }
             while (Get-GameProcess) { Start-Sleep -Seconds 2 }
         }
         Stop-Game
+        Request-HostStop # the host shuts down while we clean up
         if ($remote) { Restore-ExternalServers } else { Remove-TestWorld }
         Remove-DeployedMod
+        Remove-HeadlessInputLeftover
         Restore-OtherMods
         $restore = Join-Path $PSScriptRoot "scenarios/$Scenario.restore.ps1"
         if (Test-Path $restore) { & pwsh -NoProfile -File $restore }
         Exit-E2ELock
     }
 } catch {
-    $failures.Add("harness: $_")
-    Write-Host "[e2e] $($_.ScriptStackTrace)" -ForegroundColor DarkGray
-} finally {
-    if ($hostProc) {
-        Set-Content -Path (Join-Path $script:HostDir 'stop') -Value 'stop'
-        if (-not $hostProc.WaitForExit(120000)) { $hostProc.Kill($true); $failures.Add('BDS host did not stop') }
-        elseif ($hostProc.ExitCode -ne 0) { $failures.Add("BDS host failed (exit $($hostProc.ExitCode), see tools/e2e/server/out/client-host/)") }
-        Remove-Item Env:ABP_E2E_HOST_DIR -ErrorAction SilentlyContinue
+    if (($script:LockTimedOut -and -not $lockAcquired) -or $script:HostSlotTimedOut) {
+        $lockTimeout = "$_"
+    } else {
+        $failures.Add("harness: $_")
+        Write-Host "[e2e] $($_.ScriptStackTrace)" -ForegroundColor DarkGray
     }
+} finally {
+    # Runs on success, failure, timeout and Ctrl+C: never leave the host (and its slot) behind.
+    if ($script:HostProc) {
+        $hp = $script:HostProc
+        if (-not $hostInfo) {
+            # Not ready yet (still waiting for a slot or booting): nobody needs it, kill it now.
+            if (-not $hp.HasExited) { Write-Step "killing the BDS host that never got ready"; $hp.Kill($true) }
+        } else {
+            Request-HostStop
+            if (-not $hp.WaitForExit(120000)) { $hp.Kill($true); $failures.Add('BDS host did not stop') }
+            elseif ($hp.ExitCode -ne 0) { $failures.Add("BDS host failed (exit $($hp.ExitCode), see tools/e2e/server/out/client-host/)") }
+        }
+        Remove-Item Env:ABP_E2E_HOST_DIR, Env:ABP_E2E_HOST_OWNER_PID -ErrorAction SilentlyContinue
+    }
+}
+
+if ($lockTimeout) {
+    Write-Host "[e2e] client scenario '$Scenario' NOT RUN (game lock or server slot not free in time; nothing was tested)" -ForegroundColor Yellow
+    Write-Host "[e2e]   $lockTimeout" -ForegroundColor Yellow
+    exit 2
 }
 
 if ($failures.Count -gt 0) {

@@ -6,8 +6,8 @@ There are two harnesses, one per LeviLamina platform. Both run the real game bin
 |---|---|---|
 | Runs | Bedrock Dedicated Server + LeviLamina 26.51.7 (`bedrock_server_mod.exe`) | Minecraft 1.26.51 through LeviLauncher (instance `1.26.51.01`) |
 | Mod taken from | `bin/server/AlleviatedBackpacks` | `bin/client/AlleviatedBackpacks` |
-| Driven by | console stdin/stdout | real mouse/keyboard input (`SendInput`) and window screenshots |
-| Parallel runs | yes: 3 slots, so 3 runs at a time (more runs wait) | no: one game per machine (lock shared with BEI) |
+| Driven by | console stdin/stdout | **headless input** through the LeviHeadlessInput mod's pipe (game in the background, your mouse/keyboard untouched; `-Foreground` = real `SendInput`) and window screenshots |
+| Parallel runs | yes: 3 slots, so 3 runs at a time (more runs wait) | opt-in game-instance slots (`-Slot` / `$env:LEVI_E2E_SLOTS`, see below); default one game (slot 1, lock shared with BEI and BeetrootSkin) |
 | Speed | ~20 s plus the tests | ~2 min plus the tests |
 | Output | `server/out/<scenario>/` `server.log`, `selftest.json` | `client/out/<scenario>/` `*.png`, `client.log`, `selftest.json` |
 
@@ -19,7 +19,32 @@ pwsh -NoProfile -File tools/e2e/server/run.ps1 -Scenario smoke     # [-Build] [-
 pwsh -NoProfile -File tools/e2e/server/run.ps1 -Scenario full
 pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario smoke     # [-Build] [-KeepOpen] [-KeepOtherMods]
 pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario full
+pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario smoke -Foreground   # real SendInput (takes over the PC)
+pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario smoke -Slot 2       # a clone game instance
 ```
+
+### Headless input and parallel games
+
+Client runs are **headless** by default: [LeviHeadlessInput](https://github.com/LiteLDev/LeviHeadlessInput)
+(clone it to `%USERPROFILE%\Desktop\LeviHeadlessInput` and build it once with `xmake`;
+`$env:LEVI_HEADLESS_INPUT_DIR` can point at another `bin\LeviHeadlessInput`) is deployed next to
+our mod, and its `harness-shim.ps1` replaces `Click`, `Press-Key`, `Type-Text`, `Scroll`,
+`Move-Mouse`, `Focus-Game`, `Assert-GameForeground` and `Set-GameWindowSize` with versions that
+talk to the mod over a pipe; `[AbpE2E.Native]::Key/MouseButton/Wheel/Unicode/MoveRelative` (used
+directly by scenarios) are redirected too, so scenarios need no changes. The game is started
+straight from the instance folder without activation, stays at the back of the Z order, never
+pauses on focus loss, and neither sees nor grabs the real mouse and keyboard (it reads the mouse
+through GDK GameInput; the mod feeds it a virtual one). With `-KeepOpen` the run hands the game
+to the human (headless input off) while it waits.
+
+**Slots.** Slot 1 is the LeviLauncher instance (`bei-e2e.lock`). Slots 2.. are clones,
+`versions\<base>-hi<N>`, made on first use by LeviHeadlessInput's `clone-instance.ps1` (hard links
+and junctions; own `mods\`, `logs\`, worlds) with their own lock `hi<N>-e2e.lock`, so several client
+runs (of this and other projects) can play at once: `-Slot 2`, or `$env:LEVI_E2E_SLOTS = '1,2,3'`
+to take the first free one. Game processes are matched by instance folder, so a run only ever
+focuses or closes its own game. Only enable more slots once every harness on the machine does
+that (BEI's still treats every `Minecraft.Windows` process as its own). Remote modes use one BDS
+server slot each, as before. Windows Firewall may ask once per new clone exe path: Cancel is fine.
 
 ### Client modes (`-Mode`)
 
@@ -61,7 +86,7 @@ the server harness).
 ## Prerequisites
 
 - **Server:** [lip](https://github.com/futrime/lip) on `PATH`. The first `run.ps1` calls `server/install.ps1`. It runs `lip install github.com/LiteLDev/LeviLamina@26.51.7` in an empty folder, which brings in BDS 1.26.51, CrashLogger, PreLoader and PeEditor, and installs everything into `%LOCALAPPDATA%\abp-e2e\bds-base`. This takes about 1–3 minutes, once per machine. `install.ps1 -Force` reinstalls. Set `$env:ABP_E2E_HOME` to use a different folder.
-- **Client:** LeviLauncher at `%USERPROFILE%\Desktop\LeviLauncher.exe` (or `$env:ABP_E2E_LAUNCHER`). The instance `%APPDATA%\levilauncher.exe\versions\1.26.51.01` must have been started and signed in by hand once. The screen must stay unlocked, and no one should use the mouse during a run.
+- **Client:** LeviLauncher at `%USERPROFILE%\Desktop\LeviLauncher.exe` (or `$env:ABP_E2E_LAUNCHER`). The instance `%APPDATA%\levilauncher.exe\versions\1.26.51.01` must have been started and signed in by hand once. The screen must stay unlocked. In headless mode (the default) you can keep using the PC during a run; with `-Foreground` no one should use the mouse.
 
 ## What a run does
 
@@ -88,15 +113,16 @@ The run **fails** if any of these happen:
 
 **Client** (`client/run.ps1`):
 1. Optional `-Build`. This happens before the lock, so the game is not blocked while compiling.
-2. Takes the game lock.
-3. Closes a running game.
-4. Deploys the mod to `mods\AlleviatedBackpacks`, always as a fresh copy.
-5. Moves every other mod except LeviLamina and CrashLogger (BEI, ...) to `versions\1.26.51.01\mods.abp-e2e-aside\`.
-6. Installs the `ABP-Test` world with `LastPlayed` set to now, so it is the first world in the list.
-7. Launches the game, waits for `AlleviatedBackpacks enabled`, clicks Play and then the first world, and waits for `Player Spawned`. If the game shows "Connection timed out (Kelp)", it retries twice, then restarts the game, up to 3 launches.
-8. Runs the scenario.
-9. Checks the log as the server harness does.
-10. **Always** cleans up: closes the game, deletes the `ABP-Test` world, removes our mod, moves the other mods back, runs `scenarios/<name>.restore.ps1` and releases the lock.
+2. Takes the game lock (`-LockTimeoutMinutes`, default 120; `0` waits forever). While waiting it prints `waiting for game lock (<n> min), held by <pid, repo or command line>` every minute. If the lock is not free in time the run exits with code **2** and `NOT RUN` (not a test failure).
+3. Remote modes only: starts the BDS host (server harness, scenario `client-host`) **now, with the game lock held**, and waits up to `-HostTimeoutMinutes` (default 15) for it to be ready. A run queued behind the game lock therefore holds no server slot. If the host gets no slot within `-SlotWaitMinutes` (default 3), the run kills it, **gives the game lock back** and queues again 30 s later, so a slot shortage never blocks the shared game; past `-LockTimeoutMinutes` it exits 2 (`NOT RUN`).
+4. Closes a running game.
+5. Deploys the mod to `mods\AlleviatedBackpacks`, always as a fresh copy.
+6. Moves every other mod except LeviLamina and CrashLogger (BEI, ...) to `versions\1.26.51.01\mods.abp-e2e-aside\`.
+7. Installs the `ABP-Test` world (remote modes: adds the server entry instead) with `LastPlayed` set to now, so it is the first world in the list.
+8. Launches the game, waits for `AlleviatedBackpacks enabled`, clicks Play and then the first world, and waits for `Player Spawned`. If the game shows "Connection timed out (Kelp)", it retries twice, then restarts the game, up to 3 launches.
+9. Runs the scenario.
+10. Checks the log as the server harness does.
+11. **Always** cleans up (also on failure, timeout and Ctrl+C): closes the game, tells the BDS host to stop, deletes the `ABP-Test` world, removes our mod, moves the other mods back, runs `scenarios/<name>.restore.ps1` and releases the game lock, then waits for the host to exit (a host that never got ready is killed at once).
 
 If a run was killed half-way, the next run puts the aside mods back first.
 
@@ -156,9 +182,10 @@ The glob is sent **quoted** (`backpack selftest "core.*"`) because `*` is not va
 
 ## Locks and concurrency
 
-- **Client:** `%APPDATA%\levilauncher.exe\bei-e2e.lock` is the **same file BEI's harness uses**. There is one game per machine, so ABP and BEI runs from any worktree queue behind each other. The harness polls every 15 s and gives up after 2 h.
+- **Client:** `%APPDATA%\levilauncher.exe\bei-e2e.lock` is the **same file BEI's harness uses**. There is one game per machine, so ABP and BEI runs from any worktree queue behind each other. BeetrootSkin uses it too. The harness polls every 15 s, prints the holder every minute and gives up after `-LockTimeoutMinutes` (default 2 h, exit code 2). Other projects only write their pid into the lock file itself (unreadable while held), so the holder is found with the Windows Restart Manager; our runs also write `<lock>.owner`, which adds the repo/worktree when its pid matches.
 - **Server:** each slot `%LOCALAPPDATA%\abp-e2e\slots\<n>\` has a lock `slots\<n>.lock`, so up to `$env:ABP_E2E_SERVER_SLOTS` runs (default 3) go in parallel. Slot n uses UDP port `19200 + 10n` (the next free pair if that is taken). `-Slot n` forces a slot. Installs are serialized by `install.lock` and happen in a temporary folder that is renamed at the end, so concurrent first runs are safe.
 - Every lock is a file opened exclusively. **The OS releases it when the process dies**, so locks never go stale. The holder writes its pid, repo and time to `<lock>.owner`, which a waiting run prints. A server left running by a killed run is killed by the next run that takes the same slot.
+- **Orphaned hosts.** When all slots are busy, a waiting server run checks (at most once a minute) the BDS processes in the slots and kills only orphans: the harness that started it is gone, or it is a `client-host` whose client run is gone, or it is older than `$env:ABP_E2E_HOST_MAX_AGE_MIN` (default 45) minutes and the pid in `slots\<n>.lock.owner` is dead. A host whose owner is alive is never killed. The `client-host` scenario also stops by itself as soon as its client run (`$env:ABP_E2E_HOST_OWNER_PID`) exits. `. tools/e2e/server/lib.ps1; Stop-OrphanedHosts 0,1,2 -DryRun` shows who owns each host.
 - `%LOCALAPPDATA%` is virtualized when the harness is started from a packaged app such as the Claude desktop app. The files then really live in `%LOCALAPPDATA%\Packages\<app>\LocalCache\Local\abp-e2e`. Processes started from the same app see the same files, but Explorer shows the real path. `%APPDATA%\levilauncher.exe` is not affected because that folder already exists.
 
 ## Reading results

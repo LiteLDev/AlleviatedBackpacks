@@ -375,14 +375,29 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         ctx.sendTabAction    = [slot = t.slot](nlohmann::json d) { net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(d)}}); };
         ctx.sendScreenAction = [](nlohmann::json b) { net::sendScreenAction(std::move(b)); };
         t.native->update(ctx);
+        if (t.native->needsRebuild()) {
+            t.widgets.widgets.clear();
+            t.openSize = t.native->build(ctx, t.rect, t.widgets);
+        }
     }
 }
 
+namespace {
+/// An upgrade shows a settings tab when it has settings or a native tab, unless its tab data hides
+/// it (`"hidden": true`, e.g. SB hides the Inception tab by config).
+bool hasTab(cs::UpgradeView const& u) {
+    if (auto h = u.tab.find("hidden"); h != u.tab.end() && h->is_boolean() && h->get<bool>()) return false;
+    return u.hasSettings || (!u.id.empty() && hasNativeTab(u.id));
+}
+} // namespace
+
 void BackpackScreenLayer::rebuildTabs(cs::BackpackScreenModel const& m) {
-    std::string sig;
+    // The upgrade count is part of the signature: a screen without upgrade tabs (e.g. a nested
+    // backpack) must not keep the previous screen's tabs (its signature is empty too).
+    std::string sig = std::to_string(m.upgrades.size()) + "|";
     for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
         auto const& u = m.upgrades[i];
-        if (u.hasSettings || (!u.id.empty() && hasNativeTab(u.id))) sig += std::to_string(i) + ":" + u.id + ";";
+        if (hasTab(u)) sig += std::to_string(i) + ":" + u.id + ";";
     }
     if (sig == mTabsSig && !mTabs.empty()) return;
     mTabsSig = sig;
@@ -391,7 +406,7 @@ void BackpackScreenLayer::rebuildTabs(cs::BackpackScreenModel const& m) {
     mTabs.push_back(TabState{}); // backpack settings
     for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
         auto const& u = m.upgrades[i];
-        if (!(u.hasSettings || (!u.id.empty() && hasNativeTab(u.id)))) continue;
+        if (!hasTab(u)) continue;
         TabState t;
         t.slot   = static_cast<int>(i);
         t.native = createNativeTab(u.id);

@@ -39,7 +39,7 @@
     "abp.companion.button.upgrade_switch_inactive": "INACTIVE",
     "abp.key.open_backpack": "Open Backpack",
     "abp.key.inventory_interaction": "Deposit / restock at a container",
-    "abp.key.tool_swap": "Swap to the right tool",
+    "abp.key.tool_swap": "Swap tool based on current block/entity",
     "abp.key.toggle_upgrade_1": "Alt+ toggle upgrade 1",
     "abp.key.toggle_upgrade_2": "Alt+ toggle upgrade 2",
     "abp.key.toggle_upgrade_3": "Alt+ toggle upgrade 3",

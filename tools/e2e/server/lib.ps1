@@ -64,6 +64,7 @@ function Enter-ServerSlot([int]$TimeoutMinutes = 120, [int]$Slot = -1) {
     $candidates = if ($Slot -ge 0) { @($Slot) } else { 0..($script:SlotCount - 1) }
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
     $announced = $false
+    $nextOrphanCheck = Get-Date
     while ($true) {
         foreach ($n in $candidates) {
             $s = Enter-FileLockOnce (Join-Path $script:SlotsDir "$n.lock")
@@ -75,10 +76,73 @@ function Enter-ServerSlot([int]$TimeoutMinutes = 120, [int]$Slot = -1) {
                 return
             }
         }
+        if ((Get-Date) -ge $nextOrphanCheck) {
+            # All busy: free slots whose hosts belong to a run that is gone.
+            $killed = Stop-OrphanedHosts $candidates
+            $nextOrphanCheck = (Get-Date).AddSeconds(60)
+            if ($killed -gt 0) { Start-Sleep -Seconds 2; continue }
+        }
         if (-not $announced) { Write-Step "all $($candidates.Count) server slot(s) busy; waiting"; $announced = $true }
         if ((Get-Date) -gt $deadline) { throw "Timed out waiting for a free server slot" }
         Start-Sleep -Seconds 5
     }
+}
+
+# Hosts older than this are killed when the pid recorded as their slot-lock holder is dead.
+$script:HostMaxAgeMinutes = if ($env:ABP_E2E_HOST_MAX_AGE_MIN) { [int]$env:ABP_E2E_HOST_MAX_AGE_MIN } else { 45 }
+
+# Kills BDS hosts in busy slots that no live run owns. A server in slot n is started by a
+# server/run.ps1 (the harness, which holds <n>.lock); for the client harness's remote modes that
+# harness runs scenario client-host and is itself started by client/run.ps1 (the owner). A host is
+# an orphan when
+#   - its harness is gone, or
+#   - it is a client-host and its owning client run is gone, or
+#   - it is older than $script:HostMaxAgeMinutes and the pid in <n>.lock.owner is dead.
+# A host whose harness and owner are alive is never touched. Returns the number of hosts killed.
+function Stop-OrphanedHosts([int[]]$Slots, [switch]$DryRun) {
+    $procs = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate, CommandLine, ExecutablePath -ErrorAction SilentlyContinue)
+    $byId = @{}
+    foreach ($p in $procs) { $byId[[int]$p.ProcessId] = $p }
+    # The parent, if it is still the process that started $p (pids are reused on Windows).
+    $parentOf = {
+        param($p)
+        $q = $byId[[int]$p.ParentProcessId]
+        if ($q -and $q.CreationDate -le $p.CreationDate) { $q } else { $null }
+    }
+    $killed = 0
+    foreach ($bds in $procs) {
+        if (-not $bds.ExecutablePath -or $bds.ExecutablePath -notmatch '\\slots\\(\d+)\\bedrock_server_mod\.exe$') { continue }
+        $n = [int]$Matches[1]
+        if ($n -notin $Slots) { continue }
+        $slotExe = Join-Path (Join-Path $script:SlotsDir "$n") 'bedrock_server_mod.exe'
+        if ($bds.ExecutablePath -ne $slotExe) { continue }   # another E2E home: not ours to judge
+        $harness = & $parentOf $bds
+        $reason = $null
+        if (-not $harness) {
+            $reason = 'its harness is gone'
+        } elseif ($harness.CommandLine -match '-Scenario\s+client-host\b') {
+            if (-not (& $parentOf $harness)) { $reason = "its client run (pid $($harness.ParentProcessId)) is gone" }
+        }
+        $ageMin = ((Get-Date) - $bds.CreationDate).TotalMinutes
+        if (-not $reason -and $ageMin -gt $script:HostMaxAgeMinutes) {
+            # The real lock holder (Restart Manager), not the best-effort .owner file. Unknown = keep.
+            $holders = @(try { Get-FileHolderPids (Join-Path $script:SlotsDir "$n.lock") } catch { @() })
+            if ($holders -and -not @($holders | Where-Object { $byId[[int]$_] })) {
+                $reason = "it is $([int]$ageMin) min old and its slot-lock holder (pid $($holders -join ',')) is dead"
+            }
+        }
+        if (-not $reason) { if ($DryRun) { Write-Step "slot $($n): host pid $($bds.ProcessId) ($([int]$ageMin) min) is owned by a live run" }; continue }
+        if ($DryRun) { Write-Step "slot $($n): would kill host pid $($bds.ProcessId): $reason"; continue }
+        # Kill the harness tree when it is still around (it holds the slot lock), else the server.
+        $target = if ($harness) { $harness.ProcessId } else { $bds.ProcessId }
+        Write-Step "slot $($n): killing orphaned host (server pid $($bds.ProcessId), $([int]$ageMin) min old): $reason"
+        try {
+            $p = [System.Diagnostics.Process]::GetProcessById([int]$target)
+            $p.Kill($true); $p.WaitForExit(15000) | Out-Null
+            $killed++
+        } catch { Write-Step "could not kill pid $($target): $_" }
+    }
+    return $killed
 }
 
 function Exit-ServerSlot {

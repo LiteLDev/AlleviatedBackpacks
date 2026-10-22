@@ -1,11 +1,13 @@
 // Selftests for the Filter upgrade: `backpack selftest "filter.*"`.
 
 #include "mc/world/actor/player/Inventory.h"
+#include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "game/ItemConv.h"
 #include "game/Storage.h"
+#include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
@@ -163,7 +165,11 @@ ABP_REGISTER_SELFTEST("filter.advanced_match_options", [](Context& ctx) {
     filtering::store(bctx, UpgradeTier::Basic, f); // tag filter with no ghosts
     auto loaded = filtering::load(bctx, UpgradeTier::Basic);
     ctx.check(loaded.matchBy == core::MatchBy::Item && loaded.tags.empty() && loaded.ghosts.size() == 9, "basic normalized");
-    ctx.check(inserted(*basic, "minecraft:stone", kAutomation) == 1, "basic: empty item filter allows all");
+    // SC: an empty allow list matches nothing, an empty block list everything.
+    ctx.check(inserted(*basic, "minecraft:stone", kAutomation) == 0, "basic: empty allow list refuses");
+    loaded.mode = core::FilterMode::Deny;
+    filtering::store(bctx, UpgradeTier::Basic, loaded);
+    ctx.check(inserted(*basic, "minecraft:stone", kAutomation) == 1, "basic: empty block list allows all");
 });
 
 ABP_REGISTER_SELFTEST("filter.priority_over_void", [](Context& ctx) {
@@ -197,6 +203,10 @@ ABP_REGISTER_SELFTEST("filter.settings_menu", [](Context& ctx) -> ll::coro::Coro
     (void)mm.simulate(p, {Action::Place, {Where::Cursor, 0}, {Where::Menu, 8}, 2});
     (void)mm.simulate(p, {Action::Place, {Where::Cursor, 0}, {Where::Inventory, 4}, 2});
     ctx.check(filtering::load(uctx, UpgradeTier::Basic).ghosts[8].id == "minecraft:apple", "ghost saved");
+    // SB: a new filter is a block list; the type button (control slot 0) makes it an allow list.
+    ctx.check(filtering::load(uctx, UpgradeTier::Basic).mode == core::FilterMode::Deny, "block list by default");
+    (void)mm.simulate(p, {Action::Take, {Where::Menu, control}, {Where::Cursor, 0}, 1});
+    ctx.check(filtering::load(uctx, UpgradeTier::Basic).mode == core::FilterMode::Allow, "allow list");
     // Slot 9 is a filler in a basic filter (only 9 ghost slots).
     (void)mm.simulate(p, {Action::Take, {Where::Inventory, 4}, {Where::Cursor, 0}, 2});
     (void)mm.simulate(p, {Action::Place, {Where::Cursor, 0}, {Where::Menu, 9}, 2});
@@ -231,6 +241,84 @@ ABP_REGISTER_SELFTEST("filter.settings_menu", [](Context& ctx) -> ll::coro::Coro
     std::string reason;
     ctx.require(install(other, 0, *item, nullptr, &reason), "reinstall: " + reason);
     ctx.check(inserted(*other, "minecraft:dirt", kAutomation) == 0, "filter kept after moving the upgrade");
+});
+
+
+// ---- native tab API (FilterTab.h) ---------------------------------------------------------------
+
+/// Runs one tab action through the registered handlers, like the native screen does.
+bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+    auto* type = upgradeFor(ctx.state().item);
+    for (auto const& h : net::TabActionRegistry::entries()) {
+        bool match = type && (h.upgrade == type->info().id || h.upgrade == type->info().groupOrId());
+        if (match && h.handle && h.handle(player, ctx, data)) return true;
+    }
+    return false;
+}
+nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
+    auto*          type = upgradeFor(ctx.state().item);
+    nlohmann::json out  = nlohmann::json::object();
+    for (auto const& p : net::TabDataRegistry::entries()) {
+        bool match = type && (p.upgrade == type->info().id || p.upgrade == type->info().groupOrId());
+        if (match && p.data) out.update(p.data(player, ctx));
+    }
+    return out;
+}
+
+ABP_REGISTER_SELFTEST("filter.tab_actions", [](Context& ctx) {
+    auto&          p    = ctx.player();
+    auto           bp   = ctx.createBackpack(Tier::Leather);
+    int            slot = ctx.installUpgrade(bp, "advanced_filter");
+    UpgradeContext uctx(bp, slot, &p);
+    auto           tab = tabData(p, uctx);
+    ctx.require(tab.contains("filter"), "tab data has the filter state");
+    auto const& s = tab["filter"];
+    ctx.check(s.value("slots", 0) == 16 && s.value("perRow", 0) == 4 && s.value("advanced", false), "16 slots, 4 per row, advanced");
+    ctx.check(s.value("type", std::string{}) == "contents" && s.value("typeState", -1) == 1, "contents type, block list (SB default)");
+    ctx.check(!tab.value("tabLabel", std::string{}).empty() && !tab.value("tabTooltip", std::string{}).empty(), "tab title and tooltip");
+
+    // Filter slot with the cursor item; duplicates are refused; an empty cursor clears.
+    p.mPlayerUIContainer->setItem(0, game::ItemConv::make("minecraft:apple", 5));
+    ctx.check(tabAction(p, uctx, {{"filter", "filter"}, {"op", "slot"}, {"index", 3}}), "slot action handled");
+    ctx.check(filtering::load(uctx, UpgradeTier::Advanced).ghosts[3].id == "minecraft:apple", "apple ghost");
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "slot"}, {"index", 4}});
+    ctx.check(filtering::load(uctx, UpgradeTier::Advanced).ghosts[4].empty(), "duplicate refused");
+    ctx.check(p.mPlayerUIContainer->getItem(0).mCount == 5, "cursor untouched (ghost slot)");
+    p.mPlayerUIContainer->setItem(0, ItemStack{});
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "slot"}, {"index", 3}});
+    ctx.check(filtering::load(uctx, UpgradeTier::Advanced).ghosts[3].empty(), "empty cursor clears");
+
+    // Type: block -> storage -> allow; tags mode skips storage.
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "type"}});
+    ctx.check(filtering::load(uctx, UpgradeTier::Advanced).contentsType() == core::ContentsFilterType::Storage, "storage");
+    ctx.check(!tabData(p, uctx)["filter"].value("slotsEnabled", true), "slots disabled in storage mode");
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "primary"}});
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "primary"}});
+    auto f = filtering::load(uctx, UpgradeTier::Advanced);
+    ctx.check(f.matchBy == core::MatchBy::Tag && f.contentsType() == core::ContentsFilterType::Allow, "tags: storage -> allow");
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "addTag"}, {"tag", "minecraft:logs"}});
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "addTag"}, {"tag", "minecraft:logs"}});
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "anyTag"}});
+    f = filtering::load(uctx, UpgradeTier::Advanced);
+    ctx.check(f.tags == std::vector<std::string>{"minecraft:logs"} && !f.matchAnyTag, "tag added once, match all");
+    ctx.check(inserted(*bp, "minecraft:birch_log", kAutomation) == 1, "tag filter applies to automation");
+    ctx.check(inserted(*bp, "minecraft:dirt", kAutomation) == 0, "tag filter refuses dirt");
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "removeTag"}, {"tag", "minecraft:logs"}});
+    ctx.check(filtering::load(uctx, UpgradeTier::Advanced).tags.empty(), "tag removed");
+    // Durability / NBT are hidden (refused) in tags mode.
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "dur"}});
+    ctx.check(!filtering::load(uctx, UpgradeTier::Advanced).matchDurability, "no durability in tags mode");
+    // Direction.
+    ctx.check(tabAction(p, uctx, {{"op", "direction"}}), "direction handled");
+    ctx.check(directionOf(uctx) == Direction::Input, "direction input");
+
+    // Basic: only the type button.
+    auto           basic = ctx.createBackpack(Tier::Leather);
+    int            bslot = ctx.installUpgrade(basic, "pickup");
+    UpgradeContext bctx(basic, bslot, &p);
+    (void)tabAction(p, bctx, {{"filter", "filter"}, {"op", "primary"}});
+    ctx.check(filtering::load(bctx, UpgradeTier::Basic).matchBy == core::MatchBy::Item, "basic: no primary match button");
+    ctx.check(tabData(p, bctx)["filter"].value("perRow", 0) == 3, "basic: 3 per row");
 });
 
 } // namespace

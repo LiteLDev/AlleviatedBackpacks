@@ -8,6 +8,7 @@
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockPos.h"
 #include "mc/world/level/BlockSource.h"
+#include "mc/world/level/GameType.h"
 #include "mc/world/level/block/Block.h"
 
 #include "game/BackpackItem.h"
@@ -102,16 +103,21 @@ ABP_REGISTER_SELFTEST("refill.settings_roundtrip", [](Context& ctx) {
         load(UpgradeContext(bp, 1), kAdvancedSlots).filter.ghosts[0].id == "minecraft:torch",
         "filter travels with the item"
     );
-    // Matching: NBT only when asked.
+    // Matching (SB isSameItemSameComponents): the same item with the same NBT only.
     auto named = game::ItemConv::make("minecraft:diamond_sword", 1);
     game::ItemConv::setDisplay(named, "Named");
     auto         namedData = game::ItemConv::toData(named);
     auto         plain     = data("minecraft:diamond_sword", 1);
     core::Filter f(1);
-    ctx.check(matchesGhost(f, plain, namedData), "id match ignores NBT by default");
-    f.matchNbt = true;
-    ctx.check(!matchesGhost(f, plain, namedData), "match NBT distinguishes named items");
+    ctx.check(matchesGhost(f, plain, plain), "the same item matches");
+    ctx.check(!matchesGhost(f, plain, namedData), "a named item is another item");
     ctx.check(!matchesGhost(f, plain, data("minecraft:iron_sword", 1)), "other items never match");
+    ctx.check(kBasicSlots == 6 && slotsInRow(false) == 3 && slotsInRow(true) == 4, "SB slot counts: 6 (3 per row) / 12 (4 per row)");
+    // SB onFilterChange: a cleared filter slot loses its target; no duplicates.
+    UpgradeContext u1(bp, 1);
+    ctx.check(!setGhost(u1, true, 5, data("minecraft:torch", 1)), "duplicate refused");
+    ctx.check(setGhost(u1, true, 0, {}) && load(u1, kAdvancedSlots).targets[0] == Target::Any, "cleared slot back to any");
+    ctx.check(previousTarget(Target::Any) == static_cast<Target>(kTargetCount - 1), "scroll back wraps to hotbar 9");
 });
 
 ABP_REGISTER_SELFTEST("refill.basic_tops_up", [](Context& ctx) -> ll::coro::CoroTask<> {
@@ -140,14 +146,13 @@ ABP_REGISTER_SELFTEST("refill.basic_tops_up", [](Context& ctx) -> ll::coro::Coro
         countAt(player, 5) == 5 && countIn(*bp, "minecraft:dirt") == 50,
         "items outside the filter are untouched"
     );
-    // The stack runs out (last block placed): it comes back into the same slot.
+    // The stack runs out: SB refills into the first free slot.
     clearSlot(player, 4);
-    co_await ctx.ticks(25);
+    co_await ctx.ticks(10); // SB cooldown: 5 ticks
     ctx.check(
-        idAt(player, 4) == "minecraft:cobblestone" && countAt(player, 4) == 46,
-        "refilled into the slot it ran out in"
+        idAt(player, 0) == "minecraft:cobblestone" && countAt(player, 0) == 46,
+        "refilled into the first free slot"
     );
-    ctx.check(idAt(player, 0).empty(), "not put into the first free slot");
     ctx.check(countIn(*bp, "minecraft:cobblestone") == 0, "backpack emptied of cobblestone");
 });
 
@@ -170,11 +175,13 @@ ABP_REGISTER_SELFTEST("refill.disabled_or_menu_open", [](Context& ctx) -> ll::co
     upgrade::setEnabled(bp, slot, true);
     ctx.check(refillNow(player, UpgradeContext(bp, slot), false) == 64, "enabled: one pass refills");
     ctx.check(countIn(*bp, "minecraft:arrow") == 0, "arrows moved to the player");
-    // No refill while a menu is open.
+    // SB: the item on the cursor counts towards the stack.
     bp->inventory().insert(data("minecraft:arrow", 64), kInternal);
     for (int i = 0; i < 8; ++i) clearSlot(player, i);
     ctx.require(ui::BackpackMenu::openBackpack(player, bp), "open menu");
-    ctx.check(refillNow(player, UpgradeContext(bp, slot), false) == 0, "paused while a menu is open");
+    player.mPlayerUIContainer->setItem(0, game::ItemConv::make("minecraft:arrow", 20));
+    ctx.check(refillNow(player, UpgradeContext(bp, slot), false) == 44, "refills while a menu is open, counting the cursor");
+    player.mPlayerUIContainer->setItem(0, ItemStack::EMPTY_ITEM());
     ui::MenuManager::get().close(player);
 });
 
@@ -206,14 +213,15 @@ ABP_REGISTER_SELFTEST("refill.advanced_targets", [](Context& ctx) -> ll::coro::C
     ctx.check(!off.isNull() && off.getTypeName() == "minecraft:totem_of_undying", "totem in the offhand");
     ctx.check(countIn(*bp, "minecraft:totem_of_undying") == 1, "one totem left (max stack 1)");
     ctx.check(idAt(player, 0) == "minecraft:bread" && countAt(player, 0) == 64, "main hand bread topped up");
-    // The bread runs out in the hand: refilled. Selecting another empty slot doesn't fill it.
+    // The bread runs out in the hand: refilled (SB fills an empty main hand).
     clearSlot(player, 0);
-    co_await ctx.ticks(25);
+    co_await ctx.ticks(10);
     ctx.check(idAt(player, 0) == "minecraft:bread" && countAt(player, 0) == 37, "hand refilled after running out");
+    bp->inventory().insert(data("minecraft:bread", 5), kInternal);
     player.setSelectedSlot(3);
     player.sendInventory(true);
-    co_await ctx.ticks(25);
-    ctx.check(idAt(player, 3).empty(), "an empty slot selected later is not filled");
+    co_await ctx.ticks(10);
+    ctx.check(idAt(player, 3) == "minecraft:bread" && countAt(player, 3) == 5, "an empty selected slot is filled too");
     // A different item in the target slot is left alone.
     player.getInventory().setItem(2, game::ItemConv::make("minecraft:dirt", 1));
     player.sendInventory(false);
@@ -252,9 +260,11 @@ ABP_REGISTER_SELFTEST("refill.pick_block", [](Context& ctx) -> ll::coro::CoroTas
     player.sendInventory(true);
     ctx.check(pickFromBackpacks(player, data("minecraft:emerald_block", 1)), "pick with a full hotbar");
     ctx.check(idAt(player, 4) == "minecraft:emerald_block" && countAt(player, 4) == 3, "picked into the selected slot");
-    bool moved = false;
-    for (int i = 9; i < 36; ++i) moved = moved || (idAt(player, i) == "minecraft:dirt" && countAt(player, i) == 5);
-    ctx.check(moved, "held item moved to the main inventory");
+    ctx.check(countIn(*bp, "minecraft:dirt") == 5, "SB: the held item goes into the backpack");
+    player.setPlayerGameType(GameType::Creative);
+    bp->inventory().insert(data("minecraft:diamond_block", 3), kInternal);
+    ctx.check(!pickFromBackpacks(player, data("minecraft:diamond_block", 1)), "never in creative");
+    player.setPlayerGameType(GameType::Survival);
 
     // The block-position path (BlockPickRequestPacket): a gold block placed next to the player.
     auto&    region = player.getDimensionBlockSource();
@@ -363,16 +373,6 @@ ABP_REGISTER_SELFTEST("refill.menu", [](Context& ctx) -> ll::coro::CoroTask<> {
         load(uc, kAdvancedSlots).targets[0] == Target::Offhand,
         "target button cycles (any -> main hand -> offhand)"
     );
-    (void)mm.simulate(
-        player,
-        {
-            Action::Take,
-            {Where::Menu,   48},
-            {Where::Cursor, 0 },
-            1
-    }
-    ); // NBT toggle
-    ctx.check(load(uc, kAdvancedSlots).filter.matchNbt, "NBT toggle");
     co_await ctx.ticks(3);
     ctx.check(mm.shownItem(player, 0).getTypeName() == "minecraft:iron_ingot", "ghost displayed");
     ctx.check(mm.shownItem(player, 9).getTypeName() == "minecraft:shield", "offhand target icon");
