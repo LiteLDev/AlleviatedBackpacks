@@ -25,8 +25,8 @@ pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario smoke -Slot 2       # a
 
 ### Headless input and parallel games
 
-Client runs are **headless** by default: [LeviHeadlessInput](../../../LeviHeadlessInput/README.md)
-(sibling project `%USERPROFILE%\Desktop\LeviHeadlessInput`, build it once with `xmake`;
+Client runs are **headless** by default: [LeviHeadlessInput](https://github.com/LiteLDev/LeviHeadlessInput)
+(clone it to `%USERPROFILE%\Desktop\LeviHeadlessInput` and build it once with `xmake`;
 `$env:LEVI_HEADLESS_INPUT_DIR` can point at another `bin\LeviHeadlessInput`) is deployed next to
 our mod, and its `harness-shim.ps1` replaces `Click`, `Press-Key`, `Type-Text`, `Scroll`,
 `Move-Mouse`, `Focus-Game`, `Assert-GameForeground` and `Set-GameWindowSize` with versions that

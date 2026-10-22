@@ -11,7 +11,7 @@
      allowed slot is busy; gives up after -LockTimeoutMinutes with exit code 2. Remote modes
      start the BDS host only after that, so a queued run holds no server slot.
 
-  Input is headless by default: the LeviHeadlessInput mod (sibling project,
+  Input is headless by default: the LeviHeadlessInput mod (https://github.com/LiteLDev/LeviHeadlessInput,
   %USERPROFILE%\Desktop\LeviHeadlessInput; $env:LEVI_HEADLESS_INPUT_DIR overrides its bin folder) is
   deployed with ours and every click, key, text and screenshot goes through its control pipe. The
   game stays in the background and never takes the real mouse, keyboard or foreground, so the PC
