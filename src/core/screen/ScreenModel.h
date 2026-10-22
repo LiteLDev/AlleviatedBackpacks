@@ -65,8 +65,8 @@ struct BackpackScreenModel {
     bool                       nested      = false;    ///< opened from inside another backpack
     int                        lockedSlot  = -1;       ///< player inventory slot of this backpack
     double                     stackMultiplier = 1;
-    std::uint32_t              mainColor   = core::kDefaultMainColor;
-    std::uint32_t              accentColor = core::kDefaultAccentColor;
+    std::uint32_t              mainColor   = 0xFFCC613A;
+    std::uint32_t              accentColor = 0xFF622E1A;
     /// Red error overlay (SC `renderErrorOverlay`): message + highlighted slots.
     std::string                errorMessage;
     std::vector<int>           errorUpgradeSlots;
@@ -109,8 +109,8 @@ struct ContentsModel {
 struct RenderInfo {
     std::string              uuid;
     int                      tier        = 0;
-    std::uint32_t            mainColor   = core::kDefaultMainColor;
-    std::uint32_t            accentColor = core::kDefaultAccentColor;
+    std::uint32_t            mainColor   = 0xFFCC613A;
+    std::uint32_t            accentColor = 0xFF622E1A;
     std::vector<std::string> upgrades; ///< ids of the installed, enabled upgrades (slot order)
     nlohmann::json           extra = nlohmann::json::object();
 

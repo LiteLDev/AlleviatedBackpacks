@@ -9,7 +9,12 @@ There are two harnesses, one per LeviLamina platform. Both run the real game bin
 | Driven by | console stdin/stdout | **headless input** through the LeviHeadlessInput mod's pipe (game in the background, your mouse/keyboard untouched; `-Foreground` = real `SendInput`) and window screenshots |
 | Parallel runs | yes: 3 slots, so 3 runs at a time (more runs wait) | opt-in game-instance slots (`-Slot` / `$env:LEVI_E2E_SLOTS`, see below); default one game (slot 1, lock shared with BEI and BeetrootSkin) |
 | Speed | ~20 s plus the tests | ~2 min plus the tests |
-| Output | `server/out/<scenario>/` `server.log`, `selftest.json` | `client/out/<scenario>/` `*.png`, `client.log`, `selftest.json` |
+| Output | `server/out/<scenario>/` (or `-OutName`) `server.log`, `selftest.json` | `client/out/<scenario>/` on game slot 1, `client/out/<scenario>-slot<N>/` on slots 2..: `*.png`, `client.log`, `selftest.json`, `host/` |
+
+Parallel client runs of the same scenario on different game slots therefore never overwrite each
+other's screenshots or logs. In remote modes each client run's BDS host writes to
+`server/out/client-host-<unit>/` (`<unit>` = the client output folder name), not a shared
+`server/out/client-host/`.
 
 Prefer the **server** harness for logic: it is fast, headless and parallel, and the selftests can spawn SimulatedPlayers there. Use the **client** for UI, rendering and anything that needs a real player. Both exit `0` on pass and `1` on fail.
 
@@ -60,8 +65,8 @@ pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario companion -Mode remote-
 pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario vanilla-refused -Mode remote-vanilla
 ```
 
-How the remote modes work: `run.ps1` starts `server/run.ps1 -Scenario client-host` in the
-background with `$env:ABP_E2E_HOST_DIR` (`client/out/<scenario>/host/`). The host writes
+How the remote modes work: `run.ps1` starts `server/run.ps1 -Scenario client-host -OutName client-host-<unit>` in the
+background with `$env:ABP_E2E_HOST_DIR` (`client/out/<unit>/host/`). The host writes
 `ready.json` with its UDP port, runs console commands dropped as `cmd-*.txt`
 (`Send-HostConsole 'cmd'`) and stops when `stop` appears. The client joins it through Play >
 Servers > "+ Add server" (name, `127.0.0.1`, port) > "Add and play" (screenshots `join-*.png`;
