@@ -71,7 +71,8 @@ function V-Move([string]$key) { $p = V-Pos $key; Move-Mouse $p[0] $p[1] }
 # A slot $dx columns / $dy rows away from a seen slot (18 GUI units per slot).
 function V-MoveFrom([string]$key, [int]$dx, [int]$dy) { $p = V-Pos $key; Move-Mouse ($p[0] + $dx * 18 / $V.Inv) ($p[1] + $dy * 18 / $V.Inv) }
 function V-Click([string]$key, [switch]$Right) {
-    $p = V-Pos $key; Move-Mouse $p[0] $p[1]; Start-Sleep -Milliseconds 250; Click $p[0] $p[1] -Right:$Right; Start-Sleep -Milliseconds 400
+    $p = V-Pos $key; Move-Mouse ($p[0] + 3) ($p[1] + 3); Start-Sleep -Milliseconds 150; Move-Mouse $p[0] $p[1]; Start-Sleep -Milliseconds 250
+    Click $p[0] $p[1] -Right:$Right; Start-Sleep -Milliseconds 400
     # Let the game finish the right-button gesture (hold / drag) before the next click elsewhere.
     if ($Right) { Move-Mouse ($p[0] + 2) ($p[1] + 2); Start-Sleep -Milliseconds 500 }
 }
@@ -203,6 +204,13 @@ Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 900
 Save-Screenshot 'chest-b-closed-to-game' | Out-Null
 
+# Fresh items for the inventory part (the chest part moved some around).
+Invoke-Chat '/clear @s'
+$mark = Get-LogMark
+Invoke-Chat '/backpack input setup'
+Wait-LogLine 'input setup: A=' 15 -Since $mark | Out-Null
+Press-Key '9'
+Start-Sleep -Milliseconds 500
 # ---- Vanilla inventory: tooltips, stashing, B ---------------------------------
 $mark = Get-LogMark
 Open-Inventory
