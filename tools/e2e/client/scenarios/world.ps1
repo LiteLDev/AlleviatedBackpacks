@@ -23,6 +23,16 @@ function Read-Layout($mark) {
 function Gui-Move([double]$gx, [double]$gy) { Move-Mouse (($L.Left + $gx) / $L.Inv) (($L.Top + $gy) / $L.Inv) }
 function Gui-Click([double]$gx, [double]$gy, [switch]$Right) { Click (($L.Left + $gx) / $L.Inv) (($L.Top + $gy) / $L.Inv) -Right:$Right; Start-Sleep -Milliseconds 450 }
 function Hotbar-Pos([int]$i) { @(($L.InvX + 8 + $i * 18), ($L.InvY + 12 + 54 + 4 + 8)) }
+# Remote: a chat opened right after a screen closed can get lost. Retries until `pattern` is logged.
+function Invoke-ChatUntil([string]$text, [string]$pattern, [int]$tries = 3) {
+    for ($t = 0; $t -lt $tries; $t++) {
+        Start-Sleep -Milliseconds 1000
+        $m = Get-LogMark
+        Invoke-Chat $text
+        try { return (Wait-LogLine $pattern 8 -Since $m) } catch { Write-Step "no '$pattern' after '$text'; retrying" }
+    }
+    throw "'$text' never logged '$pattern'"
+}
 
 # ---- Ender Linker ---------------------------------------------------------------------------------
 Invoke-Chat '/clear @s'
@@ -99,9 +109,7 @@ Start-Sleep -Milliseconds 800
 
 # ---- another player's backpack ----------------------------------------------------------------------
 Press-Key '5' # empty hand
-$mark = Get-LogMark
-Invoke-Chat '/backpack world target'
-Wait-LogLine 'world target: spawned abp_e2e_target wearing backpack' 15 -Since $mark | Out-Null
+Invoke-ChatUntil '/backpack world target' 'world target: spawned abp_e2e_target wearing backpack' | Out-Null
 Start-Sleep -Milliseconds 1500
 Save-Screenshot 'target-back' | Out-Null
 $mark = Get-LogMark
@@ -116,15 +124,11 @@ Start-Sleep -Milliseconds 800
 Invoke-Chat '/backpack world untarget'
 
 # ---- /sbp ----------------------------------------------------------------------------------------------
-$mark = Get-LogMark
-Invoke-Chat '/sbp list'
-Wait-LogLine 'sbp: list -> [1-9]\d* backpacks' 10 -Since $mark | Out-Null
+Invoke-ChatUntil '/sbp list' 'sbp: list -> [1-9]\d* backpacks' | Out-Null
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'sbp-list' | Out-Null # the chat lines show on the HUD for a few seconds
 
-$mark = Get-LogMark
-Invoke-Chat "/sbp give @s $netheriteUuid"
-Wait-LogLine "sbp: gave backpack $netheriteUuid to 1 players" 10 -Since $mark | Out-Null
+Invoke-ChatUntil "/sbp give @s $netheriteUuid" "sbp: gave backpack $netheriteUuid to 1 players" | Out-Null
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'sbp-give' | Out-Null
 Assert-NoErrors
