@@ -89,6 +89,11 @@ struct KeyActionExtension {
 };
 using KeyActionRegistry = StaticRegistry<KeyActionExtension>;
 
+/// Extra per-backpack render data (`RenderInfo::extra`), e.g. the tank fluids / battery charge
+/// that SB's backpack model shows (Tank: "tanks" {"left","right"}, Battery: "battery").
+using RenderInfoProvider = std::function<void(game::Backpack& backpack, nlohmann::json& extra)>;
+using RenderInfoRegistry = StaticRegistry<RenderInfoProvider>;
+
 /// The model `player` sees for `menu` (session 0, containerId -1).
 [[nodiscard]] core::screen::BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu);
 /// Session id of the player's open native screen (0 = none).
@@ -123,6 +128,9 @@ struct ScreenClickInterceptRegistrar {
 struct KeyActionRegistrar {
     explicit KeyActionRegistrar(KeyActionExtension h) { KeyActionRegistry::add(std::move(h)); }
 };
+struct RenderInfoRegistrar {
+    explicit RenderInfoRegistrar(RenderInfoProvider p) { RenderInfoRegistry::add(std::move(p)); }
+};
 } // namespace detail
 
 } // namespace abp::net
@@ -141,3 +149,6 @@ struct KeyActionRegistrar {
 /// Adds a key action (see `abp::net::KeyActionExtension`).
 #define ABP_REGISTER_KEY_ACTION(...)                                                                                   \
     static ::abp::net::detail::KeyActionRegistrar ABP_UNIQUE(abp_key_action_)(__VA_ARGS__)
+/// Adds render info data (see `abp::net::RenderInfoProvider`).
+#define ABP_REGISTER_RENDER_INFO(...)                                                                                  \
+    static ::abp::net::detail::RenderInfoRegistrar ABP_UNIQUE(abp_render_info_)(__VA_ARGS__)

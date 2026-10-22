@@ -1,0 +1,5 @@
+{
+  "abp_battery_upgrade": {
+    "textures": "textures/items/battery_upgrade"
+  }
+}

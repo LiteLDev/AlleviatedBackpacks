@@ -1,0 +1,11 @@
+{
+  "abp.battery.name": "Battery Upgrade",
+  "abp.battery.tab": "Batt.",
+  "abp.battery.tab.tooltip": "Battery",
+  "abp.battery.contents_tooltip": "{} FE out of {} FE",
+  "abp.battery.slot.input": "Input",
+  "abp.battery.slot.output": "Output",
+  "abp.battery.tooltip.energy": "{} FE",
+  "abp.battery.error.exists": "There's already Battery Upgrade in another upgrade slot",
+  "abp.battery.error.energy_high": "Backpack can't support this battery upgrade. Upgrade backpack or add stack multiplier to get at least {}x higher max energy"
+}

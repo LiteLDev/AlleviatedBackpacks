@@ -241,8 +241,10 @@ bool canInstall(
         return false;
     }
     if (auto const& gate = installGate(); gate && !gate(backpack, *type, player, why)) return false;
-    return type->canInstall(UpgradeContext(backpack, slot, player), why);
+    return type->canInstallItem(UpgradeContext(backpack, slot, player), item.withCount(1), why);
 }
+
+nlohmann::json settingsOf(core::ItemStackData const& item) { return extractSettings(item).second; }
 
 namespace {
 /// Puts `item` into the (free) slot and runs onInstall. No checks, no hook rebuild.
