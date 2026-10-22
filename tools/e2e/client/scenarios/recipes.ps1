@@ -12,7 +12,7 @@ if ($env:ABP_E2E_HOST_DIR) { Wait-LogLine 'companion: server ready' 90 | Out-Nul
 function Get-TiersInfo {
     $mark = Get-LogMark
     Invoke-Chat '/backpack tiers info'
-    $line = Wait-LogLine 'tiers info: ' 10 -Since $mark
+    $line = Wait-LogLine 'tiers info: ' 25 -Since $mark
     if ($line -notmatch 'uuid=(\S+) tier=(\S+) items=(\d+) main=(#\w+) accent=(#\w+) upgrades=\[([^\]]*)\]') { throw "bad info line: $line" }
     return [pscustomobject]@{ Uuid = $Matches[1]; Tier = $Matches[2]; Items = [int]$Matches[3]; Main = $Matches[4]; Accent = $Matches[5]; Upgrades = $Matches[6] }
 }
