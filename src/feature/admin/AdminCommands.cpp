@@ -1,12 +1,10 @@
-// Admin sub-commands of `/backpack` (alias `/abp`). Permission: `admin.commandPermissionLevel`
-// (operators by default; the server console always qualifies).
+// AlleviatedBackpacks' admin extras of `/backpack` (alias `/abp`), beside SB's `/sbp` (list, give,
+// removeNonPlayer: SbpCommands.cpp, also reachable as `/backpack ...`). Permission:
+// `admin.commandPermissionLevel` (operators by default; the server console always qualifies).
 //
-//   /backpack list [holder]               stored backpacks: uuid, tier, fill, upgrades, holders
 //   /backpack info <uuid>                 details of one stored backpack
 //   /backpack stats                       storage statistics
-//   /backpack give <player> <uuid>        give a backpack item bound to an existing backpack
 //   /backpack remove <uuid>               delete a backpack's storage
-//   /backpack removenonplayer             delete backpacks no player ever carried (mob loot)
 //   /backpack cleanup                     delete empty, unused backpack storage (orphans)
 //   /backpack openfor <uuid>              open any backpack's GUI (players only)
 //   /backpack reload                      (foundation) reloads configs; rules apply at once
@@ -21,11 +19,11 @@
 #include "mc/server/commands/CommandOrigin.h"
 #include "mc/server/commands/CommandOutput.h"
 #include "mc/server/commands/CommandPermissionLevel.h"
-#include "mc/server/commands/CommandSelector.h"
 #include "mc/world/actor/Actor.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
+#include "feature/admin/AccessLog.h"
 #include "feature/admin/Admin.h"
 #include "game/BackpackItem.h"
 #include "game/Storage.h"
@@ -42,17 +40,9 @@ namespace abp::admin {
 struct AdminUuidParams {
     std::string uuid;
 };
-struct AdminListParams {
-    std::string holder;
-};
-struct AdminGiveParams {
-    CommandSelector<Player> player;
-    std::string             uuid;
-};
 
 namespace {
 
-constexpr std::size_t kMaxListLines   = 100;
 constexpr int         kOpenDelayTicks = 10; ///< let the chat screen close before the GUI opens
 
 Player* playerOf(CommandOrigin const& origin) {
@@ -117,30 +107,7 @@ std::string summaryLine(CommandOrigin const& origin, Summary const& s) {
     );
 }
 
-void list(CommandOrigin const& origin, CommandOutput& output, std::string const& holder) {
-    if (!allowed(origin, output)) return;
-    auto all = listBackpacks(holder);
-    output.success(
-        holder.empty() ? say(origin, "abp.admin.list.header", "{} stored backpacks:", all.size())
-                       : say(origin, "abp.admin.list.header_holder", "{} backpacks of {}:", all.size(), holder)
-    );
-    for (std::size_t i = 0; i < all.size() && i < kMaxListLines; ++i) output.success(summaryLine(origin, all[i]));
-    if (all.size() > kMaxListLines) {
-        output.success(say(origin, "abp.admin.list.more", "... and {} more", all.size() - kMaxListLines));
-    }
-    log().info("admin: list{} -> {} backpacks", holder.empty() ? "" : " " + holder, all.size());
-}
-
 void registerCommands(ll::command::CommandHandle& cmd) {
-    cmd.overload().text("list").execute([](CommandOrigin const& origin, CommandOutput& output) {
-        list(origin, output, {});
-    });
-    cmd.overload<AdminListParams>().text("list").required("holder").execute(
-        [](CommandOrigin const& origin, CommandOutput& output, AdminListParams const& params) {
-            list(origin, output, params.holder);
-        }
-    );
-
     cmd.overload<AdminUuidParams>().text("info").required("uuid").execute(
         [](CommandOrigin const& origin, CommandOutput& output, AdminUuidParams const& params) {
             if (!allowed(origin, output)) return;
@@ -183,7 +150,7 @@ void registerCommands(ll::command::CommandHandle& cmd) {
         output.success(say(
             origin,
             "abp.admin.stats.line",
-            "Backpacks: {} stored ({} loaded), {} items; empty: {}, never carried: {}, unreadable: {}, kept on death: {}",
+            "Backpacks: {} stored ({} loaded), {} items; empty: {}, never opened: {}, unreadable: {}, kept on death: {}",
             s.stored,
             s.loaded,
             s.items,
@@ -196,54 +163,17 @@ void registerCommands(ll::command::CommandHandle& cmd) {
         log().info("admin: stats stored={} loaded={} empty={} never_carried={}", s.stored, s.loaded, s.empty, s.neverAccessed);
     });
 
-    cmd.overload<AdminGiveParams>().text("give").required("player").required("uuid").execute(
-        [](CommandOrigin const& origin, CommandOutput& output, AdminGiveParams const& params) {
-            if (!allowed(origin, output)) return;
-            auto uuid = resolve(origin, output, params.uuid);
-            if (!uuid) return;
-            auto bp = game::Storage::get().find(*uuid);
-            if (!bp) return output.error(say(origin, "abp.admin.err.uuid_unknown", "No backpack with uuid {}.", *uuid));
-            // One target only: every copy shares the same storage, so handing it to a crowd by
-            // accident (`@a`) would make the contents reachable from several places at once.
-            auto    targets = params.player.results(origin);
-            Player* target  = nullptr;
-            int     matched = 0;
-            for (auto* p : targets) {
-                if (!p) continue;
-                target = p;
-                ++matched;
-            }
-            if (matched == 0) return output.error(say(origin, "abp.admin.err.no_target", "No player matched."));
-            if (matched > 1) {
-                return output.error(
-                    say(origin, "abp.admin.err.one_target", "Select exactly one player (the copy shares the storage).")
-                );
-            }
-            auto item = game::makeBackpackItem(bp->tier(), *uuid);
-            if (item.isNull()) return output.error("Backpack items are not registered (behavior pack missing?).");
-            if (!target->addAndRefresh(item)) target->drop(item, false);
-            output.success(say(origin, "abp.admin.give.ok", "Gave backpack {} to {}.", *uuid, target->getRealName()));
-            log().info("admin: gave backpack {} to {}", *uuid, target->getRealName());
-        }
-    );
-
     cmd.overload<AdminUuidParams>().text("remove").required("uuid").execute(
         [](CommandOrigin const& origin, CommandOutput& output, AdminUuidParams const& params) {
             if (!allowed(origin, output)) return;
             auto uuid = resolve(origin, output, params.uuid);
             if (!uuid) return;
             game::Storage::get().erase(*uuid);
+            AccessLog::get().erase(*uuid);
             output.success(say(origin, "abp.admin.remove.ok", "Removed backpack {}.", *uuid));
             log().info("admin: removed backpack {}", *uuid);
         }
     );
-
-    cmd.overload().text("removenonplayer").execute([](CommandOrigin const& origin, CommandOutput& output) {
-        if (!allowed(origin, output)) return;
-        auto removed = removeNonPlayer();
-        output.success(say(origin, "abp.admin.removenonplayer.ok", "Removed {} backpacks no player ever carried.", removed.size()));
-        log().info("admin: removenonplayer -> {}", removed.size());
-    });
 
     cmd.overload().text("cleanup").execute([](CommandOrigin const& origin, CommandOutput& output) {
         if (!allowed(origin, output)) return;

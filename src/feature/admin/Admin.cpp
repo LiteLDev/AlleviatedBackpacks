@@ -1,8 +1,12 @@
-// Admin unit (U20): server rules (item deny-list, disabled upgrades, nesting depth, keep backpacks
-// on death) and the bookkeeping behind the admin commands (holder tracking, listing, cleanup).
-// The commands themselves live in AdminCommands.cpp.
+// Admin unit: server rules (SB `disallowedItems` / `containerItemsDisallowed` /
+// `maxUpgradesPerStorage`, the AlleviatedBackpacks extras disabled upgrades, nesting depth and keep
+// on death) and the bookkeeping behind the admin commands (SB's access log, holder tracking,
+// listing, cleanup). The commands live in SbpCommands.cpp (`/sbp`) and AdminCommands.cpp
+// (`/backpack` extras).
 
 #include "feature/admin/Admin.h"
+#include "feature/admin/AccessLog.h"
+#include "feature/admin/SbConfig.h"
 
 #include <algorithm>
 #include <cctype>
@@ -16,6 +20,7 @@
 #include "ll/api/event/player/PlayerDieEvent.h"
 #include "ll/api/event/player/PlayerJoinEvent.h"
 #include "ll/api/event/server/ServerStartedEvent.h"
+#include "ll/api/event/server/ServerStoppingEvent.h"
 #include "ll/api/event/world/ServerLevelTickEvent.h"
 #include "ll/api/service/Bedrock.h"
 
@@ -29,11 +34,13 @@
 #include "mc/world/level/storage/db_helpers/Category.h"
 
 #include "core/Codec.h"
+#include "core/Format.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "game/Storage.h"
 #include "mod/Config.h"
+#include "mod/I18n.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
 #include "ui/menu/BackpackMenu.h"
@@ -295,6 +302,18 @@ std::unordered_set<std::string>& inspected() {
 } // namespace
 
 void markInspected(std::string const& uuid) { inspected().insert(uuid); }
+bool isInspected(std::string const& uuid) { return inspected().contains(uuid); }
+
+namespace {
+std::vector<ProtectedUuidProvider>& protectedProviders() {
+    static std::vector<ProtectedUuidProvider> v;
+    return v;
+}
+} // namespace
+
+void addProtectedUuidProvider(ProtectedUuidProvider provider) {
+    if (provider) protectedProviders().push_back(provider);
+}
 
 namespace {
 struct PendingOpen {
@@ -335,16 +354,19 @@ void openLater(Player& player, std::shared_ptr<game::Backpack> backpack, std::st
 // ---- rules API -----------------------------------------------------------------------------------
 
 bool isDisallowed(std::string_view itemId) {
-    auto const& list = cfg().disallowedItems;
-    if (list.empty()) return false;
-    auto id = lower(itemId);
-    for (auto const& raw : list) {
-        if (raw.empty()) continue;
-        auto pattern = lower(raw);
-        if (pattern.find(':') == std::string::npos) pattern = "minecraft:" + pattern;
-        if (core::globMatch(pattern, id)) return true;
-    }
-    return false;
+    // SB: container items (canFitInsideContainerItems false) other than backpacks.
+    if (sbServer().containerItemsDisallowed && game::isShulkerBox(itemId)) return true;
+    auto id      = lower(itemId);
+    auto matches = [&](std::vector<std::string> const& list) {
+        for (auto const& raw : list) {
+            if (raw.empty()) continue;
+            auto pattern = lower(raw);
+            if (pattern.find(':') == std::string::npos) pattern = "minecraft:" + pattern;
+            if (core::globMatch(pattern, id)) return true;
+        }
+        return false;
+    };
+    return matches(sbServer().disallowedItems) || matches(cfg().disallowedItems); // + the deprecated admin.json list
 }
 
 bool isUpgradeDisabled(std::string_view id, std::string_view group) {
@@ -361,6 +383,84 @@ bool isUpgradeDisabled(std::string_view id, std::string_view group) {
         s.resize(s.size() - std::string_view("_upgrade").size());
         return s == wantId || s == wantGroup;
     });
+}
+
+namespace {
+/// SB / SC upgrade group names (`maxUpgradesPerStorage` keys) -> our upgrade groups.
+std::string_view sbGroupAlias(std::string_view group) {
+    if (group == "stack") return "stack_upgrades";
+    if (group == "cooking") return "furnace_upgrades";
+    if (group == "jukebox") return "jukebox_upgrades";
+    return {};
+}
+
+std::string pathOf(std::string_view id) {
+    auto colon = id.find(':');
+    return lower(colon == std::string_view::npos ? id : id.substr(colon + 1));
+}
+
+/// Name for SC's message: the upgrade group's SC name, else the upgrade's item name.
+std::string groupDisplayName(std::string_view group, Player* player) {
+    auto key      = "abp.admin.upgrade_group." + std::string(group);
+    auto fallback = std::string(group);
+    if (group == "stack") fallback = "Stack Upgrades";
+    else if (group == "cooking") fallback = "Furnace Upgrades";
+    else if (group == "jukebox") fallback = "Jukebox Upgrades";
+    return player ? trFor(*player, key, fallback) : tr(key, fallback);
+}
+} // namespace
+
+std::string backpackDisplayName(core::Tier tier, Player const* player) {
+    static constexpr std::string_view kNames[] =
+        {"Leather Backpack", "Copper Backpack", "Iron Backpack", "Gold Backpack", "Diamond Backpack", "Netherite Backpack"};
+    auto i   = static_cast<std::size_t>(tier);
+    auto key = "abp.admin.backpack_name." + std::string(core::tierInfo(tier).id);
+    auto fb  = i < std::size(kNames) ? kNames[i] : std::string_view("Backpack");
+    return player ? trFor(*player, key, fb) : tr(key, fb);
+}
+
+bool withinMaxUpgrades(game::Backpack const& backpack, std::string_view itemId, std::string_view group, Player* player, std::string* reason) {
+    auto const& entries = sbServer().maxUpgradesPerStorage;
+    if (entries.empty()) return true;
+    auto itemPath  = pathOf(itemId);
+    auto groupName = lower(group);
+    auto alias     = sbGroupAlias(groupName);
+    for (auto const& e : entries) {
+        auto bar = e.find('|');
+        if (bar == std::string::npos) continue;
+        auto name = pathOf(std::string_view(e).substr(0, bar));
+        int  max  = 0;
+        try {
+            max = std::stoi(e.substr(bar + 1));
+        } catch (...) {
+            continue;
+        }
+        bool byItem  = name == itemPath;
+        bool byGroup = !byItem && (name == groupName || (!alias.empty() && name == alias));
+        if (!byItem && !byGroup) continue;
+        int count = 0;
+        for (auto const& s : backpack.data().upgrades) {
+            if (s.empty()) continue;
+            if (byItem && pathOf(s.item.id) == itemPath) ++count;
+            if (byGroup) {
+                if (auto* u = upgrade::upgradeFor(s.item); u && lower(u->info().groupOrId()) == groupName) ++count;
+            }
+        }
+        if (count < max) continue;
+        if (reason) {
+            auto what = byItem ? std::string(itemId) : groupDisplayName(groupName, player);
+            if (byItem) {
+                if (auto* u = upgrade::upgradeFor(core::ItemStackData::of(std::string(itemId), 1))) {
+                    what = upgrade::displayName(*u, player);
+                }
+            }
+            auto storage = backpackDisplayName(backpack.tier(), player);
+            *reason      = player ? trFor(*player, "abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", max, what, storage)
+                                  : tr("abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", max, what, storage);
+        }
+        return false;
+    }
+    return true;
 }
 
 int nestedDepth(std::string const& uuid, int limit) { return depthRec(uuid, limit, 0); }
@@ -416,7 +516,7 @@ HolderRecord holderOf(game::Backpack const& backpack) {
 }
 
 bool playerAccessed(game::Backpack const& backpack) {
-    return holderOf(backpack).first.has_value() || isLegacy(backpack.uuid());
+    return AccessLog::get().contains(backpack.uuid()) || holderOf(backpack).first.has_value() || isLegacy(backpack.uuid());
 }
 
 // ---- queries / maintenance ---------------------------------------------------------------------------
@@ -499,6 +599,9 @@ std::vector<std::string> removeWhere(Pred&& pred) {
     auto&                    storage = game::Storage::get();
     auto                     list    = carriedNow();
     std::unordered_set<std::string> carried(list.begin(), list.end());
+    for (auto provider : protectedProviders()) {
+        for (auto& u : provider()) carried.insert(std::move(u));
+    }
     for (auto const& uuid : storage.storedUuids()) {
         if (carried.contains(uuid)) continue;
         auto bp = storage.find(uuid);
@@ -507,15 +610,34 @@ std::vector<std::string> removeWhere(Pred&& pred) {
         if (!pred(*bp)) continue;
         bp.reset();
         storage.erase(uuid);
+        AccessLog::get().erase(uuid);
         removed.push_back(uuid);
     }
     return removed;
 }
 } // namespace
 
-std::vector<std::string> removeNonPlayer() {
-    auto removed = removeWhere([](game::Backpack const& bp) { return !playerAccessed(bp); });
-    if (!removed.empty()) log().info("admin: removed {} backpacks no player ever carried", removed.size());
+std::vector<std::string> removeNonPlayer(bool onlyWithEmptyInventory) {
+    auto const& log_ = AccessLog::get();
+    auto removed = removeWhere([&](game::Backpack& bp) {
+        // SB: no access log record (and, with onlyWithEmptyInventory, no items, no upgrades and no
+        // other backpack data). Backpacks players had before the access log existed count as
+        // accessed (legacy / holder records) so updating never deletes them.
+        if (log_.contains(bp.uuid()) || holderOf(bp).first || isLegacy(bp.uuid())) return false;
+        if (!onlyWithEmptyInventory) return true;
+        auto const& d = bp.data();
+        if (!bp.inventory().isEmpty()) return false;
+        for (auto const& u : d.upgrades)
+            if (!u.empty()) return false;
+        core::BackpackData const defaults;
+        if (d.mainColor != defaults.mainColor || d.accentColor != defaults.accentColor) return false;
+        if (d.settings.is_object()) {
+            for (auto const& [k, _] : d.settings.items())
+                if (k != kSettingsKey) return false;
+        }
+        return true;
+    });
+    if (!removed.empty()) log().info("admin: removed {} non player backpacks", removed.size());
     return removed;
 }
 
@@ -615,6 +737,63 @@ bool hasStash(Player const& player) {
     return it != stashes().end() && !it->second.empty();
 }
 
+// ---- access log ---------------------------------------------------------------------------------------
+
+namespace {
+
+/// SB logs every backpack GUI open (BackpackContainer constructor): item, uuid, player, name,
+/// colours, time, columns taken. Admin inspection (`/backpack openfor`) is not a player access.
+void recordAccess(Player& player, ui::BackpackMenu& menu) {
+    auto const& bp = menu.backpack();
+    if (!bp || player.isClientSide() || isInspected(bp->uuid())) return;
+    std::string itemId = game::backpackItemId(bp->tier());
+    std::string name;
+    if (auto const& src = menu.source()) {
+        auto const& stack = game::itemAt(player, *src);
+        if (game::isBackpack(stack)) {
+            itemId = stack.getTypeName();
+            name   = stack.getCustomName();
+        }
+    }
+    if (name.empty()) {
+        auto tier = game::backpackTierOf(itemId);
+        name      = backpackDisplayName(tier.value_or(bp->tier()));
+    }
+    AccessLog::get().logPlayerAccess(player, itemId, *bp, name);
+}
+
+/// The access log replaces phase-1's "who carried it" records for `removeNonPlayer`: a world that
+/// had backpacks before the log existed gets a record for every backpack a player held (last
+/// holder, last seen), so `/sbp list` shows them and `removeNonPlayer` keeps them.
+void migrateHolderRecords() {
+    auto& accessLog = AccessLog::get();
+    if (accessLog.size() > 0) return;
+    auto& storage = game::Storage::get();
+    int   n       = 0;
+    for (auto const& uuid : storage.storedUuids()) {
+        auto bp = storage.find(uuid);
+        if (!bp) continue;
+        auto h = holderOf(*bp);
+        if (!h.last) continue;
+        AccessLogRecord r;
+        r.backpackItemRegistryName = game::backpackItemId(bp->tier());
+        r.backpackUuid             = uuid;
+        r.playerName               = h.last->name;
+        r.backpackName             = backpackDisplayName(bp->tier());
+        r.clothColor               = bp->data().mainColor;
+        r.trimColor                = bp->data().accentColor;
+        r.accessTime               = h.lastSeen * 1000;
+        accessLog.put(std::move(r));
+        ++n;
+    }
+    if (n > 0) {
+        accessLog.save();
+        log().info("admin: {} holder records added to the access log", n);
+    }
+}
+
+} // namespace
+
 // ---- module -------------------------------------------------------------------------------------------
 
 class AdminModule {
@@ -624,6 +803,11 @@ public:
         upgrade::setTypeGate([](upgrade::IUpgrade const& u) {
             return !isUpgradeDisabled(u.info().id, u.info().groupOrId());
         });
+        upgrade::setInstallGate(
+            [](std::shared_ptr<game::Backpack> const& bp, upgrade::IUpgrade const& u, Player* player, std::string& reason) {
+                return withinMaxUpgrades(*bp, u.info().itemId, u.info().groupOrId(), player, &reason);
+            }
+        );
         upgrade::addRuleBuilder("admin", &buildRules);
         static bool reloadHooked = false;
         if (!reloadHooked) {
@@ -634,6 +818,7 @@ public:
         }
         auto& bus = ll::event::EventBus::getInstance();
         mListeners.push_back(bus.emplaceListener<ll::event::ServerStartedEvent>([](auto&) { onWorld(); }));
+        mListeners.push_back(bus.emplaceListener<ll::event::ServerStoppingEvent>([](auto&) { AccessLog::get().save(); }));
         mListeners.push_back(bus.emplaceListener<ll::event::PlayerDieEvent>([](ll::event::PlayerDieEvent& ev) {
             auto& player = ev.self();
             if (player.isClientSide()) return;
@@ -649,6 +834,17 @@ public:
         mListeners.push_back(bus.emplaceListener<ll::event::ServerLevelTickEvent>([this](ll::event::ServerLevelTickEvent& ev) {
             tick(ev.level());
         }));
+        ui::MenuManager::Observer o;
+        o.beforeShow = [](Player& player, ui::Menu& menu, int) {
+            if (auto* bm = dynamic_cast<ui::BackpackMenu*>(&menu)) {
+                try {
+                    recordAccess(player, *bm);
+                } catch (std::exception const& e) {
+                    log().error("admin: access log failed: {}", e.what());
+                }
+            }
+        };
+        mObserver = ui::MenuManager::get().addObserver(std::move(o));
         if (game::Storage::get().available()) onWorld(); // BDS: the world already exists
         applyRules();
     }
@@ -657,8 +853,11 @@ public:
         auto& bus = ll::event::EventBus::getInstance();
         for (auto& l : mListeners) bus.removeListener(l);
         mListeners.clear();
+        ui::MenuManager::get().removeObserver(mObserver);
+        AccessLog::get().save();
         upgrade::removeRuleBuilder("admin");
         pendingOpens().clear();
+        upgrade::setInstallGate(nullptr);
         upgrade::setTypeGate(nullptr);
         gInstalled = false;
         applyRules();
@@ -670,8 +869,11 @@ private:
         legacy() = {};
         inspected().clear();
         pendingOpens().clear();
+        AccessLog::get().clear();
         if (!game::Storage::get().available()) return;
+        AccessLog::get().load();
         loadOrMarkLegacy();
+        migrateHolderRecords();
         if (auto level = ll::service::getLevel()) {
             level->forEachPlayer([](Player& p) {
                 if (!p.isClientSide()) loadStash(p);
@@ -683,6 +885,7 @@ private:
     void tick(Level& level) {
         ++mTicks;
         runPendingOpens(level);
+        if (mTicks % 600 == 0) AccessLog::get().save(); // every 30 s, like the storage
         bool scan  = mTicks % std::max(1, cfg().holderScanInterval) == 0;
         bool quick = mTicks % kRestoreTicks == 0; // stash restore + open-menu check
         if (!scan && !quick) return;
@@ -692,7 +895,7 @@ private:
             if (quick && hasStash(player)) restoreStash(player);
             if (quick && menus.sessionCount() > 0) {
                 // A backpack opened for the first time gets its storage now; mark it as a player's
-                // right away so `removenonplayer` can't race the periodic scan. Only unowned ones:
+                // right away so maintenance can't race the periodic scan. Only unowned ones:
                 // admins inspecting with `openfor` don't become holders.
                 if (auto menu = std::dynamic_pointer_cast<ui::BackpackMenu>(menus.current(player))) {
                     auto const& bp = menu->backpack();
@@ -709,7 +912,8 @@ private:
     }
 
     std::vector<ll::event::ListenerPtr> mListeners;
-    std::int64_t                        mTicks = 0;
+    std::int64_t                        mTicks    = 0;
+    int                                 mObserver = 0;
 };
 
 } // namespace abp::admin
