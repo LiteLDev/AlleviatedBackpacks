@@ -149,20 +149,29 @@ Save-Screenshot 'leather-drag-done' | Out-Null
 # Cursor holds the rest (29 - 9 - 9 = 11): put it into slot 12 again.
 Gui-Click $p12[0] $p12[1]
 
-# Shift + double-click: the first click moves slot 24's cobblestone, the second every other
-# cobblestone stack of the storage (vanilla lastQuickMoved).
-$p24 = Storage-Pos 24
-$mark = Get-LogMark
-With-Key 0x10 {
-    # Two clicks within vanilla's 250 ms double-click window.
-    Gui-Move $p24[0] $p24[1]
-    # Headless input is a polled virtual mouse: hold each press for a few frames (80 ms).
-    [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 80; [AbpE2E.Native]::MouseButton(0, $true)
-    Start-Sleep -Milliseconds 90
-    [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 80; [AbpE2E.Native]::MouseButton(0, $true)
-    Start-Sleep -Milliseconds 400
+# Shift + double-click: the first click moves a cobblestone stack, the second (within vanilla's
+# 250 ms) every other cobblestone stack of the storage (vanilla lastQuickMoved). The headless input
+# pipe adds latency, so the pair is retried on another cobblestone slot when it came too slowly.
+$quickOk = $false
+foreach ($slot in 24, 0, 12, 6, 13) {
+    $ps = Storage-Pos $slot
+    $mark = Get-LogMark
+    With-Key 0x10 {
+        Gui-Move $ps[0] $ps[1]
+        [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 30; [AbpE2E.Native]::MouseButton(0, $true)
+        Start-Sleep -Milliseconds 20
+        [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 30; [AbpE2E.Native]::MouseButton(0, $true)
+        Start-Sleep -Milliseconds 400
+    }
+    try {
+        Wait-LogLine 'native screen action: quickMoveAll by .* \(ok\)' 4 -Since $mark | Out-Null
+        $quickOk = $true
+        break
+    } catch {
+        Write-Step "shift + double-click on slot $slot came too slowly, retrying"
+    }
 }
-Wait-LogLine 'native screen action: quickMoveAll by .* \(ok\)' 10 -Since $mark | Out-Null
+if (-not $quickOk) { throw 'shift + double-click never reached quickMoveAll' }
 Start-Sleep -Milliseconds 500
 Save-Screenshot 'leather-quick-move-all' | Out-Null
 Close-Backpack

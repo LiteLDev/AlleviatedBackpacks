@@ -1283,6 +1283,8 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         // Vanilla: a second Shift + left click on the same slot within 250 ms also moves every other
         // stack of the last shift-clicked item (mouseReleased with `lastQuickMoved`).
         bool quickAll     = button == MouseButton::Left && slot == mLastShiftClick && t - mLastShiftClickAt < 0.25;
+        log().debug("companion: shift click {} {} (previous {} {}, {:.0f} ms ago) -> {}", areaName(slot.area), slot.index,
+                    areaName(mLastShiftClick.area), mLastShiftClick.index, (t - mLastShiftClickAt) * 1000, quickAll ? "move all" : "click");
         mLastShiftClick   = slot;
         mLastShiftClickAt = quickAll ? -10 : t;
         mLastClick        = {};
