@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 namespace abp::core::capacity {
 
 /// Sophisticated Backpacks' sizing rules for the Battery and Tank upgrades (defaults are SB's
@@ -26,5 +28,22 @@ inline constexpr double kStackMultiplierRatio = 1.0;
 [[nodiscard]] int tankCapacity(int rows, double stackMultiplier, int capacityPerSlotRow = kTankPerSlotRow, double ratio = kStackMultiplierRatio);
 /// Tank mB moved per operation: max(1000, maxInputOutput x rows x adjusted multiplier).
 [[nodiscard]] int tankMaxInOut(int rows, double stackMultiplier, int maxInputOutput = kTankMaxInputOutput, double ratio = kStackMultiplierRatio);
+/// Pump mB moved per operation with tanks / pipes: max(1000, maxInputOutput x rows x
+/// (1 + (int)(ratio x (stackMultiplier - 1)))) (SC `PumpUpgradeWrapper.getMaxInOut`: the pump's
+/// adjusted multiplier is truncated to an int).
+[[nodiscard]] int pumpMaxInOut(int rows, double stackMultiplier, int maxInputOutput = 20, double ratio = kStackMultiplierRatio);
+
+/// SB's "... to get at least %sx higher capacity" value: `required` (contents / capacity after
+/// the change) rounded up to one decimal, printed like Java's `DecimalFormat("0.#")` ("1.5", "2").
+[[nodiscard]] std::string formatRequiredMultiplier(double required);
+
+// ---- inventory columns taken by upgrade inventory parts (Tank, Battery) ---------------------------
+
+/// Storage slots left when `columns` columns of a `baseSlots` layout are taken by upgrade
+/// inventory parts: `baseSlots - slotRows(baseSlots) * columns` (never negative).
+[[nodiscard]] int slotsAfterColumns(int baseSlots, int columns);
+/// The inverse of `slotsAfterColumns`: the layout's base slot count for `slots` remaining storage
+/// slots with `columns` taken (`slots` itself when no column is taken).
+[[nodiscard]] int baseSlotsFor(int slots, int columns);
 
 } // namespace abp::core::capacity
