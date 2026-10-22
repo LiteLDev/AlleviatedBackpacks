@@ -319,9 +319,17 @@ ABP_REGISTER_SELFTEST("wearable.mob_spawns_with_backpack", [](Context& ctx) -> l
     SbGuard         guard;
     guard.add().chance       = 1.0;
     guard.add().playJukebox  = false;
-    auto* zombie = spawnMob(ctx, "minecraft:zombie", 3);
-    co_await ctx.ticks(2); // added one tick after the spawn (raid check)
-    auto chest = zombie->getArmor(ArmorSlot::Torso);
+    // Vanilla may give a zombie a chestplate at spawn; SB then leaves it alone. Try a few.
+    Mob*      zombie = nullptr;
+    ItemStack chest;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        zombie = spawnMob(ctx, "minecraft:zombie", 3);
+        co_await ctx.ticks(2); // added one tick after the spawn (raid check)
+        chest = zombie->getArmor(ArmorSlot::Torso);
+        if (game::isBackpack(chest)) break;
+        ctx.info("attempt " + std::to_string(attempt) + ": chest slot " + (chest.isNull() ? std::string("empty") : chest.getTypeName()));
+        zombie->despawn();
+    }
     ctx.check(game::isBackpack(chest), "zombie wears a backpack");
     ctx.check(isMobWorn(chest), "marked as a mob backpack");
     ctx.check(!game::backpackUuid(chest).has_value(), "no storage yet (contents are created lazily)");
