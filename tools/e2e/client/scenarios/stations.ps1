@@ -52,11 +52,15 @@ function Expect-TabAction($mark, [string]$what) {
     Wait-LogLine 'native screen action: tab by ' 10 -Since $mark | Out-Null
     Write-Step "tab action: $what"
 }
-function Open-Backpack([string]$hotbarKey) {
+function Open-Backpack([string]$hotbarKey, [string]$title) {
+    Start-Sleep -Milliseconds 800
     Press-Key $hotbarKey
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 800
+    Press-Key $hotbarKey
+    Start-Sleep -Milliseconds 600
     $m = Get-LogMark
     Press-Key 'B'
+    Wait-LogLine "companion: native screen \d+ for '$title'" 10 -Since $m | Out-Null
     Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $m | Out-Null
     Read-Layout $m
     Start-Sleep -Milliseconds 700
@@ -70,7 +74,7 @@ function Close-Backpack {
 }
 
 # ==== diamond backpack: Crafting (tab 1), Stonecutter (tab 2), Smelting (tab 3) =====================
-Open-Backpack '1'
+Open-Backpack '1' 'Diamond Backpack'
 if ($L.Tabs -ne 4) { throw "expected the settings tab + 3 upgrade tabs, got $($L.Tabs)" }
 Save-Screenshot 'diamond-closed-tabs' | Out-Null
 Tab-Move 1 10 12
@@ -119,10 +123,8 @@ With-Shift { Tab-Click 1 30 124 }
 Expect-TabAction $mark 'shift-click result'
 Save-Screenshot 'crafting-shift-crafted' | Out-Null
 # Shift-click planks from the inventory: with the tab open they go into the grid.
-$mark = Get-LogMark
-With-Shift { Inv-Click 9 }
-Wait-LogLine 'native screen action: click by|native screen action' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 500
+With-Shift { Inv-Click 9 }   # slot clicks are not logged (silent actions)
+Start-Sleep -Milliseconds 700
 Save-Screenshot 'crafting-shift-into-grid' | Out-Null
 # Shift-click the grid cell back out (into the backpack).
 With-Shift { Tab-Click 1 12 53 }
@@ -199,10 +201,17 @@ $mark = Get-LogMark
 Tab-Click 3 58 51
 Expect-TabAction $mark 'output taken'
 Inv-Click 22
-Close-Backpack
 
 # ==== gold backpack: Auto-smelting (tab 1) =============================================================
-Open-Backpack '2'
+# B over the gold backpack (hotbar slot 2) opens it from the diamond backpack's screen.
+$p = Inv-Pos 1
+Gui-Move $p[0] $p[1]
+Start-Sleep -Milliseconds 400
+$m = Get-LogMark
+Press-Key 'B'
+Wait-LogLine "companion: native screen \d+ for 'Gold Backpack'" 10 -Since $m | Out-Null
+Read-Layout $m
+Start-Sleep -Milliseconds 700
 $mark = Get-LogMark
 Tab-Icon 1
 Expect-TabAction $mark 'auto-smelting tab open reported'
