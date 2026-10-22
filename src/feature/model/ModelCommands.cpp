@@ -31,6 +31,8 @@
 
 #include "core/Appearance.h"
 #include "feature/model/RenderModel.h"
+#include "feature/model/DebugPose.h"
+#include <sstream>
 #include "feature/placed/PlacedBackpacks.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -70,7 +72,9 @@ void installById(std::shared_ptr<game::Backpack> const& bp, std::string const& i
 ItemStack itemOf(std::shared_ptr<game::Backpack> const& bp) {
     if (!bp) return ItemStack::EMPTY_ITEM();
     game::Storage::get().save(*bp, true);
-    return game::makeBackpackItem(bp->tier(), bp->uuid());
+    auto item = game::makeBackpackItem(bp->tier(), bp->uuid());
+    game::setBackpackTint(item, bp->data().mainColor);
+    return item;
 }
 
 /// Tanks (water 60% left, lava 30% right), a forced battery charge, an item display.
@@ -135,6 +139,10 @@ void applyTestOverrides(game::Backpack const& backpack, core::render::BackpackMo
     if (it == backpack.data().settings.end() || !it->is_object()) return;
     if (auto b = it->find("battery"); b != it->end() && b->is_number()) m.battery = b->get<float>();
 }
+
+struct ModelPoseParams {
+    std::string values;
+};
 
 } // namespace abp::model
 
@@ -238,6 +246,28 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
         log().info("model test {}: {} objects", scene, n);
         output.success("model test " + scene + ": " + std::to_string(n));
     };
+    cmd.overload<model::ModelPoseParams>().text("modeltest").text("pose").required("values").execute(
+        [](CommandOrigin const& origin, CommandOutput& output, model::ModelPoseParams const& params) {
+            if (origin.getPermissionsLevel() < CommandPermissionLevel::GameDirectors) return output.error("You need operator permission.");
+            std::istringstream in(params.values);
+            std::string        what;
+            in >> what;
+            if (what == "off") {
+                for (int c = 0; c < 6; ++c) model::debugPose(c).on = false;
+                return output.success("model pose overrides off");
+            }
+            int ctx = std::atoi(what.c_str());
+            auto& pose = model::debugPose(ctx);
+            for (auto& v : pose.v) {
+                float f = 0;
+                in >> f;
+                v = f;
+            }
+            pose.on = true;
+            log().info("model pose {}: {}", ctx, params.values);
+            output.success("model pose " + params.values);
+        }
+    );
     for (auto const* scene : {"kit", "stands", "parts", "place", "drop"}) {
         std::string s = scene;
         cmd.overload().text("modeltest").text(scene).execute([run, s](CommandOrigin const& origin, CommandOutput& output) { run(origin, output, s); });

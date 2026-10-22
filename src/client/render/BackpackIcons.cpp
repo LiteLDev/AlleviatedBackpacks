@@ -58,44 +58,8 @@ bool drawBackpackIcon(ui::Painter& p, ItemStack const& stack, float x, float y, 
     return true;
 }
 
-// Vanilla inventory, hotbar and every other vanilla item slot: the layered 3D icon instead of the
-// item sprite.
-LL_TYPE_INSTANCE_HOOK(
-    AbpBackpackSlotIconHook,
-    ll::memory::HookPriority::Normal,
-    InventoryItemRenderer,
-    &InventoryItemRenderer::$render,
-    void,
-    ::MinecraftUIRenderContext& ctx,
-    ::IClientInstance&          client,
-    ::UIControl&                owner,
-    int                         pass
-) {
-    auto const& stack = *this->mItemInstance;
-    if (!stack.isNull() && game::backpackTierOf(stack.getTypeName())) {
-        if (pass != 0) return; // drawn once, in the first pass
-        try {
-            if (owner.mCachedPositionDirty) owner._setCachedPosition();
-            auto const& pos  = *owner.mCachedPosition;
-            auto const& size = *owner.mSize;
-            float       side = std::min(size.x, size.y);
-            ui::Painter painter(ctx);
-            if (drawBackpackIcon(painter, stack, pos.x + (size.x - side) / 2, pos.y + (size.y - side) / 2, side / 16.0f)) return;
-        } catch (std::exception const& e) {
-            log().error("backpack icon failed: {}", e.what());
-        }
-    }
-    origin(ctx, client, owner, pass);
-}
-
-class BackpackIconModule {
-public:
-    void install() { AbpBackpackSlotIconHook::hook(); }
-    void uninstall() { AbpBackpackSlotIconHook::unhook(); }
-};
-
 } // namespace abp::client::render
 
-ABP_REGISTER_MODULE(abp::client::render::BackpackIconModule);
+
 
 #endif // ABP_CLIENT

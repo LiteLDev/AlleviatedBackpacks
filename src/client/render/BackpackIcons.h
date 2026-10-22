@@ -9,8 +9,9 @@
 // per part configuration (textures/ui/alleviatedbackpacks/icons/c<battery><left tank><right tank>_*):
 // cloth and border in grey (tinted here with the main / accent colour), the untinted parts per
 // tier, the tank fluid per level (tinted with the fluid colour), the battery charge per step and
-// the glass. The companion UI (Painter::item) and the vanilla inventory / hotbar
-// (InventoryItemRenderer) draw backpacks with these layers instead of the item sprite.
+// the glass. The companion UI (Painter::item) draws backpacks with these layers instead of the item
+// sprite. Vanilla slots keep the item sprite: the default model view (the same render), tinted
+// with the main colour through the item colour.
 
 class ItemStack;
 

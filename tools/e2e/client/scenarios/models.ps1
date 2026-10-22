@@ -31,10 +31,12 @@ try {
     Invoke-Chat '/replaceitem entity @s slot.hotbar 1 alleviatedbackpacks:leather_backpack'
     Start-Sleep -Seconds 2
     Save-Screenshot 'icons-hotbar' | Out-Null
+    Invoke-Chat '/gamemode survival'
     Open-Inventory
     Start-Sleep -Seconds 2
     Save-Screenshot 'icons-inventory' | Out-Null
     Close-Screen
+    Invoke-Chat '/gamemode creative'
     $mark = Get-LogMark
     Press-Key '1'
     Press-Key 'B'
@@ -50,8 +52,23 @@ try {
     Invoke-Chat '/replaceitem entity @s slot.weapon.mainhand 0 alleviatedbackpacks:gold_backpack'
     Start-Sleep -Seconds 2
     Save-Screenshot 'player-held-first-person' | Out-Null
+    $i = 0
+    foreach ($p in '3 8 10 -14 0 180 0 0.5', '3 2 18 -12 0 180 0 0.5', '3 6 6 -10 0 180 0 0.5', '3 0 4 -16 0 180 0 0.5') {
+        Invoke-Chat "/backpack modeltest pose `"$p`""
+        Start-Sleep -Milliseconds 800
+        Save-Screenshot "calib-fp-$i" | Out-Null
+        $i++
+    }
     Set-View 'third_person_front'
     Save-Screenshot 'player-held-front' | Out-Null
+    $i = 0
+    foreach ($p in '2 2 14 -0.9 0 -90 0 0.75', '2 2 14 -0.9 0 90 0 0.75') {
+        Invoke-Chat "/backpack modeltest pose `"$p`""
+        Start-Sleep -Milliseconds 800
+        Save-Screenshot "calib-tp-$i" | Out-Null
+        $i++
+    }
+    Invoke-Chat '/backpack modeltest pose off'
     Invoke-Chat '/replaceitem entity @s slot.weapon.mainhand 0 air'
     Invoke-Chat '/replaceitem entity @s slot.armor.chest 0 alleviatedbackpacks:diamond_backpack'
     Start-Sleep -Seconds 1
@@ -91,7 +108,18 @@ try {
     Invoke-Chat '/tp @s ~-3 ~1 ~3 0 40'
     Start-Sleep -Seconds 2
     Save-Screenshot 'placed-parts' | Out-Null
-    Invoke-Chat '/tp @s ~9 ~ ~ 0 50'
+    Invoke-Chat '/tp @s ~6 ~ ~ 0 40'
+    Start-Sleep -Seconds 1
+    Save-Screenshot 'placed-display' | Out-Null
+    $i = 0
+    foreach ($p in '5 0 0 0 0 0 0 1', '5 0 0 0 -90 0 0 1', '5 0 0 0 0 180 0 1', '5 0 0 0 90 0 0 1') {
+        Invoke-Chat "/backpack modeltest pose `"$p`""
+        Start-Sleep -Milliseconds 800
+        Save-Screenshot "calib-display-$i" | Out-Null
+        $i++
+    }
+    Invoke-Chat '/backpack modeltest pose off'
+    Invoke-Chat '/tp @s ~3 ~ ~ 0 50'
     Start-Sleep -Seconds 2
     Save-Screenshot 'placed-comparator' | Out-Null
     Invoke-Chat '/tp @s ~-3 ~ ~-6 0 30'

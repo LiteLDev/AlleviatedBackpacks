@@ -5,7 +5,10 @@
 
 #include "client/render/ModelState.h"
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cmath>
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
@@ -36,6 +39,7 @@
 
 #include "client/net/ClientNet.h"
 #include "core/Tier.h"
+#include "feature/model/DebugPose.h"
 #include "game/BackpackItem.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
@@ -53,6 +57,19 @@ std::mutex                                       gWantedMutex;
 std::unordered_map<std::string, Clock::time_point> gWanted;   ///< uuid -> last time it was rendered
 
 std::thread::id gClientThread;
+
+// Accent colour by main colour (24 bit) of the backpacks rendered recently: the cloth tint
+// (changeColor) comes from the item colour, which the server keeps equal to the main colour, so
+// the draw call of a backpack can be recognised by it and given its accent (changeColor2) even
+// when the game sets the constants outside our attachable hooks (deferred draws).
+std::shared_mutex                               gAccentMutex;
+std::unordered_map<std::uint32_t, std::uint32_t> gAccentByMain;
+std::atomic<bool>                               gHasAccents{false};
+
+std::uint32_t rgbOf(mce::Color const& c) {
+    auto ch = [](float v) { return static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); };
+    return (ch(c.r) << 16) | (ch(c.g) << 8) | ch(c.b);
+}
 
 void want(std::string const& uuid) {
     std::lock_guard lock(gWantedMutex);
@@ -103,6 +120,7 @@ ItemStack const* itemOf(RenderParams const& params) {
 }
 
 int contextOf(RenderParams const& params) {
+    if (params.mActor && isDisplayEntity(*params.mActor)) return 4;
     switch (params.mSlotIndex) {
     case AttachableSlotIndex::Torso: return params.mActor && isDisplayEntity(*params.mActor) ? 4 : 1;
     case AttachableSlotIndex::CarriedItem: return 2;
@@ -141,7 +159,13 @@ float field(ModelSnapshot const* s, ModelField f, RenderParams const& params) {
 }
 
 MolangScriptArg const& modelQuery(RenderParams& params, std::vector<ExpressionNode> const& args) {
-    auto f = static_cast<ModelField>(static_cast<int>(argOf(params, args, 0)));
+    int n = static_cast<int>(argOf(params, args, 0));
+    if (n >= 30) {
+        auto& pose = model::debugPose((n - 30) / 8);
+        int   k    = (n - 30) % 8;
+        return ret(params, k == 0 ? (pose.on ? 1.0f : 0.0f) : pose.v[static_cast<std::size_t>(k - 1)].load());
+    }
+    auto f = static_cast<ModelField>(n);
     std::optional<ModelSnapshot> snap;
     if (auto const* item = itemOf(params)) snap = modelFor(*item);
     return ret(params, field(snap ? &*snap : nullptr, f, params));
@@ -261,6 +285,17 @@ LL_STATIC_HOOK(
         auto const& t = tTint.back();
         return origin(entityConstants, renderContext, tileLightColor, tileLightColorUV, blockLightColor, overlay, t.main, t.accent, glintColor, glintUVScale, uvAnim, uvOffset1, uvOffset2, uvRot1, uvRot2);
     }
+    if (gHasAccents.load(std::memory_order_relaxed)) {
+        std::optional<std::uint32_t> accent;
+        {
+            std::shared_lock lock(gAccentMutex);
+            if (auto it = gAccentByMain.find(rgbOf(changeColor)); it != gAccentByMain.end()) accent = it->second;
+        }
+        if (accent) {
+            auto a = toColor(*accent);
+            return origin(entityConstants, renderContext, tileLightColor, tileLightColorUV, blockLightColor, overlay, changeColor, a, glintColor, glintUVScale, uvAnim, uvOffset1, uvOffset2, uvRot1, uvRot2);
+        }
+    }
     origin(entityConstants, renderContext, tileLightColor, tileLightColorUV, blockLightColor, overlay, changeColor, changeColor2, glintColor, glintUVScale, uvAnim, uvOffset1, uvOffset2, uvRot1, uvRot2);
 }
 
@@ -328,6 +363,18 @@ private:
             std::unique_lock lock(gMutex);
             gSnapshots[uuid] = std::move(s);
         }
+    // Accents by main colour (defaults included: unknown / fresh backpacks).
+    std::unordered_map<std::uint32_t, std::uint32_t> accents;
+    accents[core::render::kDefaultMainColor & 0xFFFFFF] = core::render::kDefaultAccentColor;
+    {
+        std::shared_lock lock(gMutex);
+        for (auto const& [_, s] : gSnapshots) accents[s.mainColor & 0xFFFFFF] = s.accentColor;
+    }
+    {
+        std::unique_lock lock(gAccentMutex);
+        gAccentByMain.swap(accents);
+    }
+    gHasAccents = true;
     }
 
     ll::event::ListenerPtr mTick;

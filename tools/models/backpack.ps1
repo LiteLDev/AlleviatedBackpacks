@@ -429,10 +429,21 @@ $rcs = [ordered]@{
 # Per-context placement of the model (bone xf). Model frame = placed backpack (front = -z).
 #   worn:  SB BackpackLayerRenderer: 180 degree turn, (0, -0.25, -0.3) blocks from the body.
 #   held:  SB "thirdperson_righthand" / "firstperson_righthand" display transforms.
+# Each value can be overridden at runtime for calibration (`/backpack modeltest pose`, DebugPose.h).
+function Pose([int]$ctx, $pos, $rot, $scale) {
+    $b = 30 + $ctx * 8
+    $o = { param($k, $v) "q.abp_model($b) ? q.abp_model($($b + $k)) : $v" }
+    [ordered]@{
+        position = @((& $o 1 $pos[0]), (& $o 2 $pos[1]), (& $o 3 $pos[2]))
+        rotation = @((& $o 4 $rot[0]), (& $o 5 $rot[1]), (& $o 6 $rot[2]))
+        scale    = (& $o 7 $scale)
+    }
+}
 $anim = [ordered]@{
-    'animation.alleviatedbackpacks.backpack.worn'    = [ordered]@{ loop = $true; bones = [ordered]@{ xf = [ordered]@{ rotation = @(0, 180, 0); position = @(0, 12, 4.8) } } }
-    'animation.alleviatedbackpacks.backpack.held_tp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = [ordered]@{ rotation = @(0, -90, 0); position = @(2, 10.5, -0.9); scale = 0.75 } } }
-    'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = [ordered]@{ rotation = @(0, 0, 0); position = @(0, 18, -4); scale = 0.5 } } }
+    'animation.alleviatedbackpacks.backpack.worn'    = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 1 @(0, 12, 4.8) @(0, 180, 0) 1) } }
+    'animation.alleviatedbackpacks.backpack.held_tp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 2 @(2, 12, -0.9) @(0, -90, 0) 0.75) } }
+    'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 3 @(4, 14, -8) @(0, 180, 0) 0.5) } }
+    'animation.alleviatedbackpacks.backpack.placed'  = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 4 @(0, 0, 0) @(0, 0, 0) 1) } }
 }
 [ordered]@{ format_version = '1.10.0'; animations = $anim } | ConvertTo-Json -Depth 20 -Compress |
     Set-Content -NoNewline -Encoding utf8 (Join-Path $rp 'animations/alleviatedbackpacks_backpack.animation.json')
@@ -463,13 +474,15 @@ foreach ($t in $tiers) {
                     worn    = 'animation.alleviatedbackpacks.backpack.worn'
                     held_tp = 'animation.alleviatedbackpacks.backpack.held_tp'
                     held_fp = 'animation.alleviatedbackpacks.backpack.held_fp'
+                    placed  = 'animation.alleviatedbackpacks.backpack.placed'
                 }
                 scripts            = [ordered]@{
                     pre_animation = @($pre)
                     animate       = @(
                         [ordered]@{ worn = 'v.abp_ctx == 1' },
                         [ordered]@{ held_tp = '(v.abp_ctx == 2 || v.abp_ctx == 3) && !c.is_first_person' },
-                        [ordered]@{ held_fp = '(v.abp_ctx == 2 || v.abp_ctx == 3) && c.is_first_person' }
+                        [ordered]@{ held_fp = '(v.abp_ctx == 2 || v.abp_ctx == 3) && c.is_first_person' },
+                        [ordered]@{ placed = 'v.abp_ctx == 4' }
                     )
                 }
                 render_controllers = @("$prefix.tint", "$prefix.fixed", "$prefix.fluid_l", "$prefix.fluid_r", "$prefix.glass")
@@ -503,11 +516,14 @@ $dgeo | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding ut
 [ordered]@{ format_version = '1.8.0'; render_controllers = [ordered]@{
     'controller.render.alleviatedbackpacks.backpack_display' = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Texture.default') }
 } } | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding utf8 (Join-Path $rp 'render_controllers/alleviatedbackpacks_backpack_display.render_controllers.json')
+$displayPose = Pose 5 @(0, 0, 0) @(0, 0, 0) 0.5
+$displayPose.rotation[2] = "($($displayPose.rotation[2])) + v.abp_rot"
+$displayPose.position[2] = "($($displayPose.position[2])) - v.abp_z * 0.5"
 # rightItem: rotation around the anchor normal (SC rotation) and depth (SC z offset: 1 = one item pixel).
 [ordered]@{ format_version = '1.10.0'; animations = [ordered]@{
     'animation.alleviatedbackpacks.backpack_display.item' = [ordered]@{ loop = $true; bones = [ordered]@{
         rightArm  = [ordered]@{ rotation = @(0, 0, 0) }
-        rightItem = [ordered]@{ rotation = @(0, 0, 'v.abp_rot'); position = @(0, 0, '-v.abp_z * 0.5') }
+        rightItem = $displayPose
     } }
 } } | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding utf8 (Join-Path $rp 'animations/alleviatedbackpacks_backpack_display.animation.json')
 Write-Host 'display entity resources written'

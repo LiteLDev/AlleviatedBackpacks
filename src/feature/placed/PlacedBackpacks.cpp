@@ -762,6 +762,7 @@ void PlacedBackpacks::maintain(BlockSource& region, PlacedEntry const& e, std::s
     }
     // The display entity wearing the backpack and holding the displayed item.
     auto                     item = itemOf(e);
+    game::setBackpackTint(item, bp->data().mainColor);
     std::optional<ItemStack> shown;
     auto                     m = model::buildModel(*bp);
     if (m.display) shown = game::ItemConv::toStack(m.display->item, 1);
