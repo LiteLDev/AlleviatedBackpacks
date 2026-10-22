@@ -391,18 +391,18 @@ foreach ($t in $tiers) {
 function Cond([string]$bone) {
     switch -Regex ($bone) {
         '^base_' { 'true' }
-        '^front_pouch_' { '!v.abp_bat' }
-        '^battery_' { 'v.abp_bat' }
-        '^left_pouch_' { '!v.abp_lt' }
-        '^left_tank_' { 'v.abp_lt' }
-        '^right_pouch_' { '!v.abp_rt' }
-        '^right_tank_' { 'v.abp_rt' }
+        '^front_pouch_' { '!q.abp_model(2)' }
+        '^battery_' { 'q.abp_model(2)' }
+        '^left_pouch_' { '!q.abp_model(3)' }
+        '^left_tank_' { 'q.abp_model(3)' }
+        '^right_pouch_' { '!q.abp_model(4)' }
+        '^right_tank_' { 'q.abp_model(4)' }
         '^straps_' { 'v.abp_ctx != 1' }
-        '^charge_(\d+)$' { "v.abp_bat && v.abp_chg == $($Matches[1])" }
-        '^fluid_l_(\d+)_up$' { "v.abp_lt && v.abp_ll == $($Matches[1]) && v.abp_lu" }
-        '^fluid_l_(\d+)$' { "v.abp_lt && v.abp_ll == $($Matches[1]) && !v.abp_lu" }
-        '^fluid_r_(\d+)_up$' { "v.abp_rt && v.abp_rl == $($Matches[1]) && v.abp_ru" }
-        '^fluid_r_(\d+)$' { "v.abp_rt && v.abp_rl == $($Matches[1]) && !v.abp_ru" }
+        '^charge_(\d+)$' { "q.abp_model(2) && q.abp_model(5) == $($Matches[1])" }
+        '^fluid_l_(\d+)_up$' { "q.abp_model(3) && q.abp_model(6) == $($Matches[1]) && q.abp_model(8)" }
+        '^fluid_l_(\d+)$' { "q.abp_model(3) && q.abp_model(6) == $($Matches[1]) && !q.abp_model(8)" }
+        '^fluid_r_(\d+)_up$' { "q.abp_model(4) && q.abp_model(7) == $($Matches[1]) && q.abp_model(9)" }
+        '^fluid_r_(\d+)$' { "q.abp_model(4) && q.abp_model(7) == $($Matches[1]) && !q.abp_model(9)" }
         default { 'false' }
     }
 }
@@ -419,8 +419,8 @@ $looks = @($fluidLooks.Keys)
 $rcs = [ordered]@{
     "$prefix.tint"    = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.tint' }); textures = @('Texture.tint'); part_visibility = (Visibility { param($b) $b -match '_(cloth|border)$' }) }
     "$prefix.fixed"   = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Texture.fixed'); part_visibility = (Visibility { param($b) $b -match '(_fixed$|^charge_)' }) }
-    "$prefix.fluid_l" = [ordered]@{ arrays = @{ textures = @{ 'Array.fluid' = @($looks | ForEach-Object { "Texture.fluid_$_" }) } }; geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Array.fluid[v.abp_lk]'); part_visibility = (Visibility { param($b) $b -match '^fluid_l_' }) }
-    "$prefix.fluid_r" = [ordered]@{ arrays = @{ textures = @{ 'Array.fluid' = @($looks | ForEach-Object { "Texture.fluid_$_" }) } }; geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Array.fluid[v.abp_rk]'); part_visibility = (Visibility { param($b) $b -match '^fluid_r_' }) }
+    "$prefix.fluid_l" = [ordered]@{ arrays = @{ textures = @{ 'Array.fluid' = @($looks | ForEach-Object { "Texture.fluid_$_" }) } }; geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Array.fluid[q.abp_model(10)]'); part_visibility = (Visibility { param($b) $b -match '^fluid_l_' }) }
+    "$prefix.fluid_r" = [ordered]@{ arrays = @{ textures = @{ 'Array.fluid' = @($looks | ForEach-Object { "Texture.fluid_$_" }) } }; geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Array.fluid[q.abp_model(11)]'); part_visibility = (Visibility { param($b) $b -match '^fluid_r_' }) }
     "$prefix.glass"   = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.glass' }); textures = @('Texture.glass'); part_visibility = (Visibility { param($b) $b -match '_glass$' }) }
 }
 [ordered]@{ format_version = '1.8.0'; render_controllers = $rcs } | ConvertTo-Json -Depth 20 -Compress |
@@ -448,13 +448,9 @@ $anim = [ordered]@{
 [ordered]@{ format_version = '1.10.0'; animations = $anim } | ConvertTo-Json -Depth 20 -Compress |
     Set-Content -NoNewline -Encoding utf8 (Join-Path $rp 'animations/alleviatedbackpacks_backpack.animation.json')
 
-$pre = @(
-    'v.abp_known = q.abp_model(0);', 'v.abp_ctx = q.abp_model(1);', 'v.abp_bat = q.abp_model(2);',
-    'v.abp_lt = q.abp_model(3);', 'v.abp_rt = q.abp_model(4);', 'v.abp_chg = q.abp_model(5);',
-    'v.abp_ll = q.abp_model(6);', 'v.abp_rl = q.abp_model(7);', 'v.abp_lu = q.abp_model(8);',
-    'v.abp_ru = q.abp_model(9);', 'v.abp_lk = q.abp_model(10);', 'v.abp_rk = q.abp_model(11);',
-    'v.abp_ctx = v.abp_ctx == 0 ? 1 : v.abp_ctx;'
-) -join ' '
+# Context from the attachable's own Molang context (the query's slot is not known during
+# pre_animation): 1 worn, 2 main hand, 3 off hand, 4 placed (display entity).
+$pre = "v.abp_ctx = q.owner_identifier == 'alleviatedbackpacks:backpack_display' ? 4 : (c.item_slot == 'main_hand' ? 2 : (c.item_slot == 'off_hand' ? 3 : 1));"
 foreach ($t in $tiers) {
     $textures = [ordered]@{
         tint  = 'textures/entity/alleviatedbackpacks/backpack/tint'

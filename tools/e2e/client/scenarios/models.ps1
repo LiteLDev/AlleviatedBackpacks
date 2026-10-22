@@ -53,7 +53,7 @@ try {
     Start-Sleep -Seconds 2
     Save-Screenshot 'player-held-first-person' | Out-Null
     $i = 0
-    foreach ($p in '3 8 10 -14 0 180 0 0.5', '3 2 18 -12 0 180 0 0.5', '3 6 6 -10 0 180 0 0.5', '3 0 4 -16 0 180 0 0.5') {
+    foreach ($p in '3 0 0 0 0 0 0 0.5', '3 0 12 0 0 0 0 0.5', '3 0 12 -8 0 0 0 0.5', '3 0 12 8 0 0 0 0.5', '3 6 12 0 0 0 0 0.5', '3 -6 12 0 0 0 0 0.5') {
         Invoke-Chat "/backpack modeltest pose `"$p`""
         Start-Sleep -Milliseconds 800
         Save-Screenshot "calib-fp-$i" | Out-Null
@@ -62,7 +62,7 @@ try {
     Set-View 'third_person_front'
     Save-Screenshot 'player-held-front' | Out-Null
     $i = 0
-    foreach ($p in '2 2 14 -0.9 0 -90 0 0.75', '2 2 14 -0.9 0 90 0 0.75') {
+    foreach ($p in '2 0 0 0 0 0 0 0.75', '2 0 12 0 0 -90 0 0.75', '2 0 18 0 0 -90 0 0.75', '2 4 12 0 0 -90 0 0.75') {
         Invoke-Chat "/backpack modeltest pose `"$p`""
         Start-Sleep -Milliseconds 800
         Save-Screenshot "calib-tp-$i" | Out-Null
@@ -112,7 +112,7 @@ try {
     Start-Sleep -Seconds 1
     Save-Screenshot 'placed-display' | Out-Null
     $i = 0
-    foreach ($p in '5 0 0 0 0 0 0 1', '5 0 0 0 -90 0 0 1', '5 0 0 0 0 180 0 1', '5 0 0 0 90 0 0 1') {
+    foreach ($p in '5 0 0 0 -90 0 0 0.5', '5 0 -4 0 -90 0 0 0.5', '5 4 -4 0 -90 0 0 0.5', '5 -4 -4 0 -90 0 0 0.5', '5 0 0 -4 -90 0 0 0.5', '5 0 0 4 -90 0 0 0.5') {
         Invoke-Chat "/backpack modeltest pose `"$p`""
         Start-Sleep -Milliseconds 800
         Save-Screenshot "calib-display-$i" | Out-Null

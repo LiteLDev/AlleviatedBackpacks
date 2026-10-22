@@ -179,7 +179,13 @@ bool refreshItem(Player const& player, ItemStack& stack, std::shared_ptr<game::B
         stack.setDamageValue(0);
         changed = true;
     }
-    if (bp) changed |= syncTint(stack, *bp);
+    if (bp) {
+        changed |= syncTint(stack, *bp);
+    } else if (stack.mItem && !stack.mItem->hasCustomColor(stack)) {
+        // Never opened: the default main colour (the model's cloth colour).
+        game::setBackpackTint(stack, kDefaultMain);
+        changed = true;
+    }
     // The storage tier is the truth once bound (a higher item tier is applied on next open).
     auto shownTier = bp && static_cast<int>(bp->tier()) > static_cast<int>(*tier) ? bp->tier() : *tier;
     auto const& lore = loreFor(player, shownTier, bp.get());
