@@ -52,6 +52,12 @@ struct FilterDefaults {
     bool emptyAllowListMatchesEverything = false;
 };
 
+/// SC keeps selected tags in a TreeSet of ResourceLocations: ordered by path, then namespace (a
+/// tag without ':' is in the `minecraft` namespace).
+[[nodiscard]] bool tagLess(std::string_view a, std::string_view b);
+/// Sorts and de-duplicates tags in that order.
+void sortTags(std::vector<std::string>& tags);
+
 /// A reusable item filter: a fixed-size list of filter slots plus SC's `FilterAttributes`.
 ///
 /// Matching follows Sophisticated Core's `FilterLogic` exactly:

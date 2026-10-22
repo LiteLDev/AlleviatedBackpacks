@@ -116,7 +116,7 @@ bool anotherPlayerCanOpen(Player& target, game::Backpack const& backpack) {
 }
 
 OpenResult tryOpen(Player& source, Player& target, Vec3 const& hit) {
-    if (!admin::sbServer().allowOpeningOtherPlayerBackpacks) return OpenResult::Disabled;
+    if (!feature::gui::otherPlayerOpeningAllowed()) return OpenResult::Disabled;
     if (&source == &target || target.getDimensionId() != source.getDimensionId() || !target.isAlive()) return OpenResult::NotPlayer;
     auto const& box = target.getAABB();
     bool        inBox = hit.x >= box.min.x - 0.5f && hit.x <= box.max.x + 0.5f && hit.y >= box.min.y - 0.5f && hit.y <= box.max.y + 0.5f

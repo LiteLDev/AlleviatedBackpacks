@@ -1,4 +1,5 @@
 {
+  "abp.inception.error.exists": "另一插槽中已存在嵌套升级",
   "abp.inception.name": "嵌套升级",
   "abp.inception.tooltip": "§7可以把背包放进背包里",
   "abp.inception.tab": "嵌套",

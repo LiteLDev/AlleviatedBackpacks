@@ -132,6 +132,33 @@ ABP_REGISTER_SELFTEST("filter.multiple_filters", [](Context& ctx) {
     ctx.check(inserted(*bp, "minecraft:stone", kAutomation) == 0, "stone stopped by the first filter");
 });
 
+// SC FilteredItemHandler.matchesFilters: several allow lists combine with OR.
+ABP_REGISTER_SELFTEST("filter.two_allow_lists_or", [](Context& ctx) {
+    auto bp = ctx.createBackpack(Tier::Iron);
+    int  a  = ctx.installUpgrade(bp, "filter");
+    int  b  = ctx.installUpgrade(bp, "advanced_filter");
+    UpgradeContext ca(bp, a), cb(bp, b);
+    filtering::store(ca, UpgradeTier::Basic, allowOnly(9, {"minecraft:cobblestone"}));
+    filtering::store(cb, UpgradeTier::Advanced, allowOnly(16, {"minecraft:dirt"}));
+    ctx.check(inserted(*bp, "minecraft:cobblestone", kAutomation) == 1, "first allow list matches");
+    ctx.check(inserted(*bp, "minecraft:dirt", kAutomation) == 1, "second allow list matches");
+    ctx.check(inserted(*bp, "minecraft:stone", kAutomation) == 0, "neither list matches");
+    // An output-only filter doesn't take part in input decisions (and an input-only one not in
+    // extract decisions).
+    setDirection(ca, Direction::Input);
+    setDirection(cb, Direction::Output);
+    ctx.check(inserted(*bp, "minecraft:dirt", kAutomation) == 0, "only the input filter decides inserts");
+    ctx.check(extracted(*bp, "minecraft:cobblestone", kAutomation) == 0, "only the output filter decides extracts");
+    ctx.check(extracted(*bp, "minecraft:dirt", kAutomation) == 1, "output allow list");
+    // A disabled filter takes no part.
+    setDirection(ca, Direction::Both);
+    setEnabled(bp, b, false);
+    ctx.check(inserted(*bp, "minecraft:cobblestone", kAutomation) == 1, "remaining filter decides");
+    ctx.check(inserted(*bp, "minecraft:dirt", kAutomation) == 0, "remaining filter refuses dirt");
+    setEnabled(bp, a, false);
+    ctx.check(inserted(*bp, "minecraft:stone", kAutomation) == 1, "no active filter: everything passes");
+});
+
 ABP_REGISTER_SELFTEST("filter.advanced_match_options", [](Context& ctx) {
     auto           bp   = ctx.createBackpack(Tier::Leather);
     int            slot = ctx.installUpgrade(bp, "advanced_filter");

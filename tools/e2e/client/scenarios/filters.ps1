@@ -60,8 +60,12 @@ function Tab-Click([int]$i) { Gui-Click ($L.Width + 1 + 8) (4 + 25 * $i + 4 + 8)
 # action: "filter tab: <player> upgrade slot=<n> op=<op> changed=<b> filter=<json> direction=<d>").
 function Get-Filter([int]$slot) {
     $line = Get-LeviLog | Where-Object { $_ -match "filter tab: .*upgrade slot=$slot op=.* filter=" } | Select-Object -Last 1
-    if (-not $line -or $line -notmatch 'filter=(\{.*\}) direction=(\d+)') { throw "no filter tab line for upgrade slot ${slot}: $line" }
-    $f = $Matches[1] | ConvertFrom-Json
+    # Only direction clicks on an upgrade (no filter action yet): there is no filter line, only
+    # direction lines.
+    $f = if ($line -and $line -match 'filter=(\{.*\}) direction=(\d+)') { $Matches[1] | ConvertFrom-Json } else { [pscustomobject]@{} }
+    if (-not $line -and -not (Get-LeviLog | Where-Object { $_ -match "filter tab: upgrade slot=$slot op=direction" })) {
+        throw "no filter tab line for upgrade slot ${slot}"
+    }
     $d = Get-LeviLog | Where-Object { $_ -match "filter tab: upgrade slot=$slot op=direction direction=(\d+)" } | Select-Object -Last 1
     $dir = if ($d -and $d -match 'direction=(\d+)') { [int]$Matches[1] } else { 0 }
     $f | Add-Member -NotePropertyName direction -NotePropertyValue $dir
@@ -282,11 +286,11 @@ Start-Sleep -Milliseconds 1500
 Assert-Filter 2 { param($f) $f.typeState -eq 0 } 'deposit type cycled back to allow'
 
 # ---- Deposit / Restock triggers ----------------------------------------------------------------------
-# A chest two blocks east, looked at; C (inventory interaction key) runs the upgrades.
+# A chest two blocks south, looked at (as in the input scenario); C (inventory interaction key) runs the upgrades.
 Start-Sleep -Milliseconds 2500
-Invoke-Chat '/setblock ~2 ~ ~ chest'
+Invoke-Chat '/setblock ~ ~ ~2 chest'
 Start-Sleep -Milliseconds 800
-Invoke-Chat '/tp @s ~ ~ ~ facing ~2 ~ ~'
+Invoke-Chat '/tp @s ~ ~ ~ 0 29'
 Start-Sleep -Milliseconds 800
 $mark = Get-LogMark
 Press-Key 'C'
@@ -308,7 +312,7 @@ Wait-LogLine 'inventory interaction: .* used a backpack on a container' 10 -Sinc
 Start-Sleep -Milliseconds 200
 Save-Screenshot 'sneak-use-status' | Out-Null
 if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a chest UI was opened' }
-Invoke-Chat '/setblock ~2 ~ ~ air'
+Invoke-Chat '/setblock ~ ~ ~2 air'
 
 # Server-side logic (all four upgrades, the tab actions, noInteractionBlocks) runs in the server
 # harness (scenarios pickup / deposit / full).

@@ -1,2 +1,4 @@
 item.alleviatedbackpacks:infinity_upgrade.name=Infinity Upgrade (Admin)
 item.alleviatedbackpacks:survival_infinity_upgrade.name=Survival Infinity Upgrade
+item.alleviatedbackpacks:infinity_upgrade.tooltip=Makes all items in backpack infinite~LINEBREAK~Only admins can set infinite items and break or pickup backpack
+item.alleviatedbackpacks:survival_infinity_upgrade.tooltip=Makes all items in backpack infinite~LINEBREAK~All players can set infinite items and break or pickup backpack

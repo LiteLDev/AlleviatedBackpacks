@@ -1,0 +1,12 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:compacting_upgrade_clear"
+    },
+    "tags": ["crafting_table"],
+    "ingredients": [{ "item": "alleviatedbackpacks:compacting_upgrade" }],
+    "unlock": [{ "item": "alleviatedbackpacks:compacting_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:compacting_upgrade", "count": 1 }
+  }
+}

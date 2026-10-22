@@ -35,7 +35,7 @@ private:
         mTicks = 0;
         if (upgrade::all().empty()) return;
         level.forEachPlayer([&](Player& player) {
-            if (player.isClientSide() || !player.isAlive()) return true;
+            if (player.isClientSide() || !player.isAlive() || player.isSpectator()) return true; // SB inventoryTick
             for (auto& [carried, bp] : carriedBackpacks(player, false, true)) {
                 upgrade::forEachInstalled(bp, true, [&](upgrade::IUpgrade& u, upgrade::UpgradeContext const& ctx) {
                     if (!carried.upgradeActive(u.info().id, u.info().groupOrId())) return;

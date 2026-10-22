@@ -127,6 +127,14 @@ ABP_REGISTER_SELFTEST("tiers.recipes_registered", [](Context& ctx) {
     expect("alleviatedbackpacks:auto_smoking_upgrade_from_auto_smelting_upgrade", "alleviatedbackpacks:auto_smoking_upgrade", true);
     expect("alleviatedbackpacks:auto_blasting_upgrade_from_auto_smelting_upgrade", "alleviatedbackpacks:auto_blasting_upgrade", true);
     expect("alleviatedbackpacks:xp_pump_upgrade", "alleviatedbackpacks:xp_pump_upgrade", true);
+    // SC upgrade_clear: an upgrade alone in the grid gives the same upgrade without its data.
+    expect("alleviatedbackpacks:pickup_upgrade_clear", "alleviatedbackpacks:pickup_upgrade", true);
+    expect("alleviatedbackpacks:advanced_jukebox_upgrade_clear", "alleviatedbackpacks:advanced_jukebox_upgrade", true);
+    {
+        std::array<ItemStack, 9> grid{};
+        grid[4] = game::ItemConv::make("alleviatedbackpacks:magnet_upgrade", 1);
+        ctx.check(craftResult(grid) == "alleviatedbackpacks:magnet_upgrade", "a lone upgrade crafts into a cleared one");
+    }
     auto smithing = recipesFor("smithing_table");
     ctx.require(smithing != nullptr, "no smithing_table recipes");
     auto it = smithing->find("alleviatedbackpacks:netherite_backpack");

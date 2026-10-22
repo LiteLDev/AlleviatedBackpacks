@@ -1,0 +1,12 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:feeding_upgrade_clear"
+    },
+    "tags": ["crafting_table"],
+    "ingredients": [{ "item": "alleviatedbackpacks:feeding_upgrade" }],
+    "unlock": [{ "item": "alleviatedbackpacks:feeding_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:feeding_upgrade", "count": 1 }
+  }
+}

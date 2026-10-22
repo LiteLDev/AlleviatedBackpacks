@@ -117,8 +117,14 @@ ToolMode toolModeFromString(std::string_view s) {
     return ToolMode::Any;
 }
 
+int filterSlots() { return std::clamp(config::get<ToolSwapperConfig>().toolSwapperUpgrade.filterSlots, 1, 20); }
+int filterSlotsInRow() { return std::clamp(config::get<ToolSwapperConfig>().toolSwapperUpgrade.slotsInRow, 1, 6); }
+filtering::FilterSpec filterSpec() {
+    return filtering::specOf(config::get<ToolSwapperConfig>().toolSwapperUpgrade, true, filtering::TypeButton::AllowList);
+}
+
 core::Filter Settings::defaultFilter() {
-    core::Filter f(kFilterSlots);
+    core::Filter f(filterSlots());
     f.mode            = core::FilterMode::Deny; // SC FilterLogic allowListDefault = false
     f.matchBy         = core::MatchBy::Item;
     f.matchNbt        = false;
@@ -142,7 +148,7 @@ Settings settingsOf(UpgradeContext const& ctx) {
     else if (auto old = j.find("mode"); old != j.end() && old->is_number_integer()) s.mode = static_cast<ToolMode>(std::clamp(old->get<int>(), 0, 2));
     if (auto it = j.find("filter"); it != j.end() && it->is_object()) {
         try {
-            s.filter                = core::Filter::fromJson(*it, kFilterSlots);
+            s.filter                = core::Filter::fromJson(*it, filterSlots());
             s.filter.emptyAllowsAll = false; // SC: an empty allow list matches nothing here
             // Filters saved before the SB settings (phase 1, chest filter editor) default to an
             // allow list that ignored emptiness: an empty one keeps letting everything through.
@@ -495,7 +501,9 @@ KeyResult onSwapKey(Player& player) {
     }
     auto hit = player.traceRay(kReach, true, true);
     if (hit.mType != HitResultType::Tile && hit.mType != HitResultType::Entity) return KeyResult::NoTarget;
-    if (!cfg().enabled || player.isCreative() || player.isSpectator()) return KeyResult::NoTarget;
+    // SB onBlockInteract / onEntityInteract (the key): no creative check, unlike the click and
+    // attack swaps. Spectators can't touch their inventory on Bedrock, so they stay excluded.
+    if (!cfg().enabled || player.isSpectator()) return KeyResult::NoTarget;
     bool anyUpgrade = false;
     bool swapped    = false;
     if (hit.mType == HitResultType::Tile) {

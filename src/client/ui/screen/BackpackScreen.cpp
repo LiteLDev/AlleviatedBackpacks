@@ -707,7 +707,7 @@ void BackpackScreenLayer::drawTabs(Painter& p, cs::BackpackScreenModel const& m,
     auto covered     = [&](TabState const& tab) {
         // SettingsTabControl: a tab is not drawn while the open tab fully covers it.
         if (!open || &tab == open) return false;
-        return !(open->rect.bottom() < tab.rect.y || open->rect.y > tab.rect.y);
+        return !(open->rect.bottom() < tab.rect.bottom() || open->rect.y > tab.rect.y);
     };
     auto drawOne = [&](TabState& tab, bool isOpen) {
         sb::tabBackground(p, tab.rect);
@@ -953,8 +953,8 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
     for (std::size_t i = 0; i < mTabs.size(); ++i) {
         auto const& t = mTabs[i];
         if (static_cast<int>(i) == mOpenTab || !t.rect.contains(mx, my)) continue;
-        // SettingsTabControl: no tooltip for a tab the open tab fully covers.
-        if (openTab && !(openTab->rect.bottom() < t.rect.bottom() || openTab->rect.y > t.rect.y)) continue;
+        // SettingsTabControl: no tooltip for a tab whose top the open tab covers.
+        if (openTab && !(openTab->rect.bottom() < t.rect.y || openTab->rect.y > t.rect.y)) continue;
         if (t.slot < 0) lines.push_back({ctr("abp.mainscreen.settings.tooltip", "Backpack Settings"), 0xFFFFFF});
         else lines.push_back({tabTooltip(m.upgrades[static_cast<std::size_t>(t.slot)]), 0xFFFFFF});
         drawTooltip(p, lines, mx, my);
@@ -1319,11 +1319,11 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         }
         // The tab icon is an SC ImageButton: any click plays the button sound.
         playButtonClick();
-        if (button != MouseButton::Left) return true;
         if (t.slot < 0) {
-            showSettings(true); // SB opens its settings screen
+            showSettings(true); // SB opens its settings screen (StorageSettingsTab: any button)
             return true;
         }
+        if (button != MouseButton::Left) return true;
         if (isOpen) {
             mOpenTab = -1;
             t.widgets.widgets.clear();

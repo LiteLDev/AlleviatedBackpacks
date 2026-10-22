@@ -15,6 +15,7 @@
 #include "mc/world/level/Level.h"
 
 #include "core/Appearance.h"
+#include "feature/admin/SbConfig.h"
 #include "feature/tiers/Tiers.h"
 #include "game/BackpackItem.h"
 #include "game/PlayerScan.h"
@@ -78,7 +79,9 @@ bool syncColors(ItemStack& stack, game::Backpack* bp) {
     // colour. Without a marker we never tinted this item: a tint on it is a cauldron dye unless
     // the backpack already has a main colour.
     if ((marker && *marker != current) || (!marker && current >= 0 && colors.main == defaults.main)) {
-        colors.main = current < 0 ? defaults.main : (0xFF000000u | static_cast<std::uint32_t>(current));
+        // SB BackpackCauldronInteraction: washing resets both the main and the accent colour.
+        if (current < 0) colors = defaults;
+        else colors.main = 0xFF000000u | static_cast<std::uint32_t>(current);
         setItemColors(stack, colors);
         changed = true;
     } else if (!stored && colors != defaults) {
@@ -148,20 +151,19 @@ std::string colorLabel(Player const& player, std::uint32_t argb) {
 }
 
 std::vector<std::string> buildLore(Player const& player, core::Tier tier, game::Backpack const* bp) {
-    auto const&              info = core::tierInfo(tier);
     std::vector<std::string> lore;
     lore.push_back("§r" + trFor(player, "abp.tiers.lore.tier", "§7Tier: §f{}", tierLabel(player, tier)));
     core::FillStats stats;
     if (bp) {
         stats = core::fillStats(bp->data().inventory);
     } else {
-        stats.totalSlots = info.slots;
+        stats.totalSlots = admin::inventorySlotCount(tier); // SB inventorySlotCount (configurable)
     }
     lore.push_back(
         "§r"
         + trFor(player, "abp.tiers.lore.storage", "§7Storage: §f{}/{} slots §8({}% full)", stats.usedSlots, stats.totalSlots, stats.percent)
     );
-    int upgradeSlots = bp ? static_cast<int>(bp->data().upgrades.size()) : info.upgradeSlots;
+    int upgradeSlots = bp ? static_cast<int>(bp->data().upgrades.size()) : admin::upgradeSlotCount(tier);
     std::vector<std::string> upgradeLines;
     int                      installed = 0;
     if (bp) {
