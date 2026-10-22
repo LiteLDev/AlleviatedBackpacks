@@ -113,8 +113,8 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
         {"cookTotal", s.cookTotal                                               },
     };
     auto [title, tooltip] = tabLabels(player, *u);
-    j["title"]            = title;
-    j["tooltip"]          = tooltip;
+    j["tabLabel"]         = title;
+    j["tabTooltip"]       = tooltip;
     if (u->automatic()) {
         j["inputFilter"] = filterJson(ctx, false, u->inputFilter(ctx), u->inputFilterSlotsInRow());
         j["fuelFilter"]  = filterJson(ctx, true, u->fuelFilter(ctx), u->fuelFilterSlotsInRow());

@@ -260,8 +260,8 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
         {"recent",           recentOrder(player, ctx)                                              },
         {"shiftIntoStorage", shiftIntoStorage(ctx)                                                 },
         {"refill",           refillInput(ctx)                                                      },
-        {"title",            trFor(player, "abp.stonecutter.tab", "Stonecutter")                   },
-        {"tooltip",          trFor(player, "abp.stonecutter.tab.tooltip", "Stonecutter")           },
+        {"tabLabel",         trFor(player, "abp.stonecutter.tab", "Stonecutter")                   },
+        {"tabTooltip",       trFor(player, "abp.stonecutter.tab.tooltip", "Stonecutter")           },
     };
 }
 

@@ -294,8 +294,8 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
         {"selected",         r.selected                                                           },
         {"shiftIntoStorage", shiftIntoStorage(ctx)                                                },
         {"refill",           refillEnabled(ctx)                                                   },
-        {"title",            trFor(player, "abp.crafting.tab", "Craft")                           },
-        {"tooltip",          trFor(player, "abp.crafting.tab.tooltip", "Crafting")                },
+        {"tabLabel",         trFor(player, "abp.crafting.tab", "Craft")                           },
+        {"tabTooltip",       trFor(player, "abp.crafting.tab.tooltip", "Crafting")                },
     };
 }
 
