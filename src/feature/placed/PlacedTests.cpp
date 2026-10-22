@@ -72,7 +72,7 @@ ABP_REGISTER_SELFTEST("placed.place_and_pick_up", [](Context& ctx) -> ll::coro::
     site.touch(target);
     auto const& placedBlock = site.region().getBlock(target);
     ctx.require(PlacedBackpacks::isBackpackBlock(placedBlock), "sneak + use places the backpack block");
-    ctx.check(PlacedBackpacks::stateOf(placedBlock, kTierState) == static_cast<int>(Tier::Iron), "tier block state");
+    ctx.check(PlacedBackpacks::tierOfBlock(placedBlock) == Tier::Iron && placedBlock.getTypeName() == blockIdFor(Tier::Iron), "the iron backpack block (one block per tier)");
     ctx.check(
         PlacedBackpacks::stateOf(placedBlock, kFacingState) == PlacedBackpacks::facingTowards(sp.getRotation().y),
         "faces the player"
@@ -255,23 +255,32 @@ ABP_REGISTER_SELFTEST("placed.break_drops_once", [](Context& ctx) -> ll::coro::C
     co_await ctx.ticks(1);
 });
 
-ABP_REGISTER_SELFTEST("placed.explosion_proof", [](Context& ctx) -> ll::coro::CoroTask<> {
+ABP_REGISTER_SELFTEST("placed.explosion", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& sp = ctx.spawnPlayer();
     co_await toGround(ctx, sp);
     Site site(sp, 7);
+    auto& level = site.region().getLevel();
+    // SB: blast resistance 0.8 - an explosion breaks the block and the backpack drops (never lost).
     auto pos = site.at(0, 1);
     site.set(pos, "minecraft:air");
     auto bp = ctx.createBackpack(Tier::Leather);
     placeAt(ctx, site, *bp, pos);
-    auto type = BlockType::tryGetFromRegistry(HashedString(std::string(kBlockId)));
-    ctx.require(type.has_value(), "block registered");
-    auto& level = site.region().getLevel();
     level.explode(site.region(), nullptr, site.at(1, 1).center(), 2.0f, false, true, std::numeric_limits<float>::max(), false);
     co_await ctx.ticks(2);
-    ctx.check(PlacedBackpacks::isBackpackBlock(site.region().getBlock(pos)), "survives an explosion");
-    ctx.check(PlacedBackpacks::get().findUuid(bp->uuid()).has_value(), "still registered");
-    ctx.check(site.collectBackpackDrops(pos, bp->uuid()) == 0, "no drop");
-    // Pistons can't move it either (`minecraft:movable` = immovable in the block definition).
+    ctx.check(!PlacedBackpacks::isBackpackBlock(site.region().getBlock(pos)), "an explosion breaks a leather backpack block");
+    ctx.check(!PlacedBackpacks::get().findUuid(bp->uuid()).has_value(), "no longer placed");
+    ctx.check(site.collectBackpackDrops(pos, bp->uuid()) == 1, "the backpack dropped");
+    // Everlasting: bedrock's blast resistance, the block stays.
+    auto pos2 = site.at(0, 1, 3);
+    site.set(pos2, "minecraft:air");
+    auto bp2 = ctx.createBackpack(Tier::Leather);
+    ctx.installUpgrade(bp2, "everlasting");
+    placeAt(ctx, site, *bp2, pos2);
+    level.explode(site.region(), nullptr, site.at(1, 1, 3).center(), 2.0f, false, true, std::numeric_limits<float>::max(), false);
+    co_await ctx.ticks(3);
+    ctx.check(PlacedBackpacks::isBackpackBlock(site.region().getBlock(pos2)), "an Everlasting backpack survives an explosion");
+    ctx.check(PlacedBackpacks::get().findUuid(bp2->uuid()).has_value(), "still registered");
+    ctx.check(site.collectBackpackDrops(pos2, bp2->uuid()) == 0, "no drop");
 });
 
 ABP_REGISTER_SELFTEST("placed.persist_and_orphans", [](Context& ctx) -> ll::coro::CoroTask<> {
@@ -291,7 +300,7 @@ ABP_REGISTER_SELFTEST("placed.persist_and_orphans", [](Context& ctx) -> ll::coro
 
     // A backpack block without a backpack (e.g. a picked block item) is removed.
     auto orphan = site.at(0, 1, 2);
-    auto type   = BlockType::tryGetFromRegistry(HashedString(std::string(kBlockId)));
+    auto type   = BlockType::tryGetFromRegistry(HashedString(blockIdFor(Tier::Leather)));
     ctx.require(type.has_value() && type->mDefaultState != nullptr, "block type");
     site.set(orphan, *type->mDefaultState);
     co_await ctx.ticks(3);

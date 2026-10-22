@@ -158,8 +158,8 @@ BackpackScreenModel BackpackScreenModel::fromJson(json const& j) {
     m.nested      = value<bool>(j, "nested", false);
     m.lockedSlot  = value<int>(j, "locked", -1);
     m.stackMultiplier = value<double>(j, "mult", 1.0);
-    m.mainColor       = value<std::uint32_t>(j, "main", 0xFFA0703C);
-    m.accentColor     = value<std::uint32_t>(j, "accent", 0xFF5A3C1E);
+    m.mainColor       = value<std::uint32_t>(j, "main", 0xFFCC613A);
+    m.accentColor     = value<std::uint32_t>(j, "accent", 0xFF622E1A);
     errorFrom(m, j.value("error", json::object()));
     if (auto it = j.find("extra"); it != j.end() && it->is_object()) m.extra = *it;
     return m;
@@ -313,8 +313,8 @@ RenderInfo RenderInfo::fromJson(json const& j) {
     if (!j.is_object()) return r;
     r.uuid        = value<std::string>(j, "uuid", {});
     r.tier        = value<int>(j, "tier", 0);
-    r.mainColor   = value<std::uint32_t>(j, "main", 0xFFA0703C);
-    r.accentColor = value<std::uint32_t>(j, "accent", 0xFF5A3C1E);
+    r.mainColor   = value<std::uint32_t>(j, "main", 0xFFCC613A);
+    r.accentColor = value<std::uint32_t>(j, "accent", 0xFF622E1A);
     r.upgrades    = value<std::vector<std::string>>(j, "upgrades", {});
     if (auto it = j.find("extra"); it != j.end() && it->is_object()) r.extra = *it;
     return r;

@@ -1,14 +1,16 @@
 {
   "abp.void.name": "Void Upgrade",
   "abp.void.advanced_name": "Advanced Void Upgrade",
-  "abp.void.mode.all": "Void: all matching items",
-  "abp.void.mode.all.desc": "§7Every matching item is destroyed",
-  "abp.void.mode.overflow": "Void: only overflow",
-  "abp.void.mode.overflow.desc": "§7Keeps one stack, voids what doesn't fit",
-  "abp.void.work_in_gui": "Work in GUI: {}",
-  "abp.void.work_in_gui.desc": "§7Also void items you put in by hand",
-  "abp.void.describe.allow": "§7Voids {} listed item(s)",
-  "abp.void.describe.deny": "§7Voids everything except {} listed item(s)",
-  "abp.void.describe.overflow": "§7Only overflow",
-  "abp.void.describe.gui": "§7Also in the GUI"
+  "abp.void.tab": "Void",
+  "abp.void.tab.advanced": "Adv. Void",
+  "abp.void.tab.tooltip": "Void Settings",
+  "abp.void.tab.advanced.tooltip": "Advanced Void Settings",
+  "abp.void.button.works_in_gui": "Works in GUI as well",
+  "abp.void.button.only_automatic": "Only works with other upgrades/automation",
+  "abp.void.button.void_always": "Void Always",
+  "abp.void.button.void_slot_overflow": "Void Slot Overflow",
+  "abp.void.button.void_slot_overflow.detail": "Allows single slot to be filled with the item\nand voids anything that overflows",
+  "abp.void.button.void_storage_overflow": "Void Storage Overflow",
+  "abp.void.button.void_storage_overflow.detail": "Allows whole storage to be filled with the item\n and voids anything that overflows",
+  "abp.void.button.void_always_disabled": "Void Always option is disabled"
 }

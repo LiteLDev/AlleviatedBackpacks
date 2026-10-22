@@ -1,0 +1,388 @@
+{
+  "format_version": "1.26.0",
+  "minecraft:block": {
+    "description": {
+      "identifier": "alleviatedbackpacks:placed_netherite_backpack",
+      "menu_category": {
+        "category": "none",
+        "is_hidden_in_commands": true
+      },
+      "states": {
+        "alleviatedbackpacks:facing": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "alleviatedbackpacks:left_tank": [
+          false,
+          true
+        ],
+        "alleviatedbackpacks:right_tank": [
+          false,
+          true
+        ],
+        "alleviatedbackpacks:battery": [
+          false,
+          true
+        ],
+        "alleviatedbackpacks:open": [
+          false,
+          true
+        ]
+      }
+    },
+    "components": {
+      "minecraft:display_name": "tile.alleviatedbackpacks:placed_netherite_backpack.name",
+      "minecraft:geometry": {
+        "identifier": "geometry.alleviatedbackpacks.placed_backpack",
+        "bone_visibility": {
+          "front_pouch": "!q.block_state('alleviatedbackpacks:battery')",
+          "battery": "q.block_state('alleviatedbackpacks:battery')",
+          "left_pouch": "!q.block_state('alleviatedbackpacks:left_tank')",
+          "left_tank": "q.block_state('alleviatedbackpacks:left_tank')",
+          "right_pouch": "!q.block_state('alleviatedbackpacks:right_tank')",
+          "right_tank": "q.block_state('alleviatedbackpacks:right_tank')"
+        }
+      },
+      "minecraft:material_instances": {
+        "*": {
+          "texture": "abp_placed_backpack_hidden",
+          "render_method": "alpha_test",
+          "ambient_occlusion": false,
+          "face_dimming": false
+        }
+      },
+      "minecraft:destruction_particles": {
+        "texture": "abp_placed_netherite_backpack"
+      },
+      "minecraft:collision_box": {
+        "origin": [
+          -7.25,
+          0.0,
+          -5.25
+        ],
+        "size": [
+          14.5,
+          14.5,
+          9.25
+        ]
+      },
+      "minecraft:selection_box": {
+        "origin": [
+          -7.25,
+          0.0,
+          -5.25
+        ],
+        "size": [
+          14.5,
+          14.5,
+          9.25
+        ]
+      },
+      "minecraft:destructible_by_mining": {
+        "seconds_to_destroy": 0.8
+      },
+      "minecraft:destructible_by_explosion": {
+        "explosion_resistance": 1200
+      },
+      "minecraft:movable": {
+        "movement_type": "popped"
+      },
+      "minecraft:loot": "loot_tables/blocks/abp_placed_backpack.json",
+      "minecraft:light_dampening": 0,
+      "minecraft:map_color": "#c7c7c7",
+      "minecraft:liquid_detection": {
+        "detection_rules": [
+          {
+            "liquid_type": "water",
+            "can_contain_liquid": true,
+            "on_liquid_touches": "no_reaction"
+          }
+        ]
+      }
+    },
+    "permutations": [
+      {
+        "condition": "q.block_state('alleviatedbackpacks:facing') == 0",
+        "components": {
+          "minecraft:transformation": {
+            "rotation": [
+              0,
+              180,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:facing') == 1",
+        "components": {
+          "minecraft:transformation": {
+            "rotation": [
+              0,
+              90,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:facing') == 2",
+        "components": {
+          "minecraft:transformation": {
+            "rotation": [
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:facing') == 3",
+        "components": {
+          "minecraft:transformation": {
+            "rotation": [
+              0,
+              270,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:battery') == false && q.block_state('alleviatedbackpacks:left_tank') == false && q.block_state('alleviatedbackpacks:right_tank') == false",
+        "components": {
+          "minecraft:collision_box": {
+            "origin": [
+              -7.25,
+              0.0,
+              -5.25
+            ],
+            "size": [
+              14.5,
+              14.5,
+              9.25
+            ]
+          },
+          "minecraft:selection_box": {
+            "origin": [
+              -7.25,
+              0.0,
+              -5.25
+            ],
+            "size": [
+              14.5,
+              14.5,
+              9.25
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:battery') == false && q.block_state('alleviatedbackpacks:left_tank') == false && q.block_state('alleviatedbackpacks:right_tank') == true",
+        "components": {
+          "minecraft:collision_box": {
+            "origin": [
+              -7.25,
+              0.0,
+              -5.25
+            ],
+            "size": [
+              15.25,
+              14.5,
+              9.25
+            ]
+          },
+          "minecraft:selection_box": {
+            "origin": [
+              -7.25,
+              0.0,
+              -5.25
+            ],
+            "size": [
+              15.25,
+              14.5,
+              9.25
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:battery') == false && q.block_state('alleviatedbackpacks:left_tank') == true && q.block_state('alleviatedbackpacks:right_tank') == false",
+        "components": {
+          "minecraft:collision_box": {
+            "origin": [
+              -8.0,
+              0.0,
+              -5.25
+            ],
+            "size": [
+              15.25,
+              14.5,
+              9.25
+            ]
+          },
+          "minecraft:selection_box": {
+            "origin": [
+              -8.0,
+              0.0,
+              -5.25
+            ],
+            "size": [
+              15.25,
+              14.5,
+              9.25
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:battery') == false && q.block_state('alleviatedbackpacks:left_tank') == true && q.block_state('alleviatedbackpacks:right_tank') == true",
+        "components": {
+          "minecraft:collision_box": {
+            "origin": [
+              -8.0,
+              0.0,
+              -5.25
+            ],
+            "size": [
+              16.0,
+              14.5,
+              9.25
+            ]
+          },
+          "minecraft:selection_box": {
+            "origin": [
+              -8.0,
+              0.0,
+              -5.25
+            ],
+            "size": [
+              16.0,
+              14.5,
+              9.25
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:battery') == true && q.block_state('alleviatedbackpacks:left_tank') == false && q.block_state('alleviatedbackpacks:right_tank') == false",
+        "components": {
+          "minecraft:collision_box": {
+            "origin": [
+              -7.25,
+              0.0,
+              -6.35
+            ],
+            "size": [
+              14.5,
+              14.5,
+              10.35
+            ]
+          },
+          "minecraft:selection_box": {
+            "origin": [
+              -7.25,
+              0.0,
+              -6.35
+            ],
+            "size": [
+              14.5,
+              14.5,
+              10.35
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:battery') == true && q.block_state('alleviatedbackpacks:left_tank') == false && q.block_state('alleviatedbackpacks:right_tank') == true",
+        "components": {
+          "minecraft:collision_box": {
+            "origin": [
+              -7.25,
+              0.0,
+              -6.35
+            ],
+            "size": [
+              15.25,
+              14.5,
+              10.35
+            ]
+          },
+          "minecraft:selection_box": {
+            "origin": [
+              -7.25,
+              0.0,
+              -6.35
+            ],
+            "size": [
+              15.25,
+              14.5,
+              10.35
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:battery') == true && q.block_state('alleviatedbackpacks:left_tank') == true && q.block_state('alleviatedbackpacks:right_tank') == false",
+        "components": {
+          "minecraft:collision_box": {
+            "origin": [
+              -8.0,
+              0.0,
+              -6.35
+            ],
+            "size": [
+              15.25,
+              14.5,
+              10.35
+            ]
+          },
+          "minecraft:selection_box": {
+            "origin": [
+              -8.0,
+              0.0,
+              -6.35
+            ],
+            "size": [
+              15.25,
+              14.5,
+              10.35
+            ]
+          }
+        }
+      },
+      {
+        "condition": "q.block_state('alleviatedbackpacks:battery') == true && q.block_state('alleviatedbackpacks:left_tank') == true && q.block_state('alleviatedbackpacks:right_tank') == true",
+        "components": {
+          "minecraft:collision_box": {
+            "origin": [
+              -8.0,
+              0.0,
+              -6.35
+            ],
+            "size": [
+              16.0,
+              14.5,
+              10.35
+            ]
+          },
+          "minecraft:selection_box": {
+            "origin": [
+              -8.0,
+              0.0,
+              -6.35
+            ],
+            "size": [
+              16.0,
+              14.5,
+              10.35
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

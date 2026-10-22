@@ -197,6 +197,68 @@ TEST(BackpackInventory, LargeCounts) {
     EXPECT_EQ(BackpackInventory::fromJson(j).at(0).count, 4000);
 }
 
+TEST(BackpackInventory, InsertListenersSeeTouchedSlotsAfterTheOperation) {
+    BackpackInventory inv(3);
+    inv.set(1, stone(60));
+    std::vector<std::pair<int, Source>> seen;
+    inv.addInsertListener("t", [&](int slot, AccessContext const& ctx) {
+        // Runs after the whole insert: the merged slot is already full.
+        EXPECT_EQ(inv.at(1).count, 64);
+        seen.emplace_back(slot, ctx.source);
+    });
+    inv.insert(stone(10), kPickup, true); // simulated: no notification
+    EXPECT_TRUE(seen.empty());
+    inv.insert(stone(10), kPickup);
+    ASSERT_EQ(seen.size(), 2u);
+    EXPECT_EQ(seen[0].first, 1);
+    EXPECT_EQ(seen[1].first, 0);
+    EXPECT_EQ(seen[0].second, Source::Pickup);
+    seen.clear();
+    inv.insertInto(2, stone(5), kPlayer);
+    ASSERT_EQ(seen.size(), 1u);
+    EXPECT_EQ(seen[0].first, 2);
+    EXPECT_EQ(seen[0].second, Source::Player);
+    seen.clear();
+    inv.insertInto(1, stone(5), kPlayer); // full: nothing moved
+    EXPECT_TRUE(seen.empty());
+    inv.removeHooks("t");
+    inv.insert(stone(1), kPlayer);
+    EXPECT_TRUE(seen.empty());
+}
+
+TEST(BackpackInventory, ExtractListenersGetTheOriginalContent) {
+    BackpackInventory inv(2);
+    inv.set(0, stone(10));
+    int calls = 0;
+    inv.addExtractListener("t", [&](int slot, ItemStackData const& original, AccessContext const& ctx) {
+        ++calls;
+        EXPECT_EQ(slot, 0);
+        EXPECT_EQ(original.count, 10);
+        EXPECT_EQ(ctx.source, Source::Pickup);
+    });
+    inv.extract(0, 4, kPickup, true);
+    EXPECT_EQ(calls, 0);
+    inv.extract(0, 4, kPickup);
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(inv.at(0).count, 6);
+}
+
+TEST(BackpackInventory, InsertListenerMayInsertAgain) {
+    BackpackInventory inv(4);
+    int               crafts = 0;
+    inv.addInsertListener("t", [&](int slot, AccessContext const&) {
+        // Turn 4 stone into 1 cobblestone, like a compacting upgrade (re-entrant).
+        if (inv.at(slot).id != "minecraft:stone" || inv.at(slot).count < 4) return;
+        ++crafts;
+        inv.extract(slot, 4, AccessContext{Source::Upgrade});
+        inv.insert(ItemStackData::of("minecraft:cobblestone", 1), AccessContext{Source::Upgrade});
+    });
+    inv.insert(stone(4), kPickup);
+    EXPECT_EQ(crafts, 1);
+    EXPECT_EQ(inv.count([](ItemStackData const& s) { return s.id == "minecraft:stone"; }), 0);
+    EXPECT_EQ(inv.count([](ItemStackData const& s) { return s.id == "minecraft:cobblestone"; }), 1);
+}
+
 TEST(BackpackInventory, InfiniteSlotsNeverDeplete) {
     BackpackInventory inv(3);
     inv.set(0, stone(1));

@@ -15,6 +15,15 @@ void BackpackInventory::notify(int slot) const {
     for (auto const& l : mListeners) l.fn(slot);
 }
 
+void BackpackInventory::notifyInserted(std::vector<int> const& slots, AccessContext const& ctx) {
+    if (mInsertListeners.empty() || slots.empty()) return;
+    // Copy: a listener may (indirectly) rebuild the hooks.
+    auto listeners = mInsertListeners;
+    for (int slot : slots) {
+        for (auto const& l : listeners) l.fn(slot, ctx);
+    }
+}
+
 void BackpackInventory::set(int slot, ItemStackData stack) {
     if (stack.empty()) stack.clear();
     mSlots.at(static_cast<std::size_t>(slot)) = std::move(stack);
@@ -50,6 +59,14 @@ bool BackpackInventory::isSlotBlocked(int slot) const {
 InsertVerdict BackpackInventory::checkInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const {
     if (isSlotBlocked(slot)) return InsertVerdict::Deny;
     InsertQuery q{*this, slot, stack, ctx};
+    for (auto const& f : mInsertFilters) {
+        if (auto v = f.fn(q); v != InsertVerdict::Allow) return v;
+    }
+    return InsertVerdict::Allow;
+}
+
+InsertVerdict BackpackInventory::checkDirectInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const {
+    InsertQuery q{*this, slot, stack, ctx, true};
     for (auto const& f : mInsertFilters) {
         if (auto v = f.fn(q); v != InsertVerdict::Allow) return v;
     }
@@ -97,7 +114,13 @@ InsertResult BackpackInventory::insert(ItemStackData const& stack, AccessContext
         r.voided = stack.count;
         return r;
     }
-    int remaining = stack.count;
+    int              remaining = stack.count;
+    std::vector<int> touched;
+    auto             fill = [&](int i) {
+        int moved = fillSlot(i, stack, remaining, simulate);
+        if (moved > 0 && !simulate) touched.push_back(i);
+        return moved;
+    };
     // Pass 0: preferred slots (e.g. memory slots), in the order given. Each slot is filled once
     // (as far as it goes); later passes skip it, which also keeps `simulate` from counting it twice.
     std::vector<int> done;
@@ -106,7 +129,7 @@ InsertResult BackpackInventory::insert(ItemStackData const& stack, AccessContext
             if (remaining <= 0) break;
             if (i < 0 || i >= size() || std::find(done.begin(), done.end(), i) != done.end()) continue;
             if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
-            remaining -= fillSlot(i, stack, remaining, simulate);
+            remaining -= fill(i);
             done.push_back(i);
         }
     }
@@ -117,7 +140,7 @@ InsertResult BackpackInventory::insert(ItemStackData const& stack, AccessContext
             auto const& cur = mSlots[static_cast<std::size_t>(i)];
             if (pass == 0 ? (cur.empty() || !cur.sameItem(stack)) : !cur.empty()) continue;
             if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
-            remaining -= fillSlot(i, stack, remaining, simulate);
+            remaining -= fill(i);
         }
     }
     r.inserted = stack.count - remaining;
@@ -126,6 +149,7 @@ InsertResult BackpackInventory::insert(ItemStackData const& stack, AccessContext
         remaining = 0;
     }
     r.remainder = stack.withCount(remaining);
+    notifyInserted(touched, ctx);
     return r;
 }
 
@@ -136,7 +160,7 @@ InsertResult BackpackInventory::insertInto(int slot, ItemStackData const& stack,
         r.remainder = stack;
         return r;
     }
-    auto verdict = checkInsert(slot, stack, ctx);
+    auto verdict = checkDirectInsert(slot, stack, ctx);
     if (verdict == InsertVerdict::Deny) {
         r.remainder = stack;
         return r;
@@ -153,6 +177,7 @@ InsertResult BackpackInventory::insertInto(int slot, ItemStackData const& stack,
         rest     = 0;
     }
     r.remainder = stack.withCount(rest);
+    if (moved > 0 && !simulate) notifyInserted({slot}, ctx);
     return r;
 }
 
@@ -164,10 +189,17 @@ ItemStackData BackpackInventory::extract(int slot, int amount, AccessContext con
     int  n        = infinite ? amount : std::min(amount, cur.count);
     if (!canExtract(slot, n, ctx)) return {};
     auto out = cur.withCount(n);
-    if (!simulate && !infinite) {
-        cur.count -= n;
-        if (cur.count <= 0) cur.clear();
-        notify(slot);
+    if (!simulate) {
+        auto original = cur;
+        if (!infinite) {
+            cur.count -= n;
+            if (cur.count <= 0) cur.clear();
+            notify(slot);
+        }
+        if (!mExtractListeners.empty()) {
+            auto listeners = mExtractListeners;
+            for (auto const& l : listeners) l.fn(slot, original, ctx);
+        }
     }
     return out;
 }
@@ -251,6 +283,14 @@ void BackpackInventory::addChangeListener(std::string owner, ChangeListenerFn fn
     mListeners.push_back(Hook<ChangeListenerFn>{std::move(owner), 0, std::move(fn)});
 }
 
+void BackpackInventory::addInsertListener(std::string owner, InsertListenerFn fn) {
+    mInsertListeners.push_back(Hook<InsertListenerFn>{std::move(owner), 0, std::move(fn)});
+}
+
+void BackpackInventory::addExtractListener(std::string owner, ExtractListenerFn fn) {
+    mExtractListeners.push_back(Hook<ExtractListenerFn>{std::move(owner), 0, std::move(fn)});
+}
+
 void BackpackInventory::addSlotPreference(std::string owner, int priority, SlotPreferenceFn fn) {
     insertSorted(mPreferences, std::move(owner), priority, std::move(fn));
 }
@@ -273,6 +313,8 @@ void BackpackInventory::removeHooks(std::string const& owner) {
     drop(mListeners);
     drop(mPreferences);
     drop(mBlockers);
+    drop(mInsertListeners);
+    drop(mExtractListeners);
     drop(mInfinite);
 }
 
@@ -286,6 +328,8 @@ void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
     drop(mListeners);
     drop(mPreferences);
     drop(mBlockers);
+    drop(mInsertListeners);
+    drop(mExtractListeners);
     drop(mInfinite);
 }
 
