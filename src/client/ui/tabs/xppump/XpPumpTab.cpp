@@ -109,7 +109,8 @@ public:
         takeAll.icon         = iconFn(fg::Icon::TakeAll);
         takeAll.tooltipLines = {{ctr("abp.xppump.button.take_all_experience", "Take All Experience"), 0xFFFFFF}};
         takeAll.onClick      = [op](int b) {
-            if (b == 0) op({{"op", "action"}, {"what", "takeAll"}});
+            (void)b; // SC: the action buttons ignore which mouse button
+            op({{"op", "action"}, {"what", "takeAll"}});
         };
 
         auto& take   = widgets.add(std::make_unique<ScrollButton>());
@@ -117,7 +118,8 @@ public:
         take.rect    = {area.x + 21, area.y + yOff, 18, 18};
         take.icon    = iconFn(fg::Icon::Take);
         take.onClick = [op](int b) {
-            if (b == 0) op({{"op", "action"}, {"what", "take"}});
+            (void)b; // SC: the action buttons ignore which mouse button
+            op({{"op", "action"}, {"what", "take"}});
         };
         take.onScroll       = [op](float d) { op({{"op", "levelsToTake"}, {"delta", d > 0 ? 1 : -1}}); };
         take.dynamicTooltip = [this]() -> std::vector<TooltipLine> {
@@ -132,7 +134,8 @@ public:
         store.rect    = {area.x + 39, area.y + yOff, 18, 18};
         store.icon    = iconFn(fg::Icon::Store);
         store.onClick = [op](int b) {
-            if (b == 0) op({{"op", "action"}, {"what", "store"}});
+            (void)b; // SC: the action buttons ignore which mouse button
+            op({{"op", "action"}, {"what", "store"}});
         };
         store.onScroll       = [op](float d) { op({{"op", "levelsToStore"}, {"delta", d > 0 ? 1 : -1}}); };
         store.dynamicTooltip = [this]() -> std::vector<TooltipLine> {
@@ -148,7 +151,8 @@ public:
         storeAll.icon         = iconFn(fg::Icon::StoreAll);
         storeAll.tooltipLines = {{ctr("abp.xppump.button.store_all_experience", "Store All Experience"), 0xFFFFFF}};
         storeAll.onClick      = [op](int b) {
-            if (b == 0) op({{"op", "action"}, {"what", "storeAll"}});
+            (void)b; // SC: the action buttons ignore which mouse button
+            op({{"op", "action"}, {"what", "storeAll"}});
         };
         return {21 + 54 + 6, yOff + 18 + 6};
     }

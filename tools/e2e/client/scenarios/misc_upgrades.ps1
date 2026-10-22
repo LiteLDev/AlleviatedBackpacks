@@ -166,6 +166,15 @@ Gui-Click $p[0] $p[1]; Gui-Click $p[0] $p[1]                          # back to 
 $p = Tab-Button 3 3 44; Gui-Move $p[0] $p[1]
 Start-Sleep -Milliseconds 600
 Save-Screenshot 'toolswapper-filter-tooltip' | Out-Null
+# The shared SC filter control: primary match ITEM -> MOD -> TAGS shows the tag list.
+$mark = Get-LogMark
+$p = Tab-Button 3 21 44
+Gui-Click $p[0] $p[1]; Gui-Click $p[0] $p[1]
+Wait-LogLine 'filter control: key=filter primary match 1 -> 2 \(tags mode on\)' 10 -Since $mark | Out-Null
+Gui-Move ($p[0] + 60) $p[1]
+Start-Sleep -Milliseconds 600
+Save-Screenshot 'toolswapper-tags-mode' | Out-Null
+Gui-Click $p[0] $p[1]                                                 # back to Match Item
 Tab-Toggle 3
 
 # ---- Inception (one toggle at x+3, y+24) -------------------------------------------------------------

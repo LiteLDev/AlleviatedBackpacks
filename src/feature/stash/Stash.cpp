@@ -12,6 +12,7 @@
 #include "mc/world/item/ItemStack.h"
 
 #include "feature/gui/Gui.h"
+#include "feature/linked/Linked.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -312,11 +313,20 @@ Result stashableInto(Player* player, ItemStack const& backpackItem, core::ItemSt
     return stashable(player, *bp, item);
 }
 
+namespace {
+/// Vanilla runs the carried item's `overrideStackedOnOther` first: an Ender Linker on the cursor
+/// links the backpack in the slot (SC EnderLinkerItem) instead of being stashed into it.
+bool linkerOntoBackpack(ItemStack const& held, core::ItemStackData const& inSlot) {
+    return linked::isLinker(held) && inSlot.count == 1 && game::isBackpack(inSlot);
+}
+} // namespace
+
 Result overlay(Player& player, Location const& loc) {
     ItemStack held = cursorOf(player);
     if (held.isNull() || lockedSlot(player, loc)) return Result::NoSpace;
     auto inSlot = itemAt(player, loc);
     if (inSlot.empty()) return Result::NoSpace;
+    if (linkerOntoBackpack(held, inSlot)) return Result::NoSpace;
     // SC: a backpack (count 1) in the slot first, then the backpack on the cursor.
     if (inSlot.count == 1 && game::isBackpack(inSlot)) {
         return stashableInto(&player, game::ItemConv::toStack(inSlot, 1), game::ItemConv::toData(held));
@@ -327,6 +337,7 @@ Result overlay(Player& player, Location const& loc) {
 
 int rightClick(Player& player, Location const& loc) {
     if (!game::Storage::get().available()) return 0;
+    if (linkerOntoBackpack(cursorOf(player), itemAt(player, loc))) return 0; // the linker links instead
     // Vanilla order (AbstractContainerMenu.doClick): the carried item's override first.
     int moved = stashSlotIntoCursor(player, loc);
     if (moved <= 0) moved = stashCursorIntoSlot(player, loc);

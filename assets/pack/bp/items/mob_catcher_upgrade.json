@@ -7,7 +7,7 @@
     },
     "components": {
       "minecraft:icon": "abp_mob_catcher_upgrade",
-      "minecraft:max_stack_size": 1,
+      "minecraft:max_stack_size": 64,
       "minecraft:display_name": { "value": "item.alleviatedbackpacks:mob_catcher_upgrade.name" }
     }
   }

@@ -26,7 +26,7 @@
         "item": "minecraft:redstone"
       },
       "C": {
-        "item": "minecraft:chest"
+        "tag": "alleviatedbackpacks:wooden_chests"
       }
     },
     "unlock": [

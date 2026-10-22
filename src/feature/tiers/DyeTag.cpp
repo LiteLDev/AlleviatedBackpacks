@@ -3,8 +3,12 @@
 // vanilla items, so the mod adds it when the game registers its hard-coded item tags, before
 // recipes are loaded (recipe loading checks that the tag exists). This runs in both builds: the
 // client matches recipes itself to show the crafting output and the recipe book.
+//
+// The same hook adds item tags for SB's other recipe ingredient tags (`c:chests/wooden`,
+// `c:chests`, `c:glass_blocks`, `c:obsidians`), used by the upgrade and backpack recipes.
 
 #include <string>
+#include <vector>
 
 #include "ll/api/memory/Hook.h"
 
@@ -42,6 +46,24 @@ LL_STATIC_HOOK(
             if (!item->hasTag(tag)) item->addTag(tag);
             itemRegistry.addItemToTagMap(*item);
         }
+        auto tagItems = [&](HashedString const& t, std::vector<std::string> const& ids) {
+            for (auto const& id : ids) {
+                auto item = itemRegistry.lookupByName(HashedString("minecraft:" + id));
+                if (!item) continue;
+                if (!item->hasTag(t)) item->addTag(t);
+                itemRegistry.addItemToTagMap(*item);
+            }
+        };
+        static HashedString const woodenChests{"alleviatedbackpacks:wooden_chests"};
+        static HashedString const chests{"alleviatedbackpacks:chests"};
+        static HashedString const glassBlocks{"alleviatedbackpacks:glass_blocks"};
+        static HashedString const obsidians{"alleviatedbackpacks:obsidians"};
+        tagItems(woodenChests, {"chest", "trapped_chest"});
+        tagItems(chests, {"chest", "trapped_chest", "ender_chest"});
+        std::vector<std::string> glass{"glass", "tinted_glass"};
+        for (auto const& d : core::kDyes) glass.push_back(std::string(d.id) + "_stained_glass");
+        tagItems(glassBlocks, glass);
+        tagItems(obsidians, {"obsidian", "crying_obsidian"});
     } catch (std::exception const& e) {
         log().error("registering the dye item tag failed: {}", e.what());
     }

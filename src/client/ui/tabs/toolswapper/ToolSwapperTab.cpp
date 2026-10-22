@@ -1,8 +1,7 @@
 // Native tab of the Advanced Tool Swapper upgrade (SB ToolSwapperUpgradeTab; the basic one has no
 // tab). Layout (SB): "Swap Weapon" toggle at (x+3, y+24), tool swap mode toggle at (x+21, y+24),
-// the advanced filter control (SC FilterLogicControl.Advanced) at (x+3, y+44): Allow / Block at
-// +0, primary match (item / mod / tags) at +18, durability at +36, NBT at +54, the 8 filter slots
-// 21 below, 4 per row.
+// the shared advanced filter control (SC FilterLogicControl.Advanced, incl. TAGS mode) at (x+3, y+44),
+// slots from config/toolswapper.json `toolSwapperUpgrade` (SB: 8, 4 per row).
 //
 // Server side: upgrade/toolswapper/Upgrades.cpp (tab data / action "toolswapper").
 
@@ -15,6 +14,7 @@
 
 #include "client/Client.h"
 #include "client/ui/screen/Tabs.h"
+#include "client/ui/widgets/FilterControl.h"
 #include "core/ItemStackData.h"
 #include "game/ItemConv.h"
 
@@ -109,153 +109,6 @@ PixelArt const kToolsOnly{
      },
     {"Y=E0C030"},
 };
-PixelArt const kAllow{
-    {
-     "................",
-     "................",
-     "................",
-     "............GG..",
-     "...........GGG..",
-     "..........GGG...",
-     ".........GGG....",
-     "..GG....GGG.....",
-     "..GGG..GGG......",
-     "...GGGGGG.......",
-     "....GGGG........",
-     ".....GG.........",
-     "................",
-     "................",
-     "................",
-     "................",
-     },
-    {"G=3BBF3B"},
-};
-PixelArt const kBlock{
-    {
-     "................",
-     "................",
-     "...RR......RR...",
-     "...RRR....RRR...",
-     "....RRR..RRR....",
-     ".....RRRRRR.....",
-     "......RRRR......",
-     "......RRRR......",
-     ".....RRRRRR.....",
-     "....RRR..RRR....",
-     "...RRR....RRR...",
-     "...RR......RR...",
-     "................",
-     "................",
-     "................",
-     "................",
-     },
-    {"R=D02020"},
-};
-PixelArt const kMatchItem{
-    {
-     "................",
-     "...DDDDDDDDDD...",
-     "...DLLLLLLLLD...",
-     "...DL......LD...",
-     "...DL.WWWW.LD...",
-     "...DL..WW..LD...",
-     "...DL..WW..LD...",
-     "...DL..WW..LD...",
-     "...DL..WW..LD...",
-     "...DL.WWWW.LD...",
-     "...DL......LD...",
-     "...DLLLLLLLLD...",
-     "...DDDDDDDDDD...",
-     "................",
-     "................",
-     "................",
-     },
-    {"D=373737", "L=8B8B8B", "W=FFFFFF"},
-};
-PixelArt const kMatchMod{
-    {
-     "................",
-     "...DDDDDDDDDD...",
-     "...DLLLLLLLLD...",
-     "...DL......LD...",
-     "...DLW....WLD...",
-     "...DLWW..WWLD...",
-     "...DLW.WW.WLD...",
-     "...DLW....WLD...",
-     "...DLW....WLD...",
-     "...DLW....WLD...",
-     "...DL......LD...",
-     "...DLLLLLLLLD...",
-     "...DDDDDDDDDD...",
-     "................",
-     "................",
-     "................",
-     },
-    {"D=373737", "L=8B8B8B", "W=FFFFFF"},
-};
-PixelArt const kMatchTags{
-    {
-     "................",
-     "...DDDDDDDDDD...",
-     "...DLLLLLLLLD...",
-     "...DL.W..W.LD...",
-     "...DLWWWWWWLD...",
-     "...DL.W..W.LD...",
-     "...DL.W..W.LD...",
-     "...DLWWWWWWLD...",
-     "...DL.W..W.LD...",
-     "...DL......LD...",
-     "...DL......LD...",
-     "...DLLLLLLLLD...",
-     "...DDDDDDDDDD...",
-     "................",
-     "................",
-     "................",
-     },
-    {"D=373737", "L=8B8B8B", "W=FFFFFF"},
-};
-PixelArt const kDurability{
-    {
-     "................",
-     "................",
-     "................",
-     "................",
-     "................",
-     "................",
-     "..DDDDDDDDDDDD..",
-     "..DGGGGGGGGYYD..",
-     "..DGGGGGGGGYYD..",
-     "..DDDDDDDDDDDD..",
-     "................",
-     "................",
-     "................",
-     "................",
-     "................",
-     "................",
-     },
-    {"D=1E1E1E", "G=3BBF3B", "Y=8B8B8B"},
-};
-PixelArt const kNbt{
-    {
-     "................",
-     "................",
-     "....WW....WW....",
-     "...W........W...",
-     "...W........W...",
-     "...W..W..W..W...",
-     "..W..........W..",
-     "...W........W...",
-     "...W..W..W..W...",
-     "...W........W...",
-     "...W........W...",
-     "....WW....WW....",
-     "................",
-     "................",
-     "................",
-     "................",
-     },
-    {"W=E0C030"},
-};
 
 IconFn layered(std::vector<PixelArt const*> arts) {
     return [arts = std::move(arts)](Painter& p, float x, float y) {
@@ -269,11 +122,27 @@ std::vector<TooltipLine> tip(std::string const& title, std::string const& detail
     return out;
 }
 
-class ToolSwapperTab final : public NativeTab {
+class ToolSwapperTab final : public FilterTab {
 public:
-    Size build(TabContext const& ctx, Rect area, WidgetGroup& widgets) override {
-        mDurability = mNbt = nullptr; // widgets of an earlier build are gone
-        update(ctx);
+    ToolSwapperTab()
+    : FilterTab("filter", 44, [this](TabContext const& ctx, Rect area, WidgetGroup& widgets) { addButtons(ctx, area, widgets); }) {}
+
+    void update(TabContext const& ctx) override {
+        read(ctx);
+        FilterTab::update(ctx);
+    }
+
+private:
+    void read(TabContext const& ctx) {
+        auto it = ctx.upgrade.tab.find("toolswapper");
+        if (it == ctx.upgrade.tab.end() || !it->is_object()) return;
+        mSwapWeapon = it->value("swapWeapon", true);
+        auto mode   = it->value("mode", std::string("name"));
+        mMode       = mode == "onlyTools" ? 1 : mode == "noSwap" ? 2 : 0;
+    }
+
+    void addButtons(TabContext const& ctx, Rect area, WidgetGroup& widgets) {
+        read(ctx);
         auto send = ctx.sendTabAction;
         auto op   = [send](std::string o) {
             return [send, o = std::move(o)](int) {
@@ -304,97 +173,10 @@ public:
         };
         tools.current = [this] { return mMode; };
         tools.onClick = op("mode");
-
-        // SC FilterLogicControl.Advanced at (x+3, y+44).
-        float fx = area.x + 3, fy = area.y + 44;
-        auto  toggle = [&](float dx, std::vector<ToggleButton::State> states, std::function<int()> current, std::string o) -> ToggleButton& {
-            auto& b   = widgets.add(std::make_unique<ToggleButton>());
-            b.rect    = {fx + dx, fy, 18, 18};
-            b.states  = std::move(states);
-            b.current = std::move(current);
-            b.onClick = op(std::move(o));
-            return b;
-        };
-        toggle(
-            0,
-            {{layered({&kAllow}), tip(ctr("abp.toolswapper.filter.allow", "Allow"))}, {layered({&kBlock}), tip(ctr("abp.toolswapper.filter.block", "Block"))}},
-            [this] { return mAllow ? 0 : 1; },
-            "allow"
-        );
-        toggle(
-            18,
-            {{layered({&kMatchItem}), tip(ctr("abp.toolswapper.filter.match_item", "Match Item"))},
-             {layered({&kMatchMod}), tip(ctr("abp.toolswapper.filter.match_mod", "Match Mod"))},
-             {layered({&kMatchTags}), tip(ctr("abp.toolswapper.filter.match_tags", "Match Tags"))}},
-            [this] { return mPrimary; },
-            "primary"
-        );
-        mDurability = &toggle(
-            36,
-            {{layered({&kDurability, &kCross}), tip(ctr("abp.toolswapper.filter.ignore_durability", "Ignore Durability"))},
-             {layered({&kDurability}), tip(ctr("abp.toolswapper.filter.match_durability", "Match Durability"))}},
-            [this] { return mMatchDurability ? 1 : 0; },
-            "durability"
-        );
-        mNbt = &toggle(
-            54,
-            {{layered({&kNbt, &kCross}), tip(ctr("abp.toolswapper.filter.ignore_nbt", "Ignore NBT"))}, {layered({&kNbt}), tip(ctr("abp.toolswapper.filter.match_nbt", "Match NBT"))}},
-            [this] { return mMatchNbt ? 1 : 0; },
-            "nbt"
-        );
-        auto& grid   = widgets.add(std::make_unique<SlotGrid>());
-        int   rows   = (static_cast<int>(mGhosts.size()) + mPerRow - 1) / mPerRow;
-        grid.columns = mPerRow;
-        grid.count   = static_cast<int>(mGhosts.size());
-        grid.rect    = {fx, fy + 21, static_cast<float>(mPerRow) * 18, static_cast<float>(rows) * 18};
-        grid.item    = [this](int i) -> ItemStack const* {
-            return i >= 0 && i < static_cast<int>(mGhosts.size()) && !mGhosts[static_cast<std::size_t>(i)].isNull() ? &mGhosts[static_cast<std::size_t>(i)] : nullptr;
-        };
-        grid.onClick = [send](int i, int, bool) {
-            if (send) send(nlohmann::json{{"toolswapper", "slot"}, {"index", i}});
-        };
-        update(ctx);
-        return {3 + static_cast<float>(mPerRow) * 18 + 6, 44 + 21 + static_cast<float>(rows) * 18 + 6};
     }
 
-    void update(TabContext const& ctx) override {
-        auto it = ctx.upgrade.tab.find("toolswapper");
-        if (it == ctx.upgrade.tab.end() || !it->is_object()) return;
-        auto const& j = *it;
-        mSwapWeapon   = j.value("swapWeapon", true);
-        auto mode     = j.value("mode", std::string("name"));
-        mMode         = mode == "onlyTools" ? 1 : mode == "noSwap" ? 2 : 0;
-        auto f        = j.value("filter", nlohmann::json::object());
-        mAllow        = f.value("allow", false);
-        mPrimary      = f.value("primary", 0);
-        mMatchDurability = f.value("durability", false);
-        mMatchNbt        = f.value("nbt", false);
-        mPerRow          = std::max(1, f.value("slotsInRow", 4));
-        mGhosts.clear();
-        for (auto const& g : f.value("ghosts", nlohmann::json::array())) {
-            core::ItemStackData d;
-            try {
-                if (!g.is_null()) d = core::ItemStackData::fromJson(g);
-            } catch (...) {
-            }
-            mGhosts.push_back(d.empty() ? ItemStack{} : game::ItemConv::toStack(d, 1));
-        }
-        // SC: durability / NBT buttons are hidden in TAGS mode.
-        if (mDurability) mDurability->visible = mPrimary != 2;
-        if (mNbt) mNbt->visible = mPrimary != 2;
-    }
-
-private:
-    bool                   mSwapWeapon      = true;
-    int                    mMode            = 0;
-    bool                   mAllow           = false;
-    int                    mPrimary         = 0;
-    bool                   mMatchDurability = false;
-    bool                   mMatchNbt        = false;
-    int                    mPerRow          = 4;
-    std::vector<ItemStack> mGhosts;
-    ToggleButton*          mDurability = nullptr; ///< owned by the tab's widget group
-    ToggleButton*          mNbt        = nullptr;
+    bool mSwapWeapon = true;
+    int  mMode       = 0;
 };
 
 } // namespace

@@ -1,0 +1,12 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:filter_upgrade_clear"
+    },
+    "tags": ["crafting_table"],
+    "ingredients": [{ "item": "alleviatedbackpacks:filter_upgrade" }],
+    "unlock": [{ "item": "alleviatedbackpacks:filter_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:filter_upgrade", "count": 1 }
+  }
+}

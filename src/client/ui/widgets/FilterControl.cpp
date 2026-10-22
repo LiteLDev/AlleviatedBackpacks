@@ -10,6 +10,7 @@
 
 #include "client/Client.h"
 #include "client/ui/widgets/SbStyle.h"
+#include "core/Filter.h"
 #include "game/ItemConv.h"
 #include "mod/Log.h"
 
@@ -138,8 +139,7 @@ void FilterControl::refreshTagsToAdd() {
     if (!mTagItem.isNull()) {
         auto data = game::ItemConv::toData(mTagItem);
         auto all  = game::ItemConv::tags().tagsOf(data);
-        std::sort(all.begin(), all.end());
-        all.erase(std::unique(all.begin(), all.end()), all.end());
+        core::sortTags(all); // SC TreeSet<ResourceLocation> order
         for (auto& t : all) {
             if (!t.empty() && std::find(mTags.begin(), mTags.end(), t) == mTags.end()) mTagsToAdd.push_back(std::move(t));
         }
@@ -314,7 +314,10 @@ bool FilterControl::mouseDown(MouseButton button, float x, float y) {
             send({{"op", "removeTag"}, {"tag", tag}});
             if (!mTagItem.isNull() && game::ItemConv::tags().hasTag(game::ItemConv::toData(mTagItem), tag)
                 && std::find(mTagsToAdd.begin(), mTagsToAdd.end(), tag) == mTagsToAdd.end()) {
-                mTagsToAdd.insert(std::lower_bound(mTagsToAdd.begin(), mTagsToAdd.end(), tag), tag);
+                mTagsToAdd.insert(
+                    std::lower_bound(mTagsToAdd.begin(), mTagsToAdd.end(), tag, [](std::string const& a, std::string const& b) { return core::tagLess(a, b); }),
+                    tag
+                );
             }
             mSelectedToRemove = std::max(0, mSelectedToRemove - 1);
         }

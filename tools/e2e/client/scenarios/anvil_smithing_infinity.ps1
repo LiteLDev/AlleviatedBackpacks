@@ -77,9 +77,10 @@ function Close-Backpack {
     Wait-LogLine 'native screen action: close by' 10 -Since $m | Out-Null
     Start-Sleep -Milliseconds 700
 }
-function Open-Backpack {
+function Open-Backpack([switch]$Held) {
     $m = Get-LogMark
-    Press-Key 'B'
+    # B opens the first backpack in SB order (chest, offhand, inventory from slot 0); right-click opens the held one.
+    if ($Held) { Click 0.5 0.5 -Relative -Right } else { Press-Key 'B' }
     Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $m | Out-Null
     Read-Layout $m
     Start-Sleep -Milliseconds 500
@@ -197,7 +198,7 @@ Write-Step 'smithing: netherite chestplate shift-clicked into the backpack'
 # ---- 3. survival infinity backpack ----------------------------------------------------------------------
 Press-Key '2'
 Start-Sleep -Milliseconds 500
-Open-Backpack
+Open-Backpack -Held
 Save-Screenshot 'infinity-open' | Out-Null
 $s0 = Storage-Pos 0
 Gui-Move $s0[0] $s0[1]

@@ -122,27 +122,32 @@ InsertResult BackpackInventory::insert(ItemStackData const& stack, AccessContext
         if (moved > 0 && !simulate) touched.push_back(i);
         return moved;
     };
-    // Pass 0: preferred slots (e.g. memory slots), in the order given. Each slot is filled once
-    // (as far as it goes); later passes skip it, which also keeps `simulate` from counting it twice.
+    // SC InventoryHandlerSlotTracker order: (1) stacks of the same item, (2) preferred slots
+    // (memory slots), in the order given, (3) other empty slots. Each slot is filled once (as far
+    // as it goes); later passes skip it, which also keeps `simulate` from counting it twice.
     std::vector<int> done;
+    auto isDone = [&](int i) { return std::find(done.begin(), done.end(), i) != done.end(); };
+    for (int i = 0; i < size() && remaining > 0; ++i) {
+        auto const& cur = mSlots[static_cast<std::size_t>(i)];
+        if (cur.empty() || !cur.sameItem(stack)) continue;
+        if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
+        remaining -= fill(i);
+        done.push_back(i);
+    }
     for (auto const& p : mPreferences) {
+        if (remaining <= 0) break;
         for (int i : p.fn(stack)) {
             if (remaining <= 0) break;
-            if (i < 0 || i >= size() || std::find(done.begin(), done.end(), i) != done.end()) continue;
+            if (i < 0 || i >= size() || isDone(i)) continue;
             if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
             remaining -= fill(i);
             done.push_back(i);
         }
     }
-    // Pass 1: merge into existing stacks. Pass 2: empty slots.
-    for (int pass = 0; pass < 2 && remaining > 0; ++pass) {
-        for (int i = 0; i < size() && remaining > 0; ++i) {
-            if (!done.empty() && std::find(done.begin(), done.end(), i) != done.end()) continue;
-            auto const& cur = mSlots[static_cast<std::size_t>(i)];
-            if (pass == 0 ? (cur.empty() || !cur.sameItem(stack)) : !cur.empty()) continue;
-            if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
-            remaining -= fill(i);
-        }
+    for (int i = 0; i < size() && remaining > 0; ++i) {
+        if (!mSlots[static_cast<std::size_t>(i)].empty() || isDone(i)) continue;
+        if (checkInsert(i, stack, ctx) != InsertVerdict::Allow) continue;
+        remaining -= fill(i);
     }
     r.inserted = stack.count - remaining;
     if (remaining > 0 && verdict == InsertVerdict::VoidOverflow) {

@@ -20,7 +20,7 @@
         "item": "minecraft:leather"
       },
       "C": {
-        "item": "minecraft:chest"
+        "tag": "alleviatedbackpacks:wooden_chests"
       }
     },
     "unlock": [

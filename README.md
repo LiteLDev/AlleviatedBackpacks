@@ -39,11 +39,17 @@ dedicated servers (BDS) and in single-player / local worlds on the client.
 - **Contents belong to the backpack, not to the player**: drop it, give it away, put it in a chest —
   the items stay inside. Data is stored in the world itself, so it moves with the world folder.
 - **Upgrades** go into the backpack's upgrade slots and can be switched on and off individually;
-  many have their own settings page with item filters (allow/deny list, match by item, namespace or
-  tag, NBT and durability options). The upgrade set follows Sophisticated Backpacks (pickup,
-  filter, magnet, feeding, compacting, void, restock/deposit, refill, stack, crafting, smelting,
-  inception, everlasting, jukebox, tool swapper, tank, pump, xp pump, alchemy, anvil, ...).
-  - The **Battery upgrade** has no Bedrock equivalent (there is no Forge Energy) and is not provided.
+  most have their own settings tab with item filters (allow/block list, match by item, namespace
+  or tag, NBT and durability options). Every Sophisticated Backpacks upgrade is there, basic and
+  advanced: Pickup, Filter, Magnet, Feeding, Compacting, Void, Restock, Deposit, Refill, Tool
+  Swapper, Jukebox, Pump, Alchemy, Mob Catcher; Stack (Starter, Tier 1-4, Omega, downgrades and
+  conversion items); Crafting, Stonecutter, Anvil, Smithing; Smelting, Smoking, Blasting and
+  their Auto versions; Inception, Everlasting, Infinity, Survival Infinity; Tank, Battery, XP Pump.
+  Only the Chipped and Sawmill compat upgrades are missing, because those mods are Java-only.
+  - Bedrock has no Forge Energy or fluid handlers, so AlleviatedBackpacks provides both as a small
+    public API (FE and mB) that the Tank, Battery, Pump and XP Pump upgrades use. Other mods can
+    use it too: see [docs/API.md](docs/API.md).
+- Feature-by-feature comparison with Sophisticated Backpacks: [docs/FEATURES.md](docs/FEATURES.md).
 - Backpacks can't be put into themselves, and by default not into other backpacks
   (an Inception upgrade allows it). Like Sophisticated Backpacks, shulker boxes fit in backpacks
   (`containerItemsDisallowed` refuses them) and backpacks don't fit in shulker boxes
@@ -70,6 +76,9 @@ Commands (alias `/abp`):
 
 ## Install
 
+There are two builds from the same source: `server` (for BDS) and `client` (for the game). Every
+player needs the **client** build, both on a server and in single player.
+
 ### Dedicated server (BDS + LeviLamina)
 
 1. Install LeviLamina 26.51.7 for the server (`lip install github.com/LiteLDev/LeviLamina@26.51.7`).
@@ -78,13 +87,19 @@ Commands (alias `/abp`):
 3. Start the server. On first start the mod adds its resource pack to
    `worlds/<level-name>/world_resource_packs.json` and asks clients to download it. The behavior pack
    (items and recipes) is loaded automatically.
+4. Tell your players to install the client mod (next section), then join the server as usual.
+   Players without it can still join and carry backpacks, but can't open backpack screens.
 
-### Client (LeviLauncher) — required to use backpacks, also for single player
+### Players: the client mod (LeviLauncher), for servers and single player
 
-1. Install the 1.26.51 game version with LeviLamina in LeviLauncher.
-2. Copy the `client` build folder `AlleviatedBackpacks/` into
-   `%APPDATA%\levilauncher.exe\versions\<version>\mods\`.
-3. Start the game; every local world gets the backpacks. No world settings need changing.
+1. In LeviLauncher, install the 1.26.51 game version with LeviLamina 26.51.7.
+2. Download the `client` build and copy its `AlleviatedBackpacks/` folder into
+   `%APPDATA%\levilauncher.exe\versions\<version>\mods\` (for example `versions\1.26.51.01\mods\`).
+3. Start the game.
+   - **Single player:** every local world gets the backpacks, recipes and upgrades. No world
+     settings need changing; the mod brings its own behavior and resource packs.
+   - **Multiplayer:** join a BDS running the `server` build. Use the same mod version on both.
+4. The key bindings are under Settings > Keyboard & Mouse (see Features).
 
 ### Configuration
 
@@ -104,7 +119,8 @@ Sophisticated Backpacks' own settings, with SB's names, defaults and ranges:
 additions, nerfs, max upgrades per storage, other-player opening, dedup, ...),
 `config/sophisticatedbackpacks-common.json` (`chestLootEnabled`) and
 `config/sophisticatedcore-common.json` (`enabledItems`). Upgrades add their own
-`config/<upgrade>.json` files; `config/admin.json` and `config/wearable.json` hold
+`config/<upgrade>.json` files with SB's sections for that upgrade (for example `refill.json`:
+`refillUpgrade.filterSlots`); `config/admin.json` and `config/wearable.json` hold
 AlleviatedBackpacks extras that are off by default.
 
 ## Building

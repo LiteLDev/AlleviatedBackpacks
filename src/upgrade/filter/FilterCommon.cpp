@@ -56,8 +56,7 @@ void normalize(core::Filter& filter, UpgradeTier tier, int slots) {
         filter.tags.clear();
     }
     // Keep the SC TreeSet invariant (the chest editor may write tags in any order).
-    std::sort(filter.tags.begin(), filter.tags.end());
-    filter.tags.erase(std::unique(filter.tags.begin(), filter.tags.end()), filter.tags.end());
+    core::sortTags(filter.tags);
     std::erase(filter.tags, std::string{});
     // SC ContentsFilterControl never leaves STORAGE on in TAGS mode (onTagsMatchSelected).
     if (filter.matchBy == core::MatchBy::Tag && filter.filterByStorage) filter.setContentsType(filter.nextContentsType());

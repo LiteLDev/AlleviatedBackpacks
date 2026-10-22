@@ -1,4 +1,5 @@
 {
+  "abp.everlasting.error.exists": "There's already Everlasting Upgrade in another upgrade slot",
   "abp.everlasting.name": "Everlasting Upgrade",
   "abp.everlasting.describe1": "§7Backpack becomes indestructible",
   "abp.everlasting.describe2": "§7Can't despawn or fall into void"
