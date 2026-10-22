@@ -167,7 +167,8 @@ void GuiVoider::drain() {
     if (!bp || slots.empty()) return;
     auto& inv = bp->inventory();
     for (int slot : slots) {
-        if (slot < inv.size() && !inv.at(slot).empty()) {
+        // Only what still matches (the slot may have changed since it was queued).
+        if (slot < inv.size() && settings.matches(inv.at(slot))) {
             (void)inv.extract(slot, inv.at(slot).count, core::AccessContext{core::Source::Upgrade});
         }
     }

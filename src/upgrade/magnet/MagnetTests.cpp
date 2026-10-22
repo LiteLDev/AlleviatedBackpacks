@@ -96,6 +96,17 @@ ItemActor* findItem(Player& player, ActorUniqueID id) {
     return static_cast<ItemActor*>(a);
 }
 
+/// Total count of `id` lying on the ground near the player.
+int groundCount(Player& player, std::string_view id, int range = 6) {
+    int n = 0;
+    for (auto* a : player.getDimensionBlockSource().getEntities(rangeBox(carrierPos(player), range), 2.0f, ActorType::ItemEntity)) {
+        if (!a || a->mRemoved || !a->isType(ActorType::ItemEntity)) continue;
+        auto const& s = static_cast<ItemActor*>(a)->item();
+        if (!s.isNull() && s.getTypeName() == id) n += s.mCount;
+    }
+    return n;
+}
+
 std::vector<ExperienceOrb*> orbsAround(Player& player, int range) {
     std::vector<ExperienceOrb*> out;
     for (auto* a : player.getDimensionBlockSource().getEntities(rangeBox(carrierPos(player), range), 2.0f, ActorType::Experience)) {
@@ -299,8 +310,7 @@ ABP_REGISTER_SELFTEST("magnet.full_backpack", [](Context& ctx) -> ll::coro::Coro
     int  cd    = tickMagnet(bp, slot, player);
     ctx.check(cd == kCooldownTicks, "something went in: cooldown 10");
     ctx.check(countOf(*bp, "minecraft:stone") == 64, "the part that fits is taken");
-    auto* rest = findItem(player, stone);
-    ctx.check(rest && rest->item().mCount == 6, "the rest (6) stays in the entity");
+    ctx.check(findItem(player, stone) == nullptr && groundCount(player, "minecraft:stone") == 6, "the rest (6) stays on the ground");
     cd = tickMagnet(bp, slot, player);
     ctx.check(cd == kFullCooldownTicks, "nothing fits: cooldown 40");
     UpgradeContext uc(bp, slot);

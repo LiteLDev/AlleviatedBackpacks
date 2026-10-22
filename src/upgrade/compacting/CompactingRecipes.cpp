@@ -36,6 +36,8 @@ struct Cache {
     std::uint64_t                                                generation = 0;
     Recipes const*                                               recipes    = nullptr;
     std::unordered_map<std::string, std::optional<Compaction>>  entries;
+    std::unordered_map<std::string, bool>                       uncompact; ///< uncompactMatches
+    std::unordered_map<std::string, CompactingShapes>           shapes;    ///< compactingShapes
 };
 Cache gCache;
 
@@ -153,6 +155,8 @@ std::optional<Compaction> lookup(Recipes const& recipes, core::ItemStackData con
 
 void dropCache() {
     gCache.entries.clear();
+    gCache.uncompact.clear();
+    gCache.shapes.clear();
     gCache.recipes = nullptr;
 }
 
@@ -200,10 +204,11 @@ private:
 
 } // namespace
 
-std::optional<Compaction> findCompaction(core::ItemStackData const& item, Shape const& shape) {
-    if (item.empty() || shape.count < 1) return std::nullopt;
+namespace {
+/// The current recipes with a cache that belongs to them (nullptr outside a world).
+Recipes const* currentRecipes() {
     auto level = ll::service::getLevel();
-    if (!level) return std::nullopt;
+    if (!level) return nullptr;
     Recipes const& recipes = level->getRecipes();
     auto           gen     = gGeneration.load();
     if (gCache.generation != gen || gCache.recipes != &recipes) {
@@ -211,6 +216,15 @@ std::optional<Compaction> findCompaction(core::ItemStackData const& item, Shape 
         gCache.generation = gen;
         gCache.recipes    = &recipes;
     }
+    return &recipes;
+}
+} // namespace
+
+std::optional<Compaction> findCompaction(core::ItemStackData const& item, Shape const& shape) {
+    if (item.empty() || shape.count < 1) return std::nullopt;
+    auto const* rp = currentRecipes();
+    if (!rp) return std::nullopt;
+    Recipes const& recipes = *rp;
     auto key = cacheKey(item.withCount(1), shape);
     if (auto it = gCache.entries.find(key); it != gCache.entries.end()) return it->second;
     std::optional<Compaction> found;
@@ -229,14 +243,19 @@ std::optional<Compaction> findCompaction(core::ItemStackData const& item, int gr
 }
 
 bool uncompactMatches(core::ItemStackData const& result, core::ItemStackData const& item, int count) {
-    auto level = ll::service::getLevel();
-    if (!level || result.empty() || item.empty()) return false;
+    if (result.empty() || item.empty()) return false;
+    auto const* recipes = currentRecipes();
+    if (!recipes) return false;
+    auto key = cacheKey(result.withCount(1), Shape::full(1)) + '>' + cacheKey(item.withCount(1), Shape{}) + '#' + std::to_string(count);
+    if (auto it = gCache.uncompact.find(key); it != gCache.uncompact.end()) return it->second;
+    bool found = false;
     try {
-        return isReversible(level->getRecipes(), result.withCount(1), item, count);
+        found = isReversible(*recipes, result.withCount(1), item, count);
     } catch (std::exception const& e) {
         log().error("uncompacting recipe lookup for {} failed: {}", result.id, e.what());
-        return false;
     }
+    gCache.uncompact.emplace(std::move(key), found);
+    return found;
 }
 
 namespace {
@@ -266,12 +285,16 @@ bool isPartOfCompactingLoop(core::ItemStackData const& first, core::ItemStackDat
 
 CompactingShapes compactingShapes(core::ItemStackData const& item) {
     CompactingShapes out;
+    if (item.empty() || !currentRecipes()) return out;
+    auto key = cacheKey(item.withCount(1), Shape{});
+    if (auto it = gCache.shapes.find(key); it != gCache.shapes.end()) return it->second;
     for (int grid : {2, 3}) {
         auto c = findCompaction(item, grid);
         if (!c || sameKind(c->result, item) || isPartOfCompactingLoop(item, c->result)) continue;
         (grid == 2 ? out.twoByTwo : out.threeByThree)                       = true;
         (grid == 2 ? out.twoByTwoUncraftable : out.threeByThreeUncraftable) = c->reversible;
     }
+    gCache.shapes.emplace(std::move(key), out);
     return out;
 }
 

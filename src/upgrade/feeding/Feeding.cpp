@@ -59,7 +59,11 @@ FeedingOptions optionsOf(UpgradeContext const& ctx) {
         int v   = old->get<int>();
         o.level = v == 0 ? HungerLevel::Any : v == 2 ? HungerLevel::Full : HungerLevel::Half;
     }
-    if (auto it = s.find(kWhenHurtKey); it != s.end() && it->is_boolean()) o.feedImmediatelyWhenHurt = it->get<bool>();
+    if (auto it = s.find(kWhenHurtKey); it != s.end() && it->is_boolean()) {
+        o.feedImmediatelyWhenHurt = it->get<bool>();
+    } else if (auto old = s.find("eatWhenHurt"); old != s.end() && old->is_boolean()) {
+        o.feedImmediatelyWhenHurt = old->get<bool>(); // phase-1 key
+    }
     return o;
 }
 

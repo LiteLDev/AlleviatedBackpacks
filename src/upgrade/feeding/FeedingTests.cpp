@@ -8,6 +8,7 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/GameType.h"
+#include "mc/world/phys/AABB.h"
 
 #include "game/ItemConv.h"
 #include "game/Storage.h"
@@ -256,9 +257,17 @@ ABP_REGISTER_SELFTEST("feeding.placed_range", [](Context& ctx) -> ll::coro::Coro
     ctx.check(countIn(*bp, "minecraft:bread") == 5, "player 6 blocks away is not fed");
     co_await ctx.ticks(101);
     setHunger(p, 0); // a backpack carried from an earlier test may have fed the player meanwhile
+    feet = p.getFeetPos(); // the player may have moved (fallen) meanwhile
+    x = static_cast<int>(std::floor(feet.x)), y = static_cast<int>(std::floor(feet.y)), z = static_cast<int>(std::floor(feet.z));
     PlacedTickContext near{UpgradeContext(bp, slot), reg, static_cast<int>(p.getDimensionId()), x + 2, y, z, 2, 2};
     byId(kBasicId)->onPlacedTick(near);
-    ctx.check(countIn(*bp, "minecraft:bread") == 4, "player within 3 blocks is fed");
+    auto const& bb = p.getAABB();
+    ctx.check(
+        countIn(*bp, "minecraft:bread") == 4,
+        "player within 3 blocks is fed (block " + std::to_string(x + 2) + "," + std::to_string(y) + "," + std::to_string(z) + ", player box "
+            + std::to_string(bb.min.x) + "," + std::to_string(bb.min.y) + "," + std::to_string(bb.min.z) + " food "
+            + std::to_string(eaterState(p).foodLevel) + ")"
+    );
 });
 
 ABP_REGISTER_SELFTEST("feeding.settings_menu", [](Context& ctx) -> ll::coro::CoroTask<> {

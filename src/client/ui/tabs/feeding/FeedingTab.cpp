@@ -12,6 +12,7 @@
 
 #include "client/Client.h"
 #include "client/ui/widgets/FilterControl.h"
+#include "client/ui/tabs/magnet/MfvcTab.h"
 
 namespace abp::client::ui::tabs::feeding {
 
@@ -176,6 +177,10 @@ public:
     AdvancedFeedingTab()
     : FilterTab("filter", 44, [this](TabContext const& ctx, Rect area, WidgetGroup& widgets) { addButtons(ctx, area, widgets); }) {}
 
+    Size build(TabContext const& ctx, Rect area, WidgetGroup& widgets) override {
+        return logTabBuilt(ctx, area, FilterTab::build(ctx, area, widgets), 44);
+    }
+
     void update(TabContext const& ctx) override {
         read(ctx);
         FilterTab::update(ctx);
@@ -226,7 +231,16 @@ private:
     bool mHurt  = true;
 };
 
-ABP_REGISTER_NATIVE_TAB("feeding", [] { return std::make_unique<FilterTab>("filter", 24); });
+/// SC FeedingUpgradeTab.Basic: only the filter control, at (x+3, y+24).
+class BasicFeedingTab final : public FilterTab {
+public:
+    BasicFeedingTab() : FilterTab("filter", 24) {}
+    Size build(TabContext const& ctx, Rect area, WidgetGroup& widgets) override {
+        return logTabBuilt(ctx, area, FilterTab::build(ctx, area, widgets), 24);
+    }
+};
+
+ABP_REGISTER_NATIVE_TAB("feeding", [] { return std::make_unique<BasicFeedingTab>(); });
 ABP_REGISTER_NATIVE_TAB("advanced_feeding", [] { return std::make_unique<AdvancedFeedingTab>(); });
 
 } // namespace

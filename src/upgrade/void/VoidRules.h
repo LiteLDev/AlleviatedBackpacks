@@ -119,27 +119,29 @@ struct VoidRules {
     using V = core::InsertVerdict;
     auto const& inv = q.inventory;
     if (q.ctx.source == core::Source::Internal) return V::Allow;
-    if (!r.matches || !r.matches(q.stack)) return V::Allow;
+    // The structural checks come first: `insert` asks once per slot, the filter is the costly part.
+    auto matches = [&] { return r.matches && r.matches(q.stack); };
     if (q.ctx.source == core::Source::Player) {
         if (!r.workInGui || r.type != VoidType::SlotOverflow) return V::Allow;
-        if (q.slot < 0) return hasSlotOverflowMatch(r, inv, q.stack) ? V::VoidOverflow : V::Allow;
+        if (q.slot < 0) return matches() && hasSlotOverflowMatch(r, inv, q.stack) ? V::VoidOverflow : V::Allow;
         auto const& cur = inv.at(q.slot);
-        if (cur.empty()) return hasSlotOverflowMatch(r, inv, q.stack, q.slot) ? V::Void : V::Allow;
-        return q.direct && cur.sameItem(q.stack) ? V::VoidOverflow : V::Allow;
+        if (cur.empty()) return matches() && hasSlotOverflowMatch(r, inv, q.stack, q.slot) ? V::Void : V::Allow;
+        return q.direct && cur.sameItem(q.stack) && matches() ? V::VoidOverflow : V::Allow;
     }
     switch (r.type) {
     case VoidType::Always:
-        return hasEmptySlot(inv) || hasStack(inv, q.stack) ? V::Void : V::Allow;
+        return matches() && (hasEmptySlot(inv) || hasStack(inv, q.stack)) ? V::Void : V::Allow;
     case VoidType::SlotOverflow:
         if (q.slot < 0) {
+            if (!matches()) return V::Allow;
             if (hasFullStack(inv, q.stack)) return V::Void;
             return hasStack(inv, q.stack) || hasEmptySlot(inv) ? V::VoidOverflow : V::Allow;
         }
-        if (inv.at(q.slot).empty()) return hasSlotOverflowMatch(r, inv, q.stack, q.slot) ? V::Void : V::Allow;
-        return q.direct && inv.at(q.slot).sameItem(q.stack) ? V::VoidOverflow : V::Allow;
+        if (inv.at(q.slot).empty()) return hasSlotOverflowMatch(r, inv, q.stack, q.slot) && matches() ? V::Void : V::Allow;
+        return q.direct && inv.at(q.slot).sameItem(q.stack) && matches() ? V::VoidOverflow : V::Allow;
     case VoidType::StorageOverflow:
-        if (q.slot < 0) return hasStack(inv, q.stack) || hasEmptySlot(inv) ? V::VoidOverflow : V::Allow;
-        return q.direct && inv.at(q.slot).sameItem(q.stack) && !hasEmptySlot(inv) ? V::VoidOverflow : V::Allow;
+        if (q.slot < 0) return matches() && (hasStack(inv, q.stack) || hasEmptySlot(inv)) ? V::VoidOverflow : V::Allow;
+        return q.direct && inv.at(q.slot).sameItem(q.stack) && !hasEmptySlot(inv) && matches() ? V::VoidOverflow : V::Allow;
     }
     return V::Allow;
 }

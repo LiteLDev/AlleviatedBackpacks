@@ -12,6 +12,7 @@
 
 #include "client/Client.h"
 #include "client/ui/widgets/FilterControl.h"
+#include "client/ui/tabs/magnet/MfvcTab.h"
 
 namespace abp::client::ui::tabs::voiding {
 
@@ -158,6 +159,10 @@ class VoidTab final : public FilterTab {
 public:
     VoidTab()
     : FilterTab("filter", 44, [this](TabContext const& ctx, Rect area, WidgetGroup& widgets) { addButtons(ctx, area, widgets); }) {}
+
+    Size build(TabContext const& ctx, Rect area, WidgetGroup& widgets) override {
+        return logTabBuilt(ctx, area, FilterTab::build(ctx, area, widgets), 44);
+    }
 
     void update(TabContext const& ctx) override {
         read(ctx);

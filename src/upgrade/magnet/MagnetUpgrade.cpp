@@ -26,6 +26,7 @@
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockSource.h"
 #include "mc/world/level/Level.h"
+#include "mc/world/level/Spawner.h"
 #include "mc/world/level/Tick.h"
 #include "mc/world/phys/AABB.h"
 
@@ -211,11 +212,18 @@ bool tryToInsertItem(game::Backpack& bp, Player* player, ItemActor& entity) {
     auto r     = bp.inventory().insert(data, core::AccessContext{core::Source::Pickup, player});
     int  taken = r.inserted + r.voided;
     if (taken <= 0) return false;
-    if (taken >= data.count) {
-        entity.remove(); // setItem(EMPTY) discards the entity
-    } else {
-        stack.set(data.count - taken);
+    if (taken < data.count) {
+        // SC setItem(remaining). Clients don't see count changes of an existing item entity, so
+        // the rest becomes a fresh entity at the same place.
+        ItemStack rest = stack;
+        rest.set(data.count - taken);
+        auto& region = entity.getDimensionBlockSource();
+        if (auto* fresh = region.getLevel().getSpawner().spawnItem(region, rest, nullptr, entity.getPosition(), 0)) {
+            fresh->pickupDelay() = entity.pickupDelay();
+            const_cast<Vec3&>(fresh->getPosDelta()) = Vec3{0.0f, 0.0f, 0.0f};
+        }
     }
+    entity.remove();
     return true;
 }
 

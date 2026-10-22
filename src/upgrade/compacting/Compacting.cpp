@@ -210,18 +210,31 @@ struct Engine : std::enable_shared_from_this<Engine> {
         return inv.insert(result, kUpgradeAccess, true).remainder.empty();
     }
 
-    /// SC `InventoryHelper.extractFromInventory`: `amount` of `item` from the slots in order.
-    static void extract(core::BackpackInventory& inv, core::ItemStackData const& item, int amount) {
-        for (int i = 0; i < inv.size() && amount > 0; ++i) {
+    /// SC `InventoryHelper.extractFromInventory`: up to `amount` of `item` from the slots in
+    /// order. Returns how many were (or would be) taken; `taken` records them for a roll-back.
+    static int extract(
+        core::BackpackInventory&                           inv,
+        core::ItemStackData const&                         item,
+        int                                                amount,
+        bool                                               simulate,
+        std::vector<std::pair<int, core::ItemStackData>>* taken = nullptr
+    ) {
+        int got = 0;
+        for (int i = 0; i < inv.size() && got < amount; ++i) {
             if (!inv.at(i).sameItem(item)) continue;
-            amount -= inv.extract(i, amount, kUpgradeAccess).count;
+            auto e = inv.extract(i, amount - got, kUpgradeAccess, simulate);
+            if (e.empty()) continue;
+            got += e.count;
+            if (taken) taken->emplace_back(i, std::move(e));
         }
+        return got;
     }
 
     void tryCompacting(core::BackpackInventory& inv, int slot, core::ItemStackData const& stack, CompactingDefinition const& def) {
         int total = def.count;
         if (def.result.empty() || total <= 0) return;
-        for (int guard = 0; countOf(inv, stack) >= total && guard < 100000; ++guard) {
+        // SC: while a simulated extraction yields a full set (extract filters may refuse some slots).
+        for (int guard = 0; extract(inv, stack, total, true) == total && guard < 100000; ++guard) {
             auto result = def.result;
             if (!fits(inv, result)) {
                 if (inv.at(slot).sameItem(stack) && inv.at(slot).count >= inv.slotLimit(slot, stack)) {
@@ -230,7 +243,15 @@ struct Engine : std::enable_shared_from_this<Engine> {
                 return;
             }
             fullSlotsToCompactLater.erase(kindOf(result));
-            extract(inv, stack, total);
+            std::vector<std::pair<int, core::ItemStackData>> taken;
+            if (extract(inv, stack, total, false, &taken) != total) {
+                // Should not happen after the simulation; never create a result from a partial set.
+                for (auto const& [s, e] : taken) {
+                    auto rest = inv.insertInto(s, e, core::AccessContext{core::Source::Internal}).remainder;
+                    if (!rest.empty()) (void)inv.insert(rest, core::AccessContext{core::Source::Internal});
+                }
+                return;
+            }
             (void)inv.insert(result, kUpgradeAccess);
         }
     }

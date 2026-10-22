@@ -7,28 +7,29 @@
 
 #include "client/Client.h"
 #include "client/ui/widgets/FilterControl.h"
+#include "client/ui/tabs/magnet/MfvcTab.h"
 
 namespace abp::client::ui::tabs::compacting {
 
 namespace {
 using L = Painter::Layer;
 
-/// 2x2 small items <-> one block (the result crafts back: only uncraftable).
+/// Small items <-> one block (the result crafts back: only uncraftable).
 PixelArt const kOnlyUncraftable{
     {
      "................",
-     ".II.II..........",
-     ".IS.IS....BBBBB.",
-     "..........BLLLB.",
-     ".II.II.A..BLLLB.",
-     ".IS.IS.AA.BLLLB.",
-     "......AAAABBBBB.",
-     ".......AA.......",
-     "....AA..A.......",
-     "...AA...........",
-     "..AAAA..........",
-     "...AA...........",
-     "....A...........",
+     ".II.II...BBBBBB.",
+     ".IS.IS...BLLLLB.",
+     ".........BLLLLB.",
+     ".II.II...BLLLLB.",
+     ".IS.IS...BLLLLB.",
+     ".........BBBBBB.",
+     "................",
+     "...A......A.....",
+     "..AA......AA....",
+     ".AAAAAAAAAAAA...",
+     "..AA......AA....",
+     "...A......A.....",
      "................",
      "................",
      "................",
@@ -36,22 +37,22 @@ PixelArt const kOnlyUncraftable{
     {"I=D8D8D8", "S=8A8A8A", "B=5A5A5A", "L=C8C8C8", "A=3FD23F"},
 };
 
-/// 2x2 small items -> one block (any recipe, one way).
+/// Small items -> one block (any recipe, one way).
 PixelArt const kAnything{
     {
      "................",
-     ".II.II..........",
-     ".IS.IS....BBBBB.",
-     "..........BLLLB.",
-     ".II.II.A..BLLLB.",
-     ".IS.IS.AA.BLLLB.",
-     "......AAAABBBBB.",
-     ".......AA.......",
-     "........A.......",
+     ".II.II...BBBBBB.",
+     ".IS.IS...BLLLLB.",
+     ".........BLLLLB.",
+     ".II.II...BLLLLB.",
+     ".IS.IS...BLLLLB.",
+     ".........BBBBBB.",
      "................",
-     "................",
-     "................",
-     "................",
+     "..........A.....",
+     "..........AA....",
+     "..AAAAAAAAAAA...",
+     "..........AA....",
+     "..........A.....",
      "................",
      "................",
      "................",
@@ -111,6 +112,10 @@ class CompactingTab final : public FilterTab {
 public:
     CompactingTab()
     : FilterTab("filter", 44, [this](TabContext const& ctx, Rect area, WidgetGroup& widgets) { addButtons(ctx, area, widgets); }) {}
+
+    Size build(TabContext const& ctx, Rect area, WidgetGroup& widgets) override {
+        return logTabBuilt(ctx, area, FilterTab::build(ctx, area, widgets), 44);
+    }
 
     void update(TabContext const& ctx) override {
         read(ctx);
