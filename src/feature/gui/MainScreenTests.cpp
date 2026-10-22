@@ -290,7 +290,8 @@ ABP_REGISTER_SELFTEST("mainscreen.locked_slot", [](Context& ctx) {
 
 /// A backpack of `tier` filled for the client scenario: varied items and counts (incl. an
 /// abbreviated count), gaps, a memory slot, two no-sort slots, a magnet upgrade (switch, error
-/// test) and, from iron up, a stack upgrade. The player also gets a second magnet upgrade.
+/// test), from iron up a stack upgrade, from gold a pickup upgrade (tab) and from diamond a tank and
+/// a battery (taken columns). The player also gets a second magnet upgrade.
 std::shared_ptr<game::Backpack> setupBackpack(Player& player, Tier tier) {
     auto bp = game::Storage::get().create(tier);
     if (!bp) return nullptr;
@@ -304,8 +305,14 @@ std::shared_ptr<game::Backpack> setupBackpack(Player& player, Tier tier) {
         }
     };
     install("magnet");
-    if (tier >= Tier::Iron) install("stack_tier_2");
+    if (tier == Tier::Iron) install("stack_tier_2");
+    if (tier >= Tier::Gold) install("stack_tier_4");
     if (tier >= Tier::Gold) install("pickup");
+    // Diamond and netherite: a tank and a battery take 2 storage columns each (bars right of the slots).
+    if (tier >= Tier::Diamond) {
+        install("tank");
+        install("battery");
+    }
     static constexpr std::string_view kItems[] = {
         "minecraft:cobblestone", "minecraft:dirt",    "minecraft:oak_log",  "minecraft:diamond", "minecraft:iron_ingot",
         "minecraft:apple",       "minecraft:redstone", "minecraft:oak_planks", "minecraft:torch", "minecraft:gold_ingot",

@@ -42,16 +42,19 @@ function With-Key([int]$vk, [scriptblock]$body) {
     [AbpE2E.Native]::Key([uint16]$vk, $false); Start-Sleep -Milliseconds 80
     try { & $body } finally { [AbpE2E.Native]::Key([uint16]$vk, $true); Start-Sleep -Milliseconds 150 }
 }
-function Expect-Layout([int]$slots) {
+# $slots: the tier's slots; $taken: storage columns taken by tank / battery bars (2 each).
+function Expect-Layout([int]$slots, [int]$taken = 0) {
     $cols = if ($slots -le 81) { 9 } else { 12 }
     $rows = [math]::Ceiling($slots / $cols)
     $fit  = [math]::Floor(($L.ScreenH - 114) / 18)
     $vis  = [math]::Min($rows, [math]::Max(1, $fit))
     $w    = $cols * 18 + 14 + $(if ($vis -lt $rows) { 6 } else { 0 })
-    if ($L.Width -ne $w -or $L.Height -ne 114 + 18 * $vis -or $L.Rows -ne $rows -or $L.Visible -ne $vis -or $L.Cols -ne $cols) {
-        throw "layout for $slots slots: expected ${w}x$(114 + 18 * $vis) rows $vis/$rows cols $cols, got $($L.Width)x$($L.Height) rows $($L.Visible)/$($L.Rows) cols $($L.Cols)"
+    $shown = $slots - $taken * $rows
+    if ($L.Width -ne $w -or $L.Height -ne 114 + 18 * $vis -or $L.Rows -ne $rows -or $L.Visible -ne $vis -or $L.Cols -ne $cols - $taken -or $L.Slots -ne $shown) {
+        throw "layout for $slots slots ($taken taken): expected ${w}x$(114 + 18 * $vis) rows $vis/$rows cols $($cols - $taken) slots $shown, got $($L.Width)x$($L.Height) rows $($L.Visible)/$($L.Rows) cols $($L.Cols) slots $($L.Slots)"
     }
 }
+$takenOf = @{ leather = 0; copper = 0; iron = 0; gold = 0; diamond = 4; netherite = 4 }
 function Open-Backpack {
     $mark = Get-LogMark
     Press-Key 'B'
@@ -93,7 +96,7 @@ $slotsOf = @{ leather = 27; copper = 45; iron = 54; gold = 81; diamond = 108; ne
 foreach ($tier in 'leather', 'copper', 'iron', 'gold', 'diamond', 'netherite') {
     Setup-Tier $tier
     Open-Backpack
-    Expect-Layout $slotsOf[$tier]
+    Expect-Layout $slotsOf[$tier] $takenOf[$tier]
     Gui-Move ($L.Width / 2) -12
     Start-Sleep -Milliseconds 300
     Save-Screenshot "$tier-open" | Out-Null
@@ -104,6 +107,13 @@ foreach ($tier in 'leather', 'copper', 'iron', 'gold', 'diamond', 'netherite') {
     Gui-Move $p[0] $p[1]
     Start-Sleep -Milliseconds 400
     Save-Screenshot "$tier-count-tooltip" | Out-Null
+    if ($takenOf[$tier] -gt 0) {
+        # Tank and battery bars right of the slots (36 units each): hover the tank.
+        $partX = 7 + $L.Cols * 18 + $(if ($L.Scroll) { 6 } else { 0 })
+        Gui-Move ($partX + 18) (17 + 20)
+        Start-Sleep -Milliseconds 400
+        Save-Screenshot "$tier-tank-bar" | Out-Null
+    }
     if ($tier -eq 'netherite' -or $tier -eq 'leather') {
         $p = Storage-Pos 10 # ender pearls
         Gui-Move $p[0] $p[1]
@@ -243,7 +253,7 @@ Start-Sleep -Milliseconds 400
 # Error overlay: a second magnet upgrade into a free upgrade slot.
 $h1 = Hotbar-Pos 1
 Gui-Click $h1[0] $h1[1]
-$u = Upgrade-Pos 4
+$u = Upgrade-Pos 5
 Gui-Click $u[0] $u[1]
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'error-overlay' | Out-Null
@@ -294,7 +304,7 @@ foreach ($h in 640, 600, 560) {
     Close-Backpack
 }
 if (-not $L.Scroll) { throw "no scroll bar at any window height (rows $($L.Visible)/$($L.Rows))" }
-Expect-Layout 120
+Expect-Layout 120 4
 Save-Screenshot 'scroll-top' | Out-Null
 $p = Storage-Pos 13
 Gui-Move $p[0] $p[1]
