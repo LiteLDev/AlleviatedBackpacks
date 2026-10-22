@@ -112,7 +112,7 @@ try {
     Start-Sleep -Seconds 1
     Save-Screenshot 'placed-display' | Out-Null
     $i = 0
-    foreach ($p in '5 -4 -3 3 -90 0 0 0.5', '5 -2 -3 1 -90 0 0 0.5', '5 0 -2 2 -90 0 0 0.5', '5 -3 -5 2 -90 0 0 0.5', '5 -5 -1 1 -90 0 0 0.5') {
+    foreach ($p in '5 -5 -1 1 -90 0 0 0.5') {
         Invoke-Chat "/backpack modeltest pose `"$p`""
         Start-Sleep -Milliseconds 800
         Save-Screenshot "calib-display-$i" | Out-Null

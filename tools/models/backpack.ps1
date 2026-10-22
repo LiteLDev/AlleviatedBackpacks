@@ -512,7 +512,7 @@ $dgeo | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding ut
 [ordered]@{ format_version = '1.8.0'; render_controllers = [ordered]@{
     'controller.render.alleviatedbackpacks.backpack_display' = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Texture.default') }
 } } | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding utf8 (Join-Path $rp 'render_controllers/alleviatedbackpacks_backpack_display.render_controllers.json')
-$displayPose = Pose 5 @(-2, 0, 3) @(-90, 0, 0) 0.5
+$displayPose = Pose 5 @(-5, -1, 1) @(-90, 0, 0) 0.5
 $displayPose.rotation[2] = "($($displayPose.rotation[2])) + v.abp_rot"
 $displayPose.position[2] = "($($displayPose.position[2])) - v.abp_z * 0.5"
 # rightItem: rotation around the anchor normal (SC rotation) and depth (SC z offset: 1 = one item pixel).
