@@ -95,6 +95,10 @@ void FilterControl::setState(nlohmann::json const& s) {
     refreshTagsToAdd();
     mSelectedToRemove = std::clamp(mSelectedToRemove, 0, std::max(0, static_cast<int>(mTags.size()) - 1));
     rect = {mX, mY, width(), height()};
+    if (mLastPrimary >= 0 && mLastPrimary != mPrimary) {
+        abp::log().info("filter control: key={} primary match {} -> {} (tags mode {})", mKey, mLastPrimary, mPrimary, tagsMode() ? "on" : "off");
+    }
+    mLastPrimary = mPrimary;
     if (mLastHeight >= 0 && mLastHeight != rect.h) mSizeChanged = true;
     mLastHeight = rect.h;
 }

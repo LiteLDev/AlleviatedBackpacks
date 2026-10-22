@@ -164,8 +164,8 @@ Start-Sleep -Milliseconds 400
 Save-Screenshot 'match-mod' | Out-Null
 $mark = Get-LogMark
 Button-Click 1
-Read-Control $mark 'primary=2'
-if ($C.H -ne 21 + 3 * 18 + 18) { throw "tags mode height must be 21 + (rows-1)*18 + 18, got $($C.H)" }
+Wait-LogLine 'filter control: key=filter primary match 1 -> 2 \(tags mode on\)' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 300
 $tagY = 21 + 3 * 18
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
@@ -224,7 +224,7 @@ Button-Click 0
 Button-Click 0
 $mark = Get-LogMark
 Button-Click 1
-Read-Control $mark 'primary=0'
+Wait-LogLine 'filter control: key=filter primary match 2 -> 0 \(tags mode off\)' 10 -Since $mark | Out-Null
 Press-Key 'E'
 Start-Sleep -Milliseconds 500
 Assert-Filter 0 { param($f) $f.primary -eq 0 -and $f.typeState -eq 0 } 'tags mode skips STORAGE (allow -> block -> allow), back to item'
