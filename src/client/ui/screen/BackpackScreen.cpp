@@ -336,7 +336,6 @@ private:
         float            x, y;
     };
     std::vector<PendingCount> mPendingCounts;
-    ItemStack                 mDragStack;
 
     // shift + double click (vanilla quick move all)
     SlotRef mLastShiftClick;
@@ -675,9 +674,9 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     auto& counts = mPendingCounts;
     counts.clear();
     auto const* player  = currentPlayer();
-    ItemStack   carried = player ? player->mPlayerUIContainer->getItem(0) : ItemStack{};
-    // Drag previews show the carried item (rebuilt from its data, like the slot stacks).
-    if (!carried.isNull()) mDragStack = game::ItemConv::toStack(game::ItemConv::toData(carried), 1);
+    static ItemStack const kNone;
+    // The cursor stack itself (copies of it render block icons squashed in the drag previews).
+    ItemStack const& carried = player ? player->mPlayerUIContainer->getItem(0) : kNone;
 
     // Inventory parts of upgrades taking storage columns (SC renderUpgradeInventoryControls).
     renderInventoryParts(p, m, inventoryPartsRect(), mx, my);
@@ -699,7 +698,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         bool        inaccessible = i < m.inaccessible.size() && m.inaccessible[i];
         if (auto preview = dragging ? dragPreviewFor(m, ref) : std::nullopt) {
             p.fillRect({x, y, 16, 16}, overSlot(0xFFFFFF, 0x80)); // renderStack(flag): -2130706433
-            p.item(mDragStack, x, y);
+            p.item(carried, x, y);
             counts.push_back({preview->overlay, x, y});
         } else if (d.empty()) {
             // Memory slot: the remembered item with SC's overlay (renderSlotBackground + drawStackOverlay).
@@ -727,7 +726,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             auto const& s = inv.getItem(i);
             if (auto preview = dragging ? dragPreviewFor(m, {SlotRef::Area::Inventory, i}) : std::nullopt) {
                 p.fillRect({x, y, 16, 16}, overSlot(0xFFFFFF, 0x80));
-                p.item(mDragStack, x, y);
+                p.item(carried, x, y);
                 counts.push_back({preview->overlay, x, y});
             } else if (!s.isNull()) {
                 p.item(s, x, y);
@@ -950,6 +949,10 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
     p.flush();
     // Counts (SC z+200, above items): text drawn in the flush right after the slot items is hidden by
     // the slot frames on Bedrock, so they come after the controls' flushes.
+    // A visible quad in the same flush is needed too (empirically: text-only flushes, or off-screen /
+    // transparent quads, leave the counts under the frames): one white pixel on the panel's white
+    // top bevel, where it changes nothing.
+    p.fillRect({mLeft + 3, mTop + 1, 1, 1}, sb::color::PANEL_LITE);
     for (auto const& c : mPendingCounts) drawCountOverlay(p, c.overlay, c.x, c.y);
     p.flush();
     drawErrorOverlay(p, *m);

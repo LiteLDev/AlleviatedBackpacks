@@ -148,13 +148,13 @@ Save-Screenshot 'leather-drag-done' | Out-Null
 # Cursor holds the rest (29 - 9 - 9 = 11): put it into slot 12 again.
 Gui-Click $p12[0] $p12[1]
 
-# Shift + double-click with an item on the cursor: every cobblestone stack goes to the inventory.
-$h1 = Hotbar-Pos 1
-Gui-Click $h1[0] $h1[1]             # the spare magnet upgrade onto the cursor
+# Shift + double-click: the first click moves slot 24's cobblestone, the second every other
+# cobblestone stack of the storage (vanilla lastQuickMoved).
+$p24 = Storage-Pos 24
 $mark = Get-LogMark
 With-Key 0x10 {
     # Two clicks within vanilla's 250 ms double-click window.
-    Gui-Move $p0[0] $p0[1]
+    Gui-Move $p24[0] $p24[1]
     [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 40; [AbpE2E.Native]::MouseButton(0, $true)
     Start-Sleep -Milliseconds 80
     [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 40; [AbpE2E.Native]::MouseButton(0, $true)
@@ -162,9 +162,7 @@ With-Key 0x10 {
 }
 Wait-LogLine 'native screen action: quickMoveAll by .* \(ok\)' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 500
-Save-Screenshot 'leather-quick-move-all' | Out-Null
-Gui-Click $h1[0] $h1[1]             # magnet back
-Close-Backpack
+Save-Screenshot 'leather-quick-move-all' | Out-NullClose-Backpack
 
 # ---- netherite: transfer, sort-by modes, search, error overlay, switches, tabs --------------------
 Setup-Tier 'netherite'
