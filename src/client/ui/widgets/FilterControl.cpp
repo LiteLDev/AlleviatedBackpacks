@@ -48,40 +48,52 @@ void FilterControl::setPosition(float x, float y) {
 
 void FilterControl::setState(nlohmann::json const& s) {
     if (!s.is_object()) return;
-    try {
-        mHasState      = true;
-        mSlots         = std::clamp(s.value("slots", 9), 0, 64);
-        mPerRow        = std::clamp(s.value("perRow", 3), 1, 16);
-        mAdvanced      = s.value("advanced", false);
-        mType          = typeOf(s.value("type", std::string("contents")));
-        mTypeState     = s.value("typeState", 1);
-        mPrimary       = std::clamp(s.value("primary", 0), 0, 2);
-        mDurability    = s.value("dur", false);
-        mNbt           = s.value("nbt", false);
-        mAnyTag        = s.value("anyTag", true);
-        mSlotsEnabled  = s.value("slotsEnabled", true);
-        mButtonsVisible = mType != Type::None || mAdvanced;
-        std::vector<std::string> tags;
-        if (auto it = s.find("tags"); it != s.end() && it->is_array()) {
-            for (auto const& t : *it) {
-                if (t.is_string()) tags.push_back(t.get<std::string>());
-            }
+    // Parse everything first: a malformed field leaves the previous state untouched.
+    auto num = [&](char const* key, int def) {
+        auto it = s.find(key);
+        return it != s.end() && it->is_number_integer() ? it->get<int>() : def;
+    };
+    auto flag = [&](char const* key, bool def) {
+        auto it = s.find(key);
+        return it != s.end() && it->is_boolean() ? it->get<bool>() : def;
+    };
+    auto typeIt = s.find("type");
+    int  slots  = std::clamp(num("slots", 9), 0, 64);
+    std::vector<std::string> tags;
+    if (auto it = s.find("tags"); it != s.end() && it->is_array()) {
+        for (auto const& t : *it) {
+            if (t.is_string()) tags.push_back(t.get<std::string>());
         }
-        bool tagsChanged = tags != mTags;
-        mTags            = std::move(tags);
-        mItems.assign(static_cast<std::size_t>(mSlots), ItemStack{});
-        if (auto it = s.find("items"); it != s.end() && it->is_array()) {
-            for (int i = 0; i < mSlots && i < static_cast<int>(it->size()); ++i) {
-                auto const& j = (*it)[static_cast<std::size_t>(i)];
-                if (j.is_null()) continue;
-                auto d = core::ItemStackData::fromJson(j);
-                if (!d.empty()) mItems[static_cast<std::size_t>(i)] = game::ItemConv::toStack(d, 1);
-            }
-        }
-        if (tagsChanged) refreshTagsToAdd();
-        mSelectedToRemove = std::clamp(mSelectedToRemove, 0, std::max(0, static_cast<int>(mTags.size()) - 1));
-    } catch (...) {
     }
+    std::vector<ItemStack> items(static_cast<std::size_t>(slots));
+    if (auto it = s.find("items"); it != s.end() && it->is_array()) {
+        for (int i = 0; i < slots && i < static_cast<int>(it->size()); ++i) {
+            auto const& j = (*it)[static_cast<std::size_t>(i)];
+            if (j.is_null()) continue;
+            try {
+                auto d = core::ItemStackData::fromJson(j);
+                if (!d.empty()) items[static_cast<std::size_t>(i)] = game::ItemConv::toStack(d, 1);
+            } catch (...) {
+            }
+        }
+    }
+    mHasState       = true;
+    mSlots          = slots;
+    mPerRow         = std::clamp(num("perRow", 3), 1, 16);
+    mAdvanced       = flag("advanced", false);
+    mType           = typeOf(typeIt != s.end() && typeIt->is_string() ? typeIt->get<std::string>() : std::string("contents"));
+    mTypeState      = num("typeState", 1);
+    mPrimary        = std::clamp(num("primary", 0), 0, 2);
+    mDurability     = flag("dur", false);
+    mNbt            = flag("nbt", false);
+    mAnyTag         = flag("anyTag", true);
+    mSlotsEnabled   = flag("slotsEnabled", true);
+    mButtonsVisible = mType != Type::None || mAdvanced;
+    mTags           = std::move(tags);
+    mItems          = std::move(items);
+    // Recomputed from the server's tag list every time (an add the server refused comes back).
+    refreshTagsToAdd();
+    mSelectedToRemove = std::clamp(mSelectedToRemove, 0, std::max(0, static_cast<int>(mTags.size()) - 1));
     rect = {mX, mY, width(), height()};
     if (mLastHeight >= 0 && mLastHeight != rect.h) mSizeChanged = true;
     mLastHeight = rect.h;

@@ -75,6 +75,9 @@ struct Filter {
     bool                       filterByInventory = false; ///< SB filter_by_inventory (DepositFilterType::Inventory)
     std::vector<ItemStackData> ghosts;         ///< fixed size; empty entries are unused slots (count is 1 when set)
     std::vector<std::string>   tags;           ///< selected tags, sorted and unique (SC TreeSet)
+    /// Phase-1 data (no "v"): a tag filter without selected tags matched the tags of its filter
+    /// items. Kept for such stored filters until a tag is selected; new filters never set it.
+    bool                       legacyGhostTags = false;
 
     Filter() = default;
     explicit Filter(int slots) : ghosts(static_cast<std::size_t>(slots)) {}

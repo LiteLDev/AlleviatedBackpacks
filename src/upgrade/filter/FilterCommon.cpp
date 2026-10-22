@@ -11,6 +11,7 @@
 #include "game/Backpack.h"
 #include "mod/Config.h"
 #include "mod/I18n.h"
+#include "net/NativeScreens.h"
 #include "ui/menu/BackpackMenu.h"
 #include "upgrade/UpgradeManager.h"
 
@@ -54,20 +55,27 @@ void normalize(core::Filter& filter, UpgradeTier tier, int slots) {
         filter.matchAnyTag     = true;
         filter.tags.clear();
     }
+    // Keep the SC TreeSet invariant (the chest editor may write tags in any order).
+    std::sort(filter.tags.begin(), filter.tags.end());
+    filter.tags.erase(std::unique(filter.tags.begin(), filter.tags.end()), filter.tags.end());
+    std::erase(filter.tags, std::string{});
+    // SC ContentsFilterControl never leaves STORAGE on in TAGS mode (onTagsMatchSelected).
+    if (filter.matchBy == core::MatchBy::Tag && filter.filterByStorage) filter.setContentsType(filter.nextContentsType());
 }
 
 core::Filter read(nlohmann::json const& settings, int slots, core::FilterDefaults defaults, std::string_view group) {
     nlohmann::json stored = settings.is_object() ? settings.value(std::string(kFilterKey), nlohmann::json()) : nlohmann::json();
     auto           f      = core::Filter::fromJson(stored, slots, defaults);
-    if (stored.is_object() && !stored.empty() && !stored.contains("v")) {
+    bool           legacy = !(stored.is_object() && stored.contains("v"));
+    if (legacy && stored.is_object() && !stored.empty()) {
         // Phase 1: an empty allow list accepted everything (= SC's empty block list).
         auto old = core::Filter::fromJson(stored, slots);
         if (old.mode == core::FilterMode::Allow && old.emptyAllowsAll && old.isEmpty()) f.mode = core::FilterMode::Deny;
-        // Phase 1 Deposit / Restock "contents" toggle.
-        if (settings.value("contents", false)) {
-            if (group == "deposit") f.filterByInventory = true;
-            else f.filterByStorage = true;
-        }
+    }
+    // Phase 1 Deposit / Restock "contents" toggle (stored next to the filter, possibly without one).
+    if (legacy && settings.is_object() && settings.value("contents", false)) {
+        if (group == "deposit") f.filterByInventory = true;
+        else f.filterByStorage = true;
     }
     return f;
 }
@@ -103,9 +111,25 @@ std::vector<core::ItemStackData> storedItems(game::Backpack& backpack) {
     return out;
 }
 
+namespace {
+/// The distinct stored items, recomputed only when the backpack changed (hot hooks call this).
+struct StoredItemsCache {
+    std::uint64_t                    revision = ~std::uint64_t{0};
+    std::vector<core::ItemStackData> items;
+};
+std::vector<core::ItemStackData> const& cachedStoredItems(game::Backpack& backpack) {
+    auto& cache = backpack.transient<StoredItemsCache>("filtering:stored_items");
+    if (cache.revision != backpack.revision()) {
+        cache.items    = storedItems(backpack);
+        cache.revision = backpack.revision();
+    }
+    return cache.items;
+}
+} // namespace
+
 bool matchesContents(core::Filter const& filter, game::Backpack& backpack, core::ItemStackData const& item) {
     if (!filter.filterByStorage) return filter.matchesContents(item, {}, &matcher());
-    auto stored = storedItems(backpack);
+    auto const& stored = cachedStoredItems(backpack);
     auto const& memory = feature::gui::memory(backpack);
     return filter.matchesContents(item, stored, &matcher(), [&](core::ItemStackData const& i) {
         return std::any_of(memory.begin(), memory.end(), [&](core::ItemStackData const& m) {
@@ -176,6 +200,26 @@ bool stillInstalled(UpgradeContext const& ctx, std::string const& itemId) {
     if (ctx.slot() < 0 || ctx.slot() >= static_cast<int>(slots.size())) return false;
     auto const& s = slots[static_cast<std::size_t>(ctx.slot())];
     return !s.empty() && s.item.id == itemId;
+}
+
+void registerStandardFilterTab(std::string group) {
+    auto tierOf = [](UpgradeContext const& ctx) {
+        auto* type = upgradeFor(ctx.state().item);
+        return type ? type->info().tier : UpgradeTier::Basic;
+    };
+    registerSettingsFilterTab(SettingsFilterTab{
+        .upgrade = group,
+        .key     = "filter",
+        .spec    = [group, tierOf](UpgradeContext const& ctx) { return specFor(group, tierOf(ctx)); },
+        .load    = [tierOf](UpgradeContext const& ctx) { return load(ctx, tierOf(ctx)); },
+        .store   = [tierOf](UpgradeContext const& ctx, core::Filter const& f) { store(ctx, tierOf(ctx), f); },
+    });
+    net::TabDataRegistry::add(net::TabDataProvider{
+        group,
+        [group, tierOf](Player& player, UpgradeContext const& ctx) {
+            return tabTexts(player, group, tierOf(ctx) == UpgradeTier::Advanced);
+        },
+    });
 }
 
 nlohmann::json tabTexts(Player& player, std::string_view group, bool advanced) {
