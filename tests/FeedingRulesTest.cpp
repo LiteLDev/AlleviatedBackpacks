@@ -3,84 +3,62 @@
 #include "upgrade/feeding/FeedingRules.h"
 
 using namespace abp::upgrade::feeding;
-using abp::core::Filter;
-using abp::core::FilterMode;
-using abp::core::ItemStackData;
 
 namespace {
-EaterState eater(int hunger, float health = 20.f) {
+EaterState eater(int food, float health = 20.f) {
     EaterState s;
-    s.hunger = hunger;
-    s.health = health;
+    s.foodLevel = food;
+    s.health    = health;
     return s;
 }
 } // namespace
 
-TEST(FeedingRules, NeverWhenFull) {
-    for (auto mode : {HungerMode::Always, HungerMode::Half, HungerMode::Full}) {
-        EXPECT_FALSE(shouldEat(eater(20), 1, {mode, true}));
-        EXPECT_FALSE(shouldEat(eater(20, 1.f), 1, {mode, true}));
+TEST(FeedingRules, NeverWhenNotHungry) {
+    for (auto level : {HungerLevel::Any, HungerLevel::Half, HungerLevel::Full}) {
+        EXPECT_FALSE(shouldFeed(eater(20), 1, {level, true}));
+        EXPECT_FALSE(shouldFeed(eater(20, 1.f), 1, {level, true}));
     }
 }
 
 TEST(FeedingRules, FullMeansNoWaste) {
-    FeedingOptions o{HungerMode::Full, false};
-    EXPECT_FALSE(shouldEat(eater(13), 8, o)); // missing 7 < 8
-    EXPECT_TRUE(shouldEat(eater(12), 8, o));  // missing 8
-    EXPECT_TRUE(shouldEat(eater(0), 8, o));
+    FeedingOptions o{HungerLevel::Full, false};
+    EXPECT_FALSE(shouldFeed(eater(13), 8, o)); // hunger 7 < 8
+    EXPECT_TRUE(shouldFeed(eater(12), 8, o));  // hunger 8
+    EXPECT_TRUE(shouldFeed(eater(0), 8, o));
 }
 
-TEST(FeedingRules, HalfAndAlways) {
-    FeedingOptions half{HungerMode::Half, false};
-    EXPECT_TRUE(shouldEat(eater(16), 8, half));  // missing 4 = half of 8
-    EXPECT_FALSE(shouldEat(eater(17), 8, half)); // missing 3
-    EXPECT_TRUE(shouldEat(eater(17), 5, half));  // missing 3 >= 2.5
-    EXPECT_FALSE(shouldEat(eater(18), 5, half)); // missing 2 < 2.5
-    FeedingOptions always{HungerMode::Always, false};
-    EXPECT_TRUE(shouldEat(eater(19), 20, always));
+TEST(FeedingRules, HalfUsesIntegerHalfAndAnyFeedsAlways) {
+    FeedingOptions half{HungerLevel::Half, false};
+    EXPECT_TRUE(shouldFeed(eater(16), 8, half));  // 8/2 = 4 <= 4
+    EXPECT_FALSE(shouldFeed(eater(17), 8, half)); // 4 > 3
+    EXPECT_TRUE(shouldFeed(eater(18), 5, half));  // 5/2 = 2 <= 2 (integer division, as SC)
+    EXPECT_FALSE(shouldFeed(eater(19), 5, half)); // 2 > 1
+    FeedingOptions any{HungerLevel::Any, false};
+    EXPECT_TRUE(shouldFeed(eater(19), 20, any));
 }
 
-TEST(FeedingRules, HurtOverridesWaste) {
-    FeedingOptions o{HungerMode::Full, true};
-    EXPECT_FALSE(shouldEat(eater(19, 10.f), 8, o)); // exactly half is not below half
-    EXPECT_TRUE(shouldEat(eater(19, 9.f), 8, o));
-    o.eatWhenHurt = false;
-    EXPECT_FALSE(shouldEat(eater(19, 9.f), 8, o));
+TEST(FeedingRules, HurtIgnoresHungerSetting) {
+    FeedingOptions o{HungerLevel::Full, true};
+    EXPECT_FALSE(shouldFeed(eater(19, 20.f), 8, o));  // not hurt
+    EXPECT_FALSE(shouldFeed(eater(19, 19.95f), 8, o)); // within 0.1 of max health is not hurt
+    EXPECT_TRUE(shouldFeed(eater(19, 19.5f), 8, o));   // any missing health
+    o.feedImmediatelyWhenHurt = false;
+    EXPECT_FALSE(shouldFeed(eater(19, 2.f), 8, o));
 }
 
-TEST(FeedingRules, HarmfulNeedsExplicitAllow) {
-    auto        harmful = defaultHarmfulFoods();
-    auto        flesh   = ItemStackData::of("minecraft:rotten_flesh", 4);
-    auto        bread   = ItemStackData::of("minecraft:bread", 4);
-    EXPECT_TRUE(isHarmful(flesh.id, harmful));
-    EXPECT_FALSE(isHarmful(bread.id, harmful));
-
-    Filter f(9); // empty allow list: everything safe passes, harmful does not
-    EXPECT_TRUE(filterAllows(f, bread, false, nullptr));
-    EXPECT_FALSE(filterAllows(f, flesh, true, nullptr));
-
-    f.setGhost(0, flesh); // explicitly allowed
-    EXPECT_TRUE(filterAllows(f, flesh, true, nullptr));
-    EXPECT_FALSE(filterAllows(f, bread, false, nullptr));
-
-    f.mode = FilterMode::Deny; // a deny list never whitelists
-    EXPECT_FALSE(filterAllows(f, flesh, true, nullptr));
-    EXPECT_TRUE(filterAllows(f, bread, false, nullptr));
+TEST(FeedingRules, Edibility) {
+    EXPECT_TRUE(isEdible("minecraft:rotten_flesh", 4)); // SB has no harmful-food exclusions
+    EXPECT_TRUE(isEdible("minecraft:chorus_fruit", 4));
+    EXPECT_FALSE(isEdible("minecraft:ominous_bottle", 1));
+    EXPECT_FALSE(isEdible("minecraft:something", 0));
 }
 
-TEST(FeedingRules, BroadMatchesDontWhitelistHarmful) {
-    auto   flesh = ItemStackData::of("minecraft:rotten_flesh", 1);
-    Filter f(9);
-    f.setGhost(0, ItemStackData::of("minecraft:cooked_beef", 1));
-    f.matchBy = abp::core::MatchBy::Namespace; // "minecraft" matches rotten flesh too
-    EXPECT_TRUE(f.matches(flesh));
-    EXPECT_FALSE(filterAllows(f, flesh, true, nullptr));
-    EXPECT_TRUE(isHarmful("minecraft:chorus_fruit", defaultHarmfulFoods()));
-}
-
-TEST(FeedingRules, ModeFromInt) {
-    EXPECT_EQ(hungerModeFromInt(0), HungerMode::Always);
-    EXPECT_EQ(hungerModeFromInt(1), HungerMode::Half);
-    EXPECT_EQ(hungerModeFromInt(2), HungerMode::Full);
-    EXPECT_EQ(hungerModeFromInt(42), HungerMode::Full);
+TEST(FeedingRules, HungerLevelNames) {
+    EXPECT_EQ(hungerLevelFromName("any"), HungerLevel::Any);
+    EXPECT_EQ(hungerLevelFromName("full"), HungerLevel::Full);
+    EXPECT_EQ(hungerLevelFromName("bogus"), HungerLevel::Half);
+    EXPECT_EQ(toString(HungerLevel::Half), "half");
+    EXPECT_EQ(next(HungerLevel::Any), HungerLevel::Half);
+    EXPECT_EQ(next(HungerLevel::Half), HungerLevel::Full);
+    EXPECT_EQ(next(HungerLevel::Full), HungerLevel::Any);
 }

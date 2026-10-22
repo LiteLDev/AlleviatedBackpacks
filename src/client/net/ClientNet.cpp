@@ -156,6 +156,14 @@ core::screen::RenderInfo const* renderInfo(std::string const& uuid) {
     return nullptr;
 }
 
+void refreshRenderInfo(std::string const& uuid) {
+    if (uuid.empty() || !gState.ready) return;
+    auto& asked = gState.renderAsked[uuid];
+    if (asked != 0 && now() - asked < 1.0) return;
+    asked = now();
+    RenderInfoRequestPacket{nlohmann::json{{"uuid", uuid}}}.sendToServer();
+}
+
 void onScreenChanged(ScreenListener fn) { gListeners.push_back(std::move(fn)); }
 
 // ---- packet handlers (client thread) --------------------------------------------------------------

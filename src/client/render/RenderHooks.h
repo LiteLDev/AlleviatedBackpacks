@@ -2,16 +2,15 @@
 
 // Render hook scaffolding for backpack visuals (client build).
 //
-// Later units draw Sophisticated Backpacks' backpack model (parts per installed upgrade, two-colour
-// tint), upgrade particles and the item display of placed backpacks through these hook points.
+// The backpack model itself (P2-11) is data driven - attachables + `query.abp_model`, see
+// ModelState.h - and backpack icons are drawn by BackpackIcons.h; these hooks let other units add
+// to them.
 // The data they need per backpack comes from the server as `core::screen::RenderInfo` (tier,
 // main/accent colour, enabled upgrades), cached client-side by uuid (`renderInfoFor`).
 //
 // Hook points:
 //   1. Icon hooks      - every backpack icon drawn by the companion UI (native screen, contents
-//                        tooltip). Built in: "abp:tint" draws the tier's grey "_dyed" texture
-//                        multiplied by the backpack's main colour (the two-colour tint; proof that
-//                        the hook works).
+//                        tooltip), after the layered 3D icon (BackpackIcons.h).
 //   2. Carrier hooks   - every client tick for each backpack the local player wears or holds
 //                        (upgrade particles, worn-model state).
 //   3. Placed hooks    - placed backpack blocks near the player (item display, particles);
@@ -21,6 +20,7 @@
 #include <functional>
 #include <string>
 
+#include "core/render/BackpackModel.h"
 #include "core/screen/ScreenModel.h"
 
 class ItemStack;
@@ -70,8 +70,8 @@ void decorateItemIcon(ui::Painter& painter, ItemStack const& stack, float x, flo
 /// Dispatches placed-block hooks (for the placed-backpack renderer).
 void dispatchPlaced(PlacedContext const& ctx);
 
-/// Default backpack colours (no tint applied by the built-in hook).
-inline constexpr std::uint32_t kDefaultMain   = 0xFFA0703C;
-inline constexpr std::uint32_t kDefaultAccent = 0xFF5A3C1E;
+/// Default backpack colours (SB BackpackWrapper.DEFAULT_MAIN_COLOR / DEFAULT_ACCENT_COLOR).
+inline constexpr std::uint32_t kDefaultMain   = core::render::kDefaultMainColor;
+inline constexpr std::uint32_t kDefaultAccent = core::render::kDefaultAccentColor;
 
 } // namespace abp::client::render

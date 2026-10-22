@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:jukebox_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " J ",
       "IBI",
       " R "
     ],
     "key": {
-      "J": { "item": "minecraft:jukebox" },
-      "I": { "item": "minecraft:iron_ingot" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "R": { "item": "minecraft:redstone" }
+      "J": {
+        "item": "minecraft:jukebox"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:jukebox_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:jukebox_upgrade",
+      "count": 1
+    }
   }
 }

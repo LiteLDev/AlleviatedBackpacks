@@ -4,20 +4,39 @@
     "description": {
       "identifier": "alleviatedbackpacks:refill_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      " C ",
+      " E ",
       "IBI",
-      "RHR"
+      "RCR"
     ],
     "key": {
-      "C": { "item": "minecraft:chest" },
-      "I": { "item": "minecraft:iron_ingot" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "R": { "item": "minecraft:redstone" },
-      "H": { "item": "minecraft:hopper" }
+      "E": {
+        "item": "minecraft:ender_pearl"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      },
+      "C": {
+        "item": "minecraft:chest"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:refill_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:refill_upgrade",
+      "count": 1
+    }
   }
 }

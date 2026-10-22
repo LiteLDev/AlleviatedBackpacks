@@ -4,18 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:stonecutter_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " S ",
       "IBI",
-      " I "
+      " R "
     ],
     "key": {
-      "S": { "item": "minecraft:stonecutter_block" },
-      "I": { "item": "minecraft:iron_ingot" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" }
+      "S": {
+        "item": "minecraft:stonecutter_block"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:stonecutter_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:stonecutter_upgrade",
+      "count": 1
+    }
   }
 }

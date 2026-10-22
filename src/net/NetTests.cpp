@@ -202,12 +202,12 @@ ABP_REGISTER_SELFTEST("companion.upgrade_slots", [](Context& ctx) -> ll::coro::C
     auto  bp = ctx.createBackpack(Tier::Iron); // 2 upgrade slots
     CompanionScope scope(p);
     auto           s = openNative(ctx, p, bp);
-    auto*          pickup = upgrade::byId("magnet"); // max 1 per backpack
-    ctx.require(pickup != nullptr, "magnet upgrade registered");
+    auto*          pickup = upgrade::byId("jukebox"); // max 1 per backpack (SB has no magnet limit)
+    ctx.require(pickup != nullptr, "jukebox upgrade registered");
     p.setPlayerUIItem(PlayerUISlot::CursorSelected, game::ItemConv::make(pickup->info().itemId, 1), false);
     ctx.check(handleScreenAction(p, action(s, "click", {{"area", "upgrade"}, {"index", 0}})), "install from the cursor");
     ctx.check(!bp->data().upgrades[0].empty() && cursor(p).isNull(), "installed");
-    // A second magnet upgrade is refused with the red error overlay.
+    // A second jukebox upgrade is refused with the red error overlay.
     p.setPlayerUIItem(PlayerUISlot::CursorSelected, game::ItemConv::make(pickup->info().itemId, 1), false);
     ctx.check(!handleScreenAction(p, action(s, "click", {{"area", "upgrade"}, {"index", 1}})), "duplicate refused");
     co_await ctx.ticks(1);

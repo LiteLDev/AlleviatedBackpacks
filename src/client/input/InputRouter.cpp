@@ -64,6 +64,7 @@ std::array<std::atomic<bool>, 256>         gKeysDown{};
 std::array<std::atomic<std::int64_t>, 256> gKeyDownTime{};
 constexpr std::int64_t                     REPEAT_WINDOW_MS = 1100;
 
+ll::event::ListenerPtr gMouseDedupListener;
 ll::event::ListenerPtr gMouseListener;
 ll::event::ListenerPtr gKeyListener;
 ll::event::ListenerPtr gAfterRenderListener;
@@ -162,7 +163,36 @@ void refreshHitSnapshot() {
     for (std::size_t i = 0; i < keys.size(); ++i) snap.capturedKeys[i] = keys[i];
 }
 
+// --- press/release de-duplication ------------------------------------------------------------------
+// A mouse button must reach the game and our layers as exactly one press and one release. The game
+// can feed the same transition to MouseDevice::feed more than once in a frame: it reads the mouse
+// through GDK GameInput readings per device, so a button state reported by several devices arrives
+// once per device (seen with LeviHeadlessInput's virtual GameInput mouse, which reports its buttons
+// for every mouse device, on a PC with two HID mice: every click came as down, down, up, up). A press
+// while the button is already down, or a release while it is up, is such a duplicate: it is cancelled
+// before anyone sees it (highest priority; a cancelled event stops the listener chain and the game).
+enum ButtonState : std::uint8_t { Unknown, Up, Down };
+constexpr std::size_t                                MOUSE_ACTIONS = MouseAction::ActionX2 + 1;
+std::array<std::atomic<std::uint8_t>, MOUSE_ACTIONS> gButtonState{};
+
+bool isMouseButton(int action) {
+    return action >= MouseAction::ActionLeft && action <= MouseAction::ActionX2 && action != MouseAction::ActionWheel;
+}
+
+void onMouseDedup(ll::event::MouseInputEvent& ev) {
+    int action = static_cast<int>(ev.actionButtonId());
+    if (!isMouseButton(action)) return;
+    std::uint8_t state = ev.buttonData() == MouseAction::DataDown ? Down : Up;
+    if (gButtonState[static_cast<std::size_t>(action)].exchange(state) == state) ev.cancel();
+}
+
+/// Forgets the button states (focus lost, level left): the next press or release always counts.
+void resetButtonState() {
+    for (auto& b : gButtonState) b = Unknown;
+}
+
 void releaseHeld(bool notifyLayers) {
+    resetButtonState();
     for (std::size_t i = 0; i < BUTTONS; ++i) {
         if (!gHeldButtons[i].exchange(false) || !notifyLayers) continue;
         auto button = static_cast<ui::MouseButton>(i);
@@ -241,6 +271,7 @@ void onMouse(ll::event::MouseInputEvent& ev) {
     }
     auto& held = gHeldButtons[static_cast<std::size_t>(button)];
     bool  down = ev.buttonData() == MouseAction::DataDown;
+    // (Repeated downs / ups of the same button never get here: onMouseDedup cancels them.)
     bool  live = snap.inLevel.load() && snap.cursorScreen.load();
 
     bool consume;
@@ -337,6 +368,8 @@ public:
     void install() {
         using namespace detail;
         auto& bus      = ll::event::EventBus::getInstance();
+        gMouseDedupListener =
+            bus.emplaceListener<ll::event::MouseInputEvent>(onMouseDedup, ll::event::EventPriority::Highest);
         gMouseListener = bus.emplaceListener<ll::event::MouseInputEvent>(onMouse);
         gKeyListener   = bus.emplaceListener<ll::event::KeyInputEvent>(onKey, ll::event::EventPriority::Low);
         gAfterRenderListener = bus.emplaceListener<ll::event::AfterUIRenderEvent>(
@@ -364,7 +397,7 @@ public:
         CompanionFocusLostHook::unhook();
         CompanionClientUpdateHook::unhook();
         auto& bus = ll::event::EventBus::getInstance();
-        for (auto* l : {&gMouseListener, &gKeyListener, &gAfterRenderListener, &gExitLevelListener}) {
+        for (auto* l : {&gMouseDedupListener, &gMouseListener, &gKeyListener, &gAfterRenderListener, &gExitLevelListener}) {
             if (*l) bus.removeListener(*l);
             l->reset();
         }

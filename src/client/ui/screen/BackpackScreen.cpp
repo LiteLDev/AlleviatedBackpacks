@@ -171,8 +171,11 @@ public:
     [[nodiscard]] bool capturesKey(int vk) const override {
         auto const* m = net::screenModel();
         if (!m) return false;
-        if (vk == VK_ESCAPE_) return m->nested || mView == View::Settings;
-        if (vk == 'E') return true; // the inventory key closes container screens
+        // ESC and the inventory key close the screen (SB / vanilla container screens). Both are
+        // handled here rather than left to the host dialog scene: the dialog's own ESC handling is
+        // not reliable (ignored under synthetic input), and an uncaptured key also reaches vanilla's
+        // key bindings.
+        if (vk == VK_ESCAPE_ || vk == 'E') return true;
         if (m->kind == "menu") return vk == 'Q' || (vk >= '1' && vk <= '9');
         using input::KeyAction;
         if (input::keyMatches(KeyAction::OpenBackpack, vk) || input::keyMatches(KeyAction::Sort, vk)
@@ -601,8 +604,9 @@ void BackpackScreenLayer::drawTabs(Painter& p, cs::BackpackScreenModel const& m,
         if (!isOpen || tab.slot < 0) return;
         auto const& u     = m.upgrades[static_cast<std::size_t>(tab.slot)];
         float       maxW  = std::max(0.f, tab.rect.w - 20 - 6);
-        // SC tab label (`translUpgrade`, e.g. "Tank"), when the upgrade's tab data names one.
-        auto label = u.tab.is_object() ? u.tab.value("tabLabel", u.name) : u.name;
+        // SC tab label (`translUpgrade`, e.g. "Tank"), when the upgrade's tab data names one
+        // ("tabLabel"; "title" is the same, used by the filter-based tabs).
+        auto label = u.tab.is_object() ? u.tab.value("tabLabel", u.tab.value("title", u.name)) : u.name;
         p.text(truncated(p, label, maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
         tab.widgets.render(p, mx, my, t);
         if (tab.native) {
@@ -786,9 +790,10 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         if (static_cast<int>(i) == mOpenTab || !t.rect.contains(mx, my)) continue;
         if (t.slot < 0) lines.push_back({ctr("abp.companion.tab.settings", "Backpack Settings"), 0xFFFFFF});
         else {
-            // SC closed tab tooltip (`translUpgradeTooltip`), when the upgrade's tab data names one.
+            // SC closed tab tooltip (`translUpgradeTooltip`), when the upgrade's tab data names one
+            // ("tabTooltip"; "tooltip" is the same, used by the filter-based tabs).
             auto const& u = m.upgrades[static_cast<std::size_t>(t.slot)];
-            lines.push_back({u.tab.is_object() ? u.tab.value("tabTooltip", u.name) : u.name, 0xFFFFFF});
+            lines.push_back({u.tab.is_object() ? u.tab.value("tabTooltip", u.tab.value("tooltip", u.name)) : u.name, 0xFFFFFF});
         }
         drawTooltip(p, lines, mx, my);
         return;
@@ -1174,7 +1179,7 @@ bool BackpackScreenLayer::onKey(int vk, bool down) {
         send({{"action", "back"}});
         return true;
     }
-    if (vk == 'E') {
+    if (vk == VK_ESCAPE_ || vk == 'E') {
         requestClose();
         return true;
     }

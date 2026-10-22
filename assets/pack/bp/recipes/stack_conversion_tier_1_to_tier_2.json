@@ -4,17 +4,30 @@
     "description": {
       "identifier": "alleviatedbackpacks:stack_conversion_tier_1_to_tier_2"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "XXX",
-      "XSX",
-      "XXX"
+      "MMM",
+      "MLM",
+      "MMM"
     ],
     "key": {
-      "X": { "item": "minecraft:gold_block" },
-      "S": { "item": "minecraft:leather" }
+      "M": {
+        "item": "minecraft:gold_block"
+      },
+      "L": {
+        "item": "minecraft:leather"
+      }
     },
-    "unlock": [{ "item": "minecraft:gold_block" }],
-    "result": { "item": "alleviatedbackpacks:stack_conversion_tier_1_to_tier_2", "count": 1 }
+    "unlock": [
+      {
+        "item": "minecraft:leather"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:stack_conversion_tier_1_to_tier_2",
+      "count": 1
+    }
   }
 }

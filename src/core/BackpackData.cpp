@@ -68,6 +68,9 @@ std::optional<BackpackData> BackpackData::fromJson(nlohmann::json const& j) try 
     d.tier        = *tier;
     d.mainColor   = j.value("main", d.mainColor);
     d.accentColor = j.value("accent", d.accentColor);
+    // Phase-1 default colours become Sophisticated Backpacks' defaults.
+    if (d.mainColor == kLegacyDefaultMainColor) d.mainColor = kDefaultMainColor;
+    if (d.accentColor == kLegacyDefaultAccentColor) d.accentColor = kDefaultAccentColor;
     if (auto it = j.find("inventory"); it != j.end()) d.inventory = BackpackInventory::fromJson(*it);
     if (auto it = j.find("upgrades"); it != j.end() && it->is_array()) {
         for (auto const& u : *it) {

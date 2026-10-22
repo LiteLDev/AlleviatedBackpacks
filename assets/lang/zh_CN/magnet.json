@@ -1,10 +1,13 @@
 {
   "abp.magnet.magnet.name": "磁铁升级",
   "abp.magnet.advanced_magnet.name": "高级磁铁升级",
-  "abp.magnet.items": "吸取物品：{}",
-  "abp.magnet.xp": "吸取经验：{}",
-  "abp.magnet.lore.range": "§7范围：§f{} 格",
-  "abp.magnet.lore.items": "§7吸取物品：{}",
-  "abp.magnet.lore.xp": "§7吸取经验：{}",
-  "abp.magnet.lore.filter": "§7过滤：§f{} 种物品"
+  "abp.magnet.tab": "磁铁",
+  "abp.magnet.tab.advanced": "高级磁铁",
+  "abp.magnet.tab.tooltip": "磁铁设置",
+  "abp.magnet.tab.advanced.tooltip": "高级磁铁设置",
+  "abp.magnet.button.pickup_items": "吸取物品",
+  "abp.magnet.button.do_not_pickup_items": "不吸取物品",
+  "abp.magnet.button.pickup_xp": "吸取经验",
+  "abp.magnet.button.pickup_xp.detail": "需要储罐升级",
+  "abp.magnet.button.do_not_pickup_xp": "不吸取经验"
 }

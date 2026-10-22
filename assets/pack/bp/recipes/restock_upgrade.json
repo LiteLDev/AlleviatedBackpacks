@@ -4,20 +4,39 @@
     "description": {
       "identifier": "alleviatedbackpacks:restock_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      " C ",
+      " P ",
       "IBI",
-      "RHR"
+      "RCR"
     ],
     "key": {
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "C": { "item": "minecraft:chest" },
-      "H": { "item": "minecraft:hopper" },
-      "I": { "item": "minecraft:iron_ingot" },
-      "R": { "item": "minecraft:redstone" }
+      "P": {
+        "item": "minecraft:sticky_piston"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      },
+      "C": {
+        "item": "minecraft:chest"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:restock_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:restock_upgrade",
+      "count": 1
+    }
   }
 }
