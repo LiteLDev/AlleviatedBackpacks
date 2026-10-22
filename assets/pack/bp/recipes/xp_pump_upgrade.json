@@ -8,27 +8,27 @@
       "crafting_table"
     ],
     "pattern": [
-      "LEL",
-      "GBG",
-      "LEL"
+      "RER",
+      "CPC",
+      "RER"
     ],
     "key": {
-      "L": {
-        "item": "minecraft:lapis_lazuli"
+      "R": {
+        "item": "minecraft:redstone"
       },
       "E": {
         "item": "minecraft:ender_eye"
       },
-      "G": {
-        "item": "minecraft:gold_ingot"
+      "C": {
+        "item": "minecraft:experience_bottle"
       },
-      "B": {
-        "item": "alleviatedbackpacks:upgrade_base"
+      "P": {
+        "item": "alleviatedbackpacks:advanced_pump_upgrade"
       }
     },
     "unlock": [
       {
-        "item": "alleviatedbackpacks:upgrade_base"
+        "item": "alleviatedbackpacks:advanced_pump_upgrade"
       }
     ],
     "result": {

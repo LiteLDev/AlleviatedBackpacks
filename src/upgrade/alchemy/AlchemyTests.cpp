@@ -302,7 +302,7 @@ ABP_REGISTER_SELFTEST("alchemy.tab_actions", [](Context& ctx) {
         return nlohmann::json{};
     };
     auto j = tabData(r);
-    ctx.check(j.value("tabTitle", "") == "Alchemy", "tab title (got " + j.value("tabTitle", "") + ")");
+    ctx.check(j.value("tabLabel", "") == "Alchemy", "tab title (got " + j.value("tabLabel", "") + ")");
     ctx.check(j["alchemy"]["filters"].size() == 4u, "4 filters in the tab data");
 
     ctx.check(act(r, {{"alchemy", "condition"}, {"index", 0}}), "toggle condition");
@@ -323,7 +323,7 @@ ABP_REGISTER_SELFTEST("alchemy.tab_actions", [](Context& ctx) {
     ctx.check(settingsOf(r.ctx()).filters[1].filter.empty(), "cleared");
 
     auto a = rig(ctx, true, potion(kFireResistance));
-    ctx.check(tabData(a).value("tabTitle", "") == "Adv. Alchemy", "advanced tab title");
+    ctx.check(tabData(a).value("tabLabel", "") == "Adv. Alchemy", "advanced tab title");
     ctx.check(act(a, {{"alchemy", "matchAll"}}) && !settingsOf(a.ctx()).matchAll, "All Effects Missing");
     ctx.check(act(a, {{"alchemy", "matchDuration"}}) && !settingsOf(a.ctx()).matchDuration, "Ignore Duration");
     ctx.check(act(a, {{"alchemy", "matchAmplifier"}}) && !settingsOf(a.ctx()).matchAmplifier, "Ignore Amplifier");

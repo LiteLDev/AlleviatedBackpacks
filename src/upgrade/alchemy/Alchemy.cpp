@@ -612,7 +612,7 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
     return {
         {"alchemy", std::move(j)},
         // Tab label / closed-tab tooltip (SC translUpgrade / translUpgradeTooltip).
-        {"tabTitle", advanced ? trFor(player, "abp.alchemy.tab.advanced", "Adv. Alchemy") : trFor(player, "abp.alchemy.tab", "Alchemy")},
+        {"tabLabel", advanced ? trFor(player, "abp.alchemy.tab.advanced", "Adv. Alchemy") : trFor(player, "abp.alchemy.tab", "Alchemy")},
         {"tabTooltip",
          advanced ? trFor(player, "abp.alchemy.tab.advanced.tooltip", "Advanced Alchemy Settings")
                   : trFor(player, "abp.alchemy.tab.tooltip", "Alchemy Settings")},
