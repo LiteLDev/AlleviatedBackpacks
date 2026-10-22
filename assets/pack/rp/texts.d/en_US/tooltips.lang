@@ -55,3 +55,4 @@ item.alleviatedbackpacks:tank_upgrade.tooltip=Replaces part of backpack's invent
 item.alleviatedbackpacks:tool_swapper_upgrade.tooltip=Automatically swaps item in player's hand for the one effective on the block/entity when these are left clicked.
 item.alleviatedbackpacks:void_upgrade.tooltip=Voids items selected in filter
 item.alleviatedbackpacks:xp_pump_upgrade.tooltip=Pumps experience between Tank upgrade and player
+item.alleviatedbackpacks:battery_upgrade.tooltip=Replaces part of backpack's inventory with energy storage

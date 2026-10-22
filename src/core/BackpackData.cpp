@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "core/Capacity.h"
+
 namespace abp::core {
 
 BackpackData BackpackData::create(std::string uuid, Tier tier) {
@@ -14,8 +16,9 @@ BackpackData BackpackData::create(std::string uuid, Tier tier) {
 }
 
 void BackpackData::setTier(Tier t) {
-    tier = t;
-    if (inventory.size() < tierInfo(t).slots) inventory.resize(tierInfo(t).slots);
+    tier      = t;
+    int slots = capacity::slotsAfterColumns(tierInfo(t).slots, columnsTaken);
+    if (inventory.size() < slots) inventory.resize(slots);
     if (upgrades.size() < static_cast<std::size_t>(tierInfo(t).upgradeSlots)) {
         upgrades.resize(static_cast<std::size_t>(tierInfo(t).upgradeSlots));
     }
@@ -30,7 +33,7 @@ nlohmann::json BackpackData::toJson() const {
             {"settings", u.settings     },
         });
     }
-    return nlohmann::json{
+    nlohmann::json out{
         {"v",         kVersion                },
         {"uuid",      uuid                    },
         {"tier",      tierInfo(tier).id       },
@@ -40,6 +43,16 @@ nlohmann::json BackpackData::toJson() const {
         {"upgrades",  std::move(ups)          },
         {"settings",  settings                },
     };
+    if (columnsTaken > 0) out["columnsTaken"] = columnsTaken;
+    return out;
+}
+
+int BackpackData::baseStorageSlots() const {
+    if (columnsTaken <= 0) return inventory.size();
+    // The tier's layout when it explains the size (the inverse is ambiguous for a few sizes).
+    int tierSlots = tierInfo(tier).slots;
+    if (capacity::slotsAfterColumns(tierSlots, columnsTaken) == inventory.size()) return tierSlots;
+    return capacity::baseSlotsFor(inventory.size(), columnsTaken);
 }
 
 std::optional<BackpackData> BackpackData::fromJson(nlohmann::json const& j) try {
@@ -71,6 +84,7 @@ std::optional<BackpackData> BackpackData::fromJson(nlohmann::json const& j) try 
         }
     }
     if (auto it = j.find("settings"); it != j.end() && it->is_object()) d.settings = *it;
+    if (auto it = j.find("columnsTaken"); it != j.end() && it->is_number_integer()) d.columnsTaken = std::max(0, it->get<int>());
     d.setTier(d.tier); // ensure the minimum slot counts for the tier
     return d;
 } catch (nlohmann::json::exception const&) {

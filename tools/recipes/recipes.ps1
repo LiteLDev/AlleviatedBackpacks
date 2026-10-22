@@ -38,7 +38,7 @@ $written = [System.Collections.Generic.List[string]]::new()
 function Save-Recipe([string]$rel, $obj) {
     $path = Join-Path $out "$rel.json"
     New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
-    $json = $obj | ConvertTo-Json -Depth 10
+    $json = ($obj | ConvertTo-Json -Depth 10) -replace "`r`n", "`n"
     [IO.File]::WriteAllText($path, $json + "`n")
     $written.Add("$rel.json")
 }
@@ -122,6 +122,7 @@ Recipe 'tool_swapper_upgrade' @('RWR', 'PBA', 'ISI') ([ordered]@{ R = $R; W = 'm
 Advanced 'advanced_tool_swapper_upgrade' 'tool_swapper_upgrade'
 Recipe 'anvil_upgrade' @('ADA', 'IBI', ' C ') ([ordered]@{ A = 'minecraft:anvil'; D = $D; I = $I; B = $B; C = $C })
 Recipe 'smithing_upgrade' @(' S ', 'IBI', ' C ') ([ordered]@{ S = 'minecraft:smithing_table'; I = $I; B = $B; C = $C })
+Recipe 'battery_upgrade' @('GRG', 'RBR', 'GRG') ([ordered]@{ G = $G; R = 'minecraft:redstone_block'; B = $B })
 Recipe 'tank_upgrade' @('GGG', 'GBG', 'GGG') ([ordered]@{ G = 'minecraft:glass'; B = $B })
 Recipe 'pump_upgrade' @('GUG', 'PBS', 'GUG') ([ordered]@{ G = 'minecraft:glass'; U = 'minecraft:bucket'; P = 'minecraft:piston'; B = $B; S = 'minecraft:sticky_piston' })
 Recipe 'advanced_pump_upgrade' @('DID', 'GPG', 'RRR') ([ordered]@{ D = $D; I = 'minecraft:dispenser'; G = $G; P = 'pump_upgrade'; R = $R })

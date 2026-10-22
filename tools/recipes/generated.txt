@@ -17,6 +17,7 @@ auto_blasting_upgrade.json
 auto_smelting_upgrade.json
 auto_smoking_upgrade_from_auto_smelting_upgrade.json
 auto_smoking_upgrade.json
+battery_upgrade.json
 blasting_upgrade_from_smelting_upgrade.json
 blasting_upgrade.json
 compacting_upgrade.json

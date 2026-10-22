@@ -19,7 +19,6 @@
 
 #include "api/BackpackCapabilities.h"
 #include "core/Capacity.h"
-#include "upgrade/tank/Tank.h"
 
 #include "core/Codec.h"
 #include "core/StackMultiplier.h"
@@ -171,13 +170,11 @@ int minimumMultiplierRequired(std::shared_ptr<game::Backpack> const& backpack, i
     if (!backpack) return 0;
     UpgradeContext ctx(backpack, slot);
     // SC: ceil(contents / base capacity), the base capacity being the capacity at multiplier 1.
-    // Handlers report the capacity at the current multiplier: divide it back out (the phase-1 tank
-    // scales by the whole-number multiplier, batteries by SB's adjusted one).
+    // Handlers report the capacity at the current (SB-adjusted) multiplier: divide it back out.
     auto tank   = api::backpack::tankOf(ctx);
     auto energy = tank ? nullptr : api::backpack::energyOf(ctx);
     if (!tank && !energy) return 0;
-    double current  = tank ? static_cast<double>(tank::stackMultiplier(*backpack))
-                           : core::capacity::adjustedMultiplier(api::backpack::stackMultiplier(*backpack));
+    double current  = core::capacity::adjustedMultiplier(api::backpack::stackMultiplier(*backpack));
     auto   required = [&](long long amount, long long capacity) {
         if (amount <= 0 || capacity <= 0) return 0;
         double base = static_cast<double>(capacity) / std::max(current, 1e-9);
