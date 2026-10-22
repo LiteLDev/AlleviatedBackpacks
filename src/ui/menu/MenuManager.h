@@ -50,8 +50,8 @@ public:
     /// Closes every open menu (normal close: packets, cursor item back to the inventory or dropped).
     void closeAll();
     /// `shutdown`: the world is stopping or the mod is going away, possibly off the server thread.
-    /// No packets, no block reads, no entities: a cursor item goes into the inventory, else the
-    /// menu's backpack, else stays on the cursor (saved with the player, given back on the next join).
+    /// No packets, no block reads, no entities: a cursor item goes into the inventory, else stays on
+    /// the cursor (saved with the player, given back on the next join). Observers get a null player.
     void closeAll(bool shutdown);
     /// Closes and opens the same menu again (applies a changed title).
     void reopen(Player& player);

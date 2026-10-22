@@ -132,37 +132,25 @@ void returnCursor(Player& player) {
     if (!player.add(cursor) && !cursor.isNull() && cursor.mCount > 0) player.drop(cursor, false);
 }
 
-/// The world is stopping: the cursor item goes into the inventory, else into the menu (the
-/// backpack's storage), and whatever still does not fit stays on the cursor, which is saved with the
-/// player (PlayerUIItems) and given back by `returnCursor` on the next join. Never dropped: there is
-/// no world left to drop it into. Needs the level's item registry on this thread (see closeAll).
-void returnCursorOnShutdown(Player& player, Menu& menu) {
+/// The world is stopping: the cursor item goes into the inventory slots (container only), and
+/// whatever does not fit stays on the cursor, which is saved with the player (PlayerUIItems) and
+/// given back on the next join. Never dropped (there is no world left to drop it into) and never put
+/// through the backpack's insert hooks (a Void upgrade could destroy it). Needs the level's item
+/// registry on this thread (see closeAll).
+void returnCursorOnShutdown(Player& player) {
     ItemStack cursor = player.mPlayerUIContainer->getItem(0);
     if (cursor.isNull() || cursor.mCount == 0) return;
-    int total = cursor.mCount;
-    int left  = addToInventorySlots(player, cursor, total);
-    int toInv = total - left;
-    int toBp  = 0;
-    if (left > 0) {
-        ItemStack rest = cursor;
-        rest.set(left);
-        try {
-            toBp = std::clamp(menu.quickMoveIn(player, rest), 0, left);
-        } catch (std::exception const& e) {
-            log().error("menu shutdown: moving the cursor item into the menu failed: {}", e.what());
-        }
-        left -= toBp;
-    }
-    ItemStack keep = cursor;
+    int       total = cursor.mCount;
+    int       left  = addToInventorySlots(player, cursor, total);
+    ItemStack keep  = cursor;
     keep.set(left);
     player.setPlayerUIItem(PlayerUISlot::CursorSelected, left > 0 ? keep : ItemStack::EMPTY_ITEM(), false);
     log().info(
-        "menu shutdown: cursor {} x{} of {}: inventory={} menu={} cursor={}",
+        "menu shutdown: cursor {} x{} of {}: inventory={} kept on cursor={}",
         cursor.getTypeName(),
         total,
         player.getRealName(),
-        toInv,
-        toBp,
+        total - left,
         left
     );
 }
@@ -501,7 +489,7 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose, bool 
         if (shutdown) {
             // The world is stopping (or the mod going away): no packets, no block reads, no
             // entities; the players are about to be saved and disconnected.
-            returnCursorOnShutdown(*player, *s->menu);
+            returnCursorOnShutdown(*player);
         } else if (sendClose && s->shown() && !s->virtualScreen) {
             auto  pkt                = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
             auto& c                  = static_cast<ContainerClosePacket&>(*pkt);
@@ -553,7 +541,7 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose, bool 
     for (auto const& [id, o] : std::vector(mObservers)) {
         if (!o.closed) continue;
         try {
-            o.closed(player, *s->menu);
+            o.closed(shutdown ? nullptr : player, *s->menu); // shutdown: no packets
         } catch (std::exception const& e) {
             log().error("menu observer (closed) failed: {}", e.what());
         }
@@ -1404,8 +1392,14 @@ void MenuManager::install() {
         auto& player = ev.self();
         if (player.isSimulatedPlayer() || mSessions.contains(keyOf(player))) return;
         if (player.mPlayerUIContainer->getItem(0).isNull()) return;
-        log().info("menu: giving {} back the cursor item kept at the last shutdown", player.getRealName());
-        returnCursor(player);
+        // Inventory only: never dropped at login (a full inventory keeps it on the cursor).
+        ItemStack cursor = player.mPlayerUIContainer->getItem(0);
+        int       left   = addToInventorySlots(player, cursor, cursor.mCount);
+        if (left == cursor.mCount) return;
+        log().info("menu: gave {} back {} of the cursor item kept at the last shutdown", player.getRealName(), cursor.mCount - left);
+        ItemStack keep = cursor;
+        keep.set(left);
+        player.setPlayerUIItem(PlayerUISlot::CursorSelected, left > 0 ? keep : ItemStack::EMPTY_ITEM(), false);
         player.sendInventory(false);
     }));
 }

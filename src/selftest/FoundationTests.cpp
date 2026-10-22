@@ -286,8 +286,8 @@ ABP_REGISTER_SELFTEST("menu.buttons_and_pages", [](Context& ctx) -> ll::coro::Co
 });
 
 // World stopping with an open menu and an item on the cursor (MenuManager::closeAll(true), what
-// ServerStoppingEvent runs): the item goes to the inventory, else the backpack, else stays on the
-// cursor (saved with the player); never dropped, never duplicated.
+// ServerStoppingEvent runs): the item goes to the inventory, else stays on the cursor (saved with
+// the player); never dropped, never duplicated.
 ABP_REGISTER_SELFTEST("menu.shutdown_keeps_cursor", [](Context& ctx) {
     auto& mm     = ui::MenuManager::get();
     auto& player = ctx.player();
@@ -316,21 +316,15 @@ ABP_REGISTER_SELFTEST("menu.shutdown_keeps_cursor", [](Context& ctx) {
     ctx.check(diamondsInInventory() == 5, "5 diamonds in the inventory, got " + std::to_string(diamondsInInventory()));
     for (int i = 1; i < 36; ++i) inv.setItem(i, ItemStack::EMPTY_ITEM());
 
-    // 2. Full inventory: into the backpack.
+    // 2. Full inventory: stays on the cursor (saved with the player), never dropped, never put
+    //    through the backpack's insert hooks.
     for (int i = 1; i < 36; ++i) inv.setItem(i, game::ItemConv::make("minecraft:dirt", 64));
-    open();
-    mm.closeAll(true);
-    ctx.check(cursorOf(player).isNull(), "cursor emptied (backpack)");
-    ctx.check(countOf(*bp, "minecraft:diamond") == 5, "5 diamonds in the backpack, got " + std::to_string(countOf(*bp, "minecraft:diamond")));
-    ctx.check(diamondsInInventory() == 0, "none in the inventory");
-
-    // 3. Inventory and backpack full: stays on the cursor (saved with the player).
-    for (int i = 0; i < bp->inventory().size(); ++i) bp->inventory().set(i, data("minecraft:dirt", 64));
     open();
     mm.closeAll(true);
     ctx.check(mm.current(player) == nullptr, "session closed (full)");
     ctx.check(cursorOf(player).mCount == 5 && cursorOf(player).getTypeName() == "minecraft:diamond", "5 diamonds kept on the cursor");
-    ctx.check(countOf(*bp, "minecraft:diamond") == 0, "nothing duplicated into the backpack");
+    ctx.check(countOf(*bp, "minecraft:diamond") == 0, "nothing moved into the backpack");
+    ctx.check(diamondsInInventory() == 0, "none in the inventory");
     player.setPlayerUIItem(PlayerUISlot::CursorSelected, ItemStack::EMPTY_ITEM(), false);
 });
 
