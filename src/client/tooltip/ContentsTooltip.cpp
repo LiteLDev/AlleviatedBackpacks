@@ -3,7 +3,9 @@
 #include "client/tooltip/ContentsTooltip.h"
 
 #include <algorithm>
+#include <atomic>
 #include <optional>
+#include <unordered_set>
 
 #include "ll/api/memory/Hook.h"
 
@@ -202,6 +204,15 @@ std::string contentsUuidOf(ItemStack const& stack, std::optional<LinkedEndpoint>
 
 bool contentsWanted() { return input::shiftDown() || cursorHasItem(); }
 
+namespace {
+std::atomic<bool> gAdvanced{false};
+}
+bool advancedTooltips() { return gAdvanced.load(); }
+void setAdvancedTooltips(bool on) {
+    gAdvanced = on;
+    log().info("tooltip: advanced tooltips {}", on ? "on" : "off");
+}
+
 std::string pressForContentsLine() {
     // translatable(press_for_contents, translatable(shift).withStyle(AQUA)).withStyle(GRAY)
     return kGray
@@ -267,7 +278,10 @@ void appendUpgradeLines(::ItemStackBase const& stack, std::string& s) {
     if (!item) return;
     auto const& id = stack.getTypeName();
     if (!id.starts_with("alleviatedbackpacks:") || game::backpackTierOf(id)) return;
-    auto text = packText(item->getDescriptionId() + ".tooltip");
+    auto key  = item->getDescriptionId() + ".tooltip";
+    auto text = packText(key);
+    static std::unordered_set<std::string> logged;
+    if (logged.size() < 64 && logged.insert(id).second) log().info("tooltip: {} -> {} ({})", id, key, text ? "found" : "missing");
     if (!text) return;
     // SB ToolSwapperUpgradeItem: the advanced tooltip names the Tool Swap key.
     if (auto at = text->find("%s"); at != std::string::npos) text->replace(at, 2, input::keyDisplayName(input::KeyAction::ToolSwap));
@@ -308,7 +322,11 @@ void appendLines(::ItemStackBase const& stack, ::Level& level, ::Bedrock::Safety
     if (!level.isClientSide() || !net::serverReady() || stack.isNull()) return;
     auto& s = hovertext.mUnredactedString;
     appendUpgradeLines(stack, s);
-    appendBackpackLines(stack, advanced, s);
+    // Bedrock passes `true` for every inventory tooltip (it is the "show category" flag there), and
+    // has no advanced-tooltips toggle (F3+H): the UUID / linked endpoint lines follow
+    // `abp::client::tooltip::advancedTooltips` instead (off by default, like Java).
+    (void)advanced;
+    appendBackpackLines(stack, advancedTooltips(), s);
 }
 } // namespace
 

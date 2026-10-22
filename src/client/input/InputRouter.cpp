@@ -30,6 +30,7 @@
 
 #include "client/input/InputState.h"
 #include "client/net/ClientNet.h"
+#include "client/tooltip/ContentsTooltip.h"
 #include "client/ui/UiRoot.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
@@ -300,6 +301,13 @@ void onKey(ll::event::KeyInputEvent& ev) {
     bool repeat = gKeysDown[idx].exchange(down) && down && now - gKeyDownTime[idx].load() < REPEAT_WINDOW_MS;
     if (down) gKeyDownTime[idx] = now;
 
+    // F3+H: Java's advanced tooltips toggle (Bedrock has none); the H press stays ours.
+    if (vk == 'H' && (GetAsyncKeyState(0x72) & 0x8000) != 0 && snap.inLevel.load() && !snap.textFocus.load() && !snap.vanillaTextFocus.load()) {
+        if (down && !repeat) post([] { tooltip::setAdvancedTooltips(!tooltip::advancedTooltips()); });
+        gHotkeyKeys[idx] = down;
+        ev.cancel();
+        return;
+    }
     // A key one of our bindings took (and its repeats / release) never reaches the game.
     auto& hotkey = gHotkeyKeys[idx];
     if (down && hotkey.load()) {

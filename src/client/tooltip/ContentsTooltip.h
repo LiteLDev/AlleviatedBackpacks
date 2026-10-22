@@ -28,6 +28,10 @@ namespace abp::client::tooltip {
 
 /// Shift held or something on the cursor (SB's condition for the contents image).
 [[nodiscard]] bool contentsWanted();
+/// Java's advanced tooltips (F3+H, toggled by input/InputRouter): backpacks show "UUID: ..." or
+/// their linked storage group / endpoint. Off at start. Any thread.
+[[nodiscard]] bool advancedTooltips();
+void               setAdvancedTooltips(bool on);
 /// "§7Press <§bLeft Shift§7> to View Contents" in the game's language.
 [[nodiscard]] std::string pressForContentsLine();
 /// The tooltip lines of a backpack item (vanilla lines, with the "press" line when the contents
