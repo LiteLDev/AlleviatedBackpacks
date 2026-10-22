@@ -161,10 +161,13 @@ Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 600
 
 # ---- Jukebox in the world: the record follows the carrier; dropping the backpack stops it ------------
-# (B is also the game's emote key: its hotkey list takes the number keys for a few seconds.)
+# (B is also the game's emote key: its hotkey list takes the number keys for a few seconds, so
+# a fresh setup selects hotbar slot 0 server-side instead.)
 Start-Sleep -Seconds 6
-Press-Key '1'
-Start-Sleep -Milliseconds 500
+$mark = Get-LogMark
+Invoke-Chat '/backpack misc setup'
+Wait-LogLine 'misc setup: gave netherite backpack' 15 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 800
 Open-Backpack
 Tab-Toggle 1
 $mark = Get-LogMark
