@@ -29,7 +29,7 @@ function Invoke-ChatUntil([string]$text, [string]$pattern, [int]$tries = 3) {
         Start-Sleep -Milliseconds 1000
         $m = Get-LogMark
         Invoke-Chat $text
-        try { return (Wait-LogLine $pattern 8 -Since $m) } catch { Write-Step "no '$pattern' after '$text'; retrying" }
+        try { return (Wait-LogLine $pattern 8 -Since $m) } catch { Write-Step "no '$pattern' after '$text'; retrying"; Press-Key ESC; Start-Sleep -Milliseconds 600 } # e.g. the vanilla emote wheel (also B) took the input
     }
     throw "'$text' never logged '$pattern'"
 }
