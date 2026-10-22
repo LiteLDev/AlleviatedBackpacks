@@ -156,9 +156,10 @@ $mark = Get-LogMark
 With-Key 0x10 {
     # Two clicks within vanilla's 250 ms double-click window.
     Gui-Move $p24[0] $p24[1]
-    [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 40; [AbpE2E.Native]::MouseButton(0, $true)
-    Start-Sleep -Milliseconds 80
-    [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 40; [AbpE2E.Native]::MouseButton(0, $true)
+    # Headless input is a polled virtual mouse: hold each press for a few frames (80 ms).
+    [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 80; [AbpE2E.Native]::MouseButton(0, $true)
+    Start-Sleep -Milliseconds 90
+    [AbpE2E.Native]::MouseButton(0, $false); Start-Sleep -Milliseconds 80; [AbpE2E.Native]::MouseButton(0, $true)
     Start-Sleep -Milliseconds 400
 }
 Wait-LogLine 'native screen action: quickMoveAll by .* \(ok\)' 10 -Since $mark | Out-Null
