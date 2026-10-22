@@ -386,6 +386,10 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         ctx.sendTabAction    = [slot = t.slot](nlohmann::json d) { net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(d)}}); };
         ctx.sendScreenAction = [](nlohmann::json b) { net::sendScreenAction(std::move(b)); };
         t.native->update(ctx);
+        if (t.native->needsRebuild()) {
+            t.widgets.widgets.clear();
+            t.openSize = t.native->build(ctx, t.rect, t.widgets);
+        }
     }
 }
 

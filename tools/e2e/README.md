@@ -88,15 +88,16 @@ The run **fails** if any of these happen:
 
 **Client** (`client/run.ps1`):
 1. Optional `-Build`. This happens before the lock, so the game is not blocked while compiling.
-2. Takes the game lock.
-3. Closes a running game.
-4. Deploys the mod to `mods\AlleviatedBackpacks`, always as a fresh copy.
-5. Moves every other mod except LeviLamina and CrashLogger (BEI, ...) to `versions\1.26.51.01\mods.abp-e2e-aside\`.
-6. Installs the `ABP-Test` world with `LastPlayed` set to now, so it is the first world in the list.
-7. Launches the game, waits for `AlleviatedBackpacks enabled`, clicks Play and then the first world, and waits for `Player Spawned`. If the game shows "Connection timed out (Kelp)", it retries twice, then restarts the game, up to 3 launches.
-8. Runs the scenario.
-9. Checks the log as the server harness does.
-10. **Always** cleans up: closes the game, deletes the `ABP-Test` world, removes our mod, moves the other mods back, runs `scenarios/<name>.restore.ps1` and releases the lock.
+2. Takes the game lock (`-LockTimeoutMinutes`, default 120; `0` waits forever). While waiting it prints `waiting for game lock (<n> min), held by <pid, repo or command line>` every minute. If the lock is not free in time the run exits with code **2** and `NOT RUN` (not a test failure).
+3. Remote modes only: starts the BDS host (server harness, scenario `client-host`) **now, with the game lock held**, and waits up to `-HostTimeoutMinutes` (default 15) for it to be ready. A run queued behind the game lock therefore holds no server slot. If the host gets no slot within `-SlotWaitMinutes` (default 3), the run kills it, **gives the game lock back** and queues again 30 s later, so a slot shortage never blocks the shared game; past `-LockTimeoutMinutes` it exits 2 (`NOT RUN`).
+4. Closes a running game.
+5. Deploys the mod to `mods\AlleviatedBackpacks`, always as a fresh copy.
+6. Moves every other mod except LeviLamina and CrashLogger (BEI, ...) to `versions\1.26.51.01\mods.abp-e2e-aside\`.
+7. Installs the `ABP-Test` world (remote modes: adds the server entry instead) with `LastPlayed` set to now, so it is the first world in the list.
+8. Launches the game, waits for `AlleviatedBackpacks enabled`, clicks Play and then the first world, and waits for `Player Spawned`. If the game shows "Connection timed out (Kelp)", it retries twice, then restarts the game, up to 3 launches.
+9. Runs the scenario.
+10. Checks the log as the server harness does.
+11. **Always** cleans up (also on failure, timeout and Ctrl+C): closes the game, tells the BDS host to stop, deletes the `ABP-Test` world, removes our mod, moves the other mods back, runs `scenarios/<name>.restore.ps1` and releases the game lock, then waits for the host to exit (a host that never got ready is killed at once).
 
 If a run was killed half-way, the next run puts the aside mods back first.
 
@@ -156,9 +157,10 @@ The glob is sent **quoted** (`backpack selftest "core.*"`) because `*` is not va
 
 ## Locks and concurrency
 
-- **Client:** `%APPDATA%\levilauncher.exe\bei-e2e.lock` is the **same file BEI's harness uses**. There is one game per machine, so ABP and BEI runs from any worktree queue behind each other. The harness polls every 15 s and gives up after 2 h.
+- **Client:** `%APPDATA%\levilauncher.exe\bei-e2e.lock` is the **same file BEI's harness uses**. There is one game per machine, so ABP and BEI runs from any worktree queue behind each other. BeetrootSkin uses it too. The harness polls every 15 s, prints the holder every minute and gives up after `-LockTimeoutMinutes` (default 2 h, exit code 2). Other projects only write their pid into the lock file itself (unreadable while held), so the holder is found with the Windows Restart Manager; our runs also write `<lock>.owner`, which adds the repo/worktree when its pid matches.
 - **Server:** each slot `%LOCALAPPDATA%\abp-e2e\slots\<n>\` has a lock `slots\<n>.lock`, so up to `$env:ABP_E2E_SERVER_SLOTS` runs (default 3) go in parallel. Slot n uses UDP port `19200 + 10n` (the next free pair if that is taken). `-Slot n` forces a slot. Installs are serialized by `install.lock` and happen in a temporary folder that is renamed at the end, so concurrent first runs are safe.
 - Every lock is a file opened exclusively. **The OS releases it when the process dies**, so locks never go stale. The holder writes its pid, repo and time to `<lock>.owner`, which a waiting run prints. A server left running by a killed run is killed by the next run that takes the same slot.
+- **Orphaned hosts.** When all slots are busy, a waiting server run checks (at most once a minute) the BDS processes in the slots and kills only orphans: the harness that started it is gone, or it is a `client-host` whose client run is gone, or it is older than `$env:ABP_E2E_HOST_MAX_AGE_MIN` (default 45) minutes and the pid in `slots\<n>.lock.owner` is dead. A host whose owner is alive is never killed. The `client-host` scenario also stops by itself as soon as its client run (`$env:ABP_E2E_HOST_OWNER_PID`) exits. `. tools/e2e/server/lib.ps1; Stop-OrphanedHosts 0,1,2 -DryRun` shows who owns each host.
 - `%LOCALAPPDATA%` is virtualized when the harness is started from a packaged app such as the Claude desktop app. The files then really live in `%LOCALAPPDATA%\Packages\<app>\LocalCache\Local\abp-e2e`. Processes started from the same app see the same files, but Explorer shows the real path. `%APPDATA%\levilauncher.exe` is not affected because that folder already exists.
 
 ## Reading results
