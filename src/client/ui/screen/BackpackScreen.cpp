@@ -320,6 +320,14 @@ private:
         return {mLeft + static_cast<float>(r.x), mTop + static_cast<float>(r.y), static_cast<float>(r.w), static_cast<float>(r.h)};
     }
 
+    // count overlays of the frame (drawn late, see render) and the drag preview stack
+    struct PendingCount {
+        cs::CountOverlay overlay;
+        float            x, y;
+    };
+    std::vector<PendingCount> mPendingCounts;
+    ItemStack                 mDragStack;
+
     // shift + double click (vanilla quick move all)
     SlotRef mLastShiftClick;
     double  mLastShiftClickAt = -10;
@@ -654,14 +662,12 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
 
     auto highlight = [&](float x, float y) { p.fillRect({x, y, 16, 16}, sb::color::HOVER, Painter::Layer::Foreground); };
     // Counts go above every item (SC renders them at z+200): collected, drawn after a flush.
-    struct PendingCount {
-        cs::CountOverlay overlay;
-        float            x, y;
-    };
-    std::vector<PendingCount> counts;
-    std::deque<ItemStack>     dragStacks; // drag previews (stable addresses until the flush)
+    auto& counts = mPendingCounts;
+    counts.clear();
     auto const* player  = currentPlayer();
     ItemStack   carried = player ? player->mPlayerUIContainer->getItem(0) : ItemStack{};
+    // Drag previews show the carried item (rebuilt from its data, like the slot stacks).
+    if (!carried.isNull()) mDragStack = game::ItemConv::toStack(game::ItemConv::toData(carried), 1);
 
     // Inventory parts of upgrades taking storage columns (SC renderUpgradeInventoryControls).
     renderInventoryParts(p, m, inventoryPartsRect(), mx, my);
@@ -683,8 +689,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         bool        inaccessible = i < m.inaccessible.size() && m.inaccessible[i];
         if (auto preview = dragging ? dragPreviewFor(m, ref) : std::nullopt) {
             p.fillRect({x, y, 16, 16}, Color::argb(0x80FFFFFF)); // renderStack(flag): -2130706433
-            dragStacks.push_back(carried);
-            p.item(dragStacks.back(), x, y);
+            p.item(mDragStack, x, y);
             counts.push_back({preview->overlay, x, y});
         } else if (d.empty()) {
             // Memory slot: the remembered item with SC's overlay (renderSlotBackground + drawStackOverlay).
@@ -712,8 +717,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             auto const& s = inv.getItem(i);
             if (auto preview = dragging ? dragPreviewFor(m, {SlotRef::Area::Inventory, i}) : std::nullopt) {
                 p.fillRect({x, y, 16, 16}, Color::argb(0x80FFFFFF));
-                dragStacks.push_back(carried);
-                p.item(dragStacks.back(), x, y);
+                p.item(mDragStack, x, y);
                 counts.push_back({preview->overlay, x, y});
             } else if (!s.isNull()) {
                 p.item(s, x, y);
@@ -723,10 +727,6 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             if (mHover.area == SlotRef::Area::Inventory && mHover.index == i) highlight(x, y);
         }
     }
-    p.flush();
-    for (auto const& c : counts) drawCountOverlay(p, c.overlay, c.x, c.y);
-    // A quad in the same flush keeps the counts above the slot frames (see Painter::flush).
-    p.fillRect({-10000, -10000, 1, 1}, Color::argb(0));
     p.flush();
 
     // Scroll bar (InventoryScrollPanel).
@@ -937,6 +937,10 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
     p.flush();
     mControls.render(p, mx, my, t);
     drawSearch(p, t);
+    p.flush();
+    // Counts (SC z+200, above items): text drawn in the flush right after the slot items is hidden by
+    // the slot frames on Bedrock, so they come after the controls' flushes.
+    for (auto const& c : mPendingCounts) drawCountOverlay(p, c.overlay, c.x, c.y);
     p.flush();
     drawErrorOverlay(p, *m);
 
