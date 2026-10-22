@@ -389,6 +389,10 @@ ABP_REGISTER_SELFTEST("pickup.settings_menu", [](Context& ctx) -> ll::coro::Coro
     auto f = filtering::load(uctx, UpgradeTier::Advanced);
     ctx.check(!f.ghosts[15].empty() && f.ghosts[15].id == "minecraft:apple", "ghost stored in the upgrade settings");
     (void)mm.simulate(p, {Action::Place, {Where::Cursor, 0}, {Where::Inventory, 5}, 3});
+    // SB: a new filter is a block list; the type button (control slot 0) makes it an allow list.
+    ctx.check(f.mode == core::FilterMode::Deny, "new filter is a block list");
+    (void)mm.simulate(p, {Action::Take, {Where::Menu, 18}, {Where::Cursor, 0}, 1});
+    ctx.check(filtering::load(uctx, UpgradeTier::Advanced).mode == core::FilterMode::Allow, "allow list");
     // Match-by button (control slot 1) cycles item -> namespace.
     (void)mm.simulate(p, {Action::Take, {Where::Menu, 19}, {Where::Cursor, 0}, 1});
     ctx.check(filtering::load(uctx, UpgradeTier::Advanced).matchBy == core::MatchBy::Namespace, "match by namespace");
@@ -413,7 +417,7 @@ ABP_REGISTER_SELFTEST("pickup.settings_menu", [](Context& ctx) -> ll::coro::Coro
     (void)mm.simulate(p, {Action::Take, {Where::Menu, 19}, {Where::Cursor, 0}, 1});
     ctx.check(filtering::load(bctx, UpgradeTier::Basic).matchBy == core::MatchBy::Item, "basic stays item match");
     (void)mm.simulate(p, {Action::Take, {Where::Menu, 18}, {Where::Cursor, 0}, 1});
-    ctx.check(filtering::load(bctx, UpgradeTier::Basic).mode == core::FilterMode::Deny, "basic allow/deny toggle");
+    ctx.check(filtering::load(bctx, UpgradeTier::Basic).mode == core::FilterMode::Allow, "basic allow/block toggle");
     mm.close(p);
 });
 

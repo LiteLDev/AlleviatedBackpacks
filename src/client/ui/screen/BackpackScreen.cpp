@@ -331,6 +331,10 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         ctx.sendTabAction    = [slot = t.slot](nlohmann::json d) { net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(d)}}); };
         ctx.sendScreenAction = [](nlohmann::json b) { net::sendScreenAction(std::move(b)); };
         t.native->update(ctx);
+        if (t.native->needsRebuild()) {
+            t.widgets.widgets.clear();
+            t.openSize = t.native->build(ctx, t.rect, t.widgets);
+        }
     }
 }
 
@@ -541,7 +545,7 @@ void BackpackScreenLayer::drawTabs(Painter& p, cs::BackpackScreenModel const& m,
         if (!isOpen || tab.slot < 0) return;
         auto const& u     = m.upgrades[static_cast<std::size_t>(tab.slot)];
         float       maxW  = std::max(0.f, tab.rect.w - 20 - 6);
-        p.text(truncated(p, u.name, maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
+        p.text(truncated(p, u.tab.value("title", u.name), maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
         tab.widgets.render(p, mx, my, t);
         if (tab.native) {
             TabContext ctx{m, tab.slot, u, &mUpgradeStacks[static_cast<std::size_t>(tab.slot)], {}, {}};
@@ -704,7 +708,10 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         auto const& t = mTabs[i];
         if (static_cast<int>(i) == mOpenTab || !t.rect.contains(mx, my)) continue;
         if (t.slot < 0) lines.push_back({ctr("abp.companion.tab.settings", "Backpack Settings"), 0xFFFFFF});
-        else lines.push_back({m.upgrades[static_cast<std::size_t>(t.slot)].name, 0xFFFFFF});
+        else {
+            auto const& u = m.upgrades[static_cast<std::size_t>(t.slot)];
+            lines.push_back({u.tab.value("tooltip", u.name), 0xFFFFFF});
+        }
         drawTooltip(p, lines, mx, my);
         return;
     }

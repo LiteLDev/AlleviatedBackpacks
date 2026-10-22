@@ -8,26 +8,27 @@
 #include "mc/world/Container.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/world/level/BlockPos.h"
+#include "mc/world/level/BlockSource.h"
+#include "mc/world/level/block/Block.h"
 
 #include "game/ItemConv.h"
 #include "mod/I18n.h"
+#include "ui/menu/BackpackMenu.h"
 #include "ui/menu/FilterMenu.h"
 #include "ui/menu/MenuManager.h"
-#include "ui/menu/BackpackMenu.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/filter/FilterCommon.h"
 
 namespace abp::upgrade::transfer {
 
 namespace {
 
+UpgradeTier tierFor(bool advanced) { return advanced ? UpgradeTier::Advanced : UpgradeTier::Basic; }
+
 /// The upgrade slot of `ctx` still holds an upgrade item `itemId` (another player may have removed
 /// it while a settings menu was open).
-bool holds(UpgradeContext const& ctx, std::string const& itemId) {
-    auto const& slots = ctx.backpack().data().upgrades;
-    if (ctx.slot() < 0 || ctx.slot() >= static_cast<int>(slots.size())) return false;
-    auto const& item = slots[static_cast<std::size_t>(ctx.slot())].item;
-    return !item.empty() && item.id == itemId;
-}
+bool holds(UpgradeContext const& ctx, std::string const& itemId) { return filtering::stillInstalled(ctx, itemId); }
 
 void addDistinct(std::vector<core::ItemStackData>& out, core::ItemStackData const& item) {
     if (item.empty()) return;
@@ -37,36 +38,37 @@ void addDistinct(std::vector<core::ItemStackData>& out, core::ItemStackData cons
     out.push_back(item.withCount(1));
 }
 
-/// FilterMenu plus the advanced "contents" mode toggle in the free control slot.
+/// FilterMenu plus the third type state (INVENTORY / STORAGE) in a free control slot.
 class TransferFilterMenu final : public ui::FilterMenu {
 public:
     TransferFilterMenu(std::string title, Getter get, Setter set, Options options, UpgradeContext ctx, bool deposit)
-    : FilterMenu(std::move(title), std::move(get), std::move(set), std::move(options)),
+    : FilterMenu(std::move(title), get, set, std::move(options)),
+      mGetFilter(std::move(get)),
+      mSetFilter(std::move(set)),
       mCtx(std::move(ctx)),
       mItemId(mCtx.state().item.id),
       mDeposit(deposit) {}
 
     void build(Player& player) override {
         FilterMenu::build(player);
-        if (!stillInstalled()) return;
-        bool on = mCtx.settings().value(std::string(kContentsKey), false);
-        auto label =
-            mDeposit ? trFor(player, "abp.deposit.contents", "Only items already in the container: {}", onOff(player, on))
-                     : trFor(player, "abp.restock.contents", "Only items already in the backpack: {}", onOff(player, on));
-        auto help = mDeposit ? trFor(player, "abp.deposit.contents.help", "§7When on, the filter list is ignored")
-                             : trFor(player, "abp.restock.contents.help", "§7When on, the filter list is ignored");
+        if (!holds(mCtx, mItemId)) return;
+        auto f  = mGetFilter();
+        bool on = mDeposit ? f.filterByInventory : f.filterByStorage;
+        auto label = mDeposit ? trFor(player, "abp.deposit.contents", "Match Inventory Contents: {}", onOff(player, on))
+                              : trFor(player, "abp.restock.contents", "Match Backpack Contents: {}", onOff(player, on));
         setSlot(
             size() - 9 + 5,
             std::make_shared<ui::ButtonSlot>(
-                ui::icon(on ? "minecraft:chest" : "minecraft:barrel", label, {help, trFor(player, "abp.filter.click_to_toggle", "§7Click to toggle")}),
+                ui::icon(on ? "minecraft:chest" : "minecraft:barrel", label, {trFor(player, "abp.filter.click_to_toggle", "§7Click to toggle")}),
                 [this](ui::ClickContext const& c) {
-                    if (!stillInstalled()) {
+                    if (!holds(mCtx, mItemId)) {
                         ui::MenuManager::get().close(c.player);
                         return;
                     }
-                    auto& s                      = mCtx.settings();
-                    s[std::string(kContentsKey)] = !s.value(std::string(kContentsKey), false);
-                    mCtx.saveSettings(false);
+                    auto f = mGetFilter();
+                    if (mDeposit) f.filterByInventory = !f.filterByInventory;
+                    else f.filterByStorage = !f.filterByStorage;
+                    mSetFilter(f);
                     invalidate();
                 }
             )
@@ -74,13 +76,12 @@ public:
     }
 
 private:
-    /// The upgrade this menu edits is still in its slot (another player may have removed it).
-    [[nodiscard]] bool stillInstalled() const { return holds(mCtx, mItemId); }
-
     static std::string onOff(Player& player, bool v) {
         return v ? trFor(player, "abp.filter.on", "§aOn") : trFor(player, "abp.filter.off", "§cOff");
     }
 
+    Getter         mGetFilter;
+    Setter         mSetFilter;
     UpgradeContext mCtx;
     std::string    mItemId;
     bool           mDeposit;
@@ -88,30 +89,11 @@ private:
 
 } // namespace
 
-bool contentsMode(UpgradeContext const& ctx, bool advanced) {
-    return advanced && ctx.settings().value(std::string(kContentsKey), false);
-}
+core::Filter loadFilter(UpgradeContext const& ctx, bool advanced) { return filtering::load(ctx, tierFor(advanced)); }
 
-core::Filter effectiveFilter(UpgradeContext const& ctx, bool advanced, std::vector<core::ItemStackData> const& reference) {
-    int  slots = filterSlots(advanced);
-    auto f     = core::Filter::fromJson(ctx.settings().value(std::string(kFilterKey), nlohmann::json::object()), slots);
-    if (!advanced) {
-        // Basic upgrades only have an allow/deny list matched by item.
-        f.matchBy         = core::MatchBy::Item;
-        f.matchNbt        = false;
-        f.matchDurability = false;
-        f.tags.clear();
-        return f;
-    }
-    if (contentsMode(ctx, advanced)) {
-        // Exactly the items present on the other side (NBT / durability options still apply).
-        f.matchBy        = core::MatchBy::Item;
-        f.mode           = core::FilterMode::Allow;
-        f.emptyAllowsAll = false;
-        f.tags.clear();
-        f.ghosts = reference;
-    }
-    return f;
+bool contentsMode(UpgradeContext const& ctx, bool advanced) {
+    auto f = loadFilter(ctx, advanced);
+    return f.filterByInventory || f.filterByStorage;
 }
 
 std::vector<core::ItemStackData> distinctItems(Container& container) {
@@ -163,7 +145,8 @@ int insertIntoContainer(Container& container, int face, core::ItemStackData cons
 std::shared_ptr<ui::Menu> settingsMenu(Player& player, UpgradeContext const& ctx, bool advanced, bool deposit) {
     auto* type  = upgradeFor(ctx.state().item);
     auto  title = type ? displayName(*type, &player) : trFor(player, "abp.filter.title", "Filter");
-    int   slots = filterSlots(advanced);
+    auto  tier  = tierFor(advanced);
+    int   slots = filtering::specFor(deposit ? "deposit" : "restock", tier).slots;
 
     ui::FilterMenu::Options options;
     options.slots           = slots;
@@ -173,45 +156,31 @@ std::shared_ptr<ui::Menu> settingsMenu(Player& player, UpgradeContext const& ctx
     options.onBack          = [bp = ctx.backpackPtr()](Player& p) {
         ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
     };
-    auto key    = std::string(kFilterKey);
+    auto base   = ctx.withPlayer(nullptr);
     auto itemId = ctx.state().item.id;
-    auto get    = [ctx, key, slots, itemId] {
-        if (!holds(ctx, itemId)) return core::Filter(slots); // removed while the menu was open
-        return core::Filter::fromJson(ctx.settings().value(key, nlohmann::json::object()), slots);
+    auto get    = [base, tier, slots, itemId] {
+        if (!holds(base, itemId)) return core::Filter(slots, core::FilterDefaults{}); // removed while the menu was open
+        return filtering::load(base, tier);
     };
-    auto set = [ctx, key, itemId](core::Filter const& f) {
-        if (!holds(ctx, itemId)) return;
-        ctx.settings()[key] = f.toJson();
-        ctx.saveSettings(false); // the filter is read on use; no inventory hooks depend on it
+    auto set = [base, tier, itemId](core::Filter const& f) {
+        if (holds(base, itemId)) filtering::store(base, tier, f);
     };
-    if (!advanced) return std::make_shared<ui::FilterMenu>(std::move(title), std::move(get), std::move(set), std::move(options));
-    return std::make_shared<TransferFilterMenu>(std::move(title), std::move(get), std::move(set), std::move(options), ctx, deposit);
+    return std::make_shared<TransferFilterMenu>(std::move(title), std::move(get), std::move(set), std::move(options), base, deposit);
 }
 
 std::vector<std::string> describe(Player& player, UpgradeContext const& ctx, bool advanced, bool deposit) {
-    std::vector<std::string> lines;
-    if (contentsMode(ctx, advanced)) {
-        lines.push_back(
-            deposit ? trFor(player, "abp.deposit.describe.contents", "§7Only items already in the container")
-                    : trFor(player, "abp.restock.describe.contents", "§7Only items already in the backpack")
-        );
-        return lines;
+    auto f = loadFilter(ctx, advanced);
+    if (deposit ? f.filterByInventory : f.filterByStorage) {
+        return {deposit ? trFor(player, "abp.deposit.describe.contents", "§7Match Inventory Contents")
+                        : trFor(player, "abp.restock.describe.contents", "§7Match Backpack Contents")};
     }
-    auto f     = effectiveFilter(ctx, advanced, {});
-    int  count = static_cast<int>(std::count_if(f.ghosts.begin(), f.ghosts.end(), [](auto const& g) { return !g.empty(); }));
-    std::string_view unit = deposit ? "deposit" : "restock";
-    if (f.isEmpty() && f.mode == core::FilterMode::Allow) {
-        lines.push_back(trFor(player, std::format("abp.{}.describe.filter_all", unit), "§7Filter: everything"));
-    } else if (f.mode == core::FilterMode::Allow) {
-        lines.push_back(trFor(player, std::format("abp.{}.describe.filter_allow", unit), "§7Allow list: {} items", count));
-    } else {
-        lines.push_back(trFor(player, std::format("abp.{}.describe.filter_deny", unit), "§7Deny list: {} items", count));
-    }
-    return lines;
+    auto copy            = f;
+    copy.filterByStorage = false;
+    return filtering::describe(player, copy, tierFor(advanced));
 }
 
 void sendTip(Player& player, std::string const& text) {
-    auto        pkt = TextPacket{};
+    auto                           pkt = TextPacket{};
     TextPacketPayload::MessageOnly message;
     message.mType = TextPacketType::Tip;
     message.mMessage->assign(text);
@@ -222,7 +191,6 @@ void sendTip(Player& player, std::string const& text) {
 Interaction interact(std::shared_ptr<game::Backpack> const& backpack, Player& player, Container& container, int face) {
     Interaction out;
     if (!backpack) return out;
-    std::vector<std::string> parts;
     forEachInstalled(backpack, true, [&](IUpgrade& type, UpgradeContext const& base) {
         auto const& info     = type.info();
         bool        advanced = info.tier == UpgradeTier::Advanced;
@@ -232,25 +200,21 @@ Interaction interact(std::shared_ptr<game::Backpack> const& backpack, Player& pl
             auto r      = deposit::run(ctx, container, face, advanced);
             out.deposited.stacks += r.stacks;
             out.deposited.items  += r.items;
-            parts.push_back(
-                r.stacks > 0 ? trFor(player, "abp.deposit.done", "Deposited {} stacks", r.stacks)
-                             : trFor(player, "abp.deposit.nothing", "Nothing to deposit")
-            );
+            // SB DepositUpgradeWrapper.onHandlerInteract
+            out.message = r.stacks > 0
+                            ? trFor(player, "abp.deposit.status.stacks_deposited", "{} stacks deposited to inventory", r.stacks)
+                            : trFor(player, "abp.deposit.status.nothing_to_deposit", "No stacks could be deposited to inventory");
         } else if (info.groupOrId() == "restock") {
             out.handled = true;
             auto r      = restock::run(ctx, container, face, advanced);
             out.restocked.stacks += r.stacks;
             out.restocked.items  += r.items;
-            parts.push_back(
-                r.stacks > 0 ? trFor(player, "abp.restock.done", "Restocked {} stacks", r.stacks)
-                             : trFor(player, "abp.restock.nothing", "Nothing to restock")
-            );
+            // SB RestockUpgradeWrapper.onHandlerInteract
+            out.message = r.stacks > 0
+                            ? trFor(player, "abp.restock.status.stacks_restocked", "{} stacks restocked from inventory", r.stacks)
+                            : trFor(player, "abp.restock.status.nothing_to_restock", "No stacks could be restocked from inventory");
         }
     });
-    for (auto const& p : parts) {
-        if (!out.message.empty()) out.message += "§r, ";
-        out.message += p;
-    }
     return out;
 }
 

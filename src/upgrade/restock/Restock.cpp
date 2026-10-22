@@ -1,40 +1,50 @@
 // Restock upgrade (basic + advanced): using the backpack on a container moves the items the
 // upgrade's filter lets through from that container into the backpack.
 
+#include <algorithm>
+
 #include "mc/world/Container.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "game/ItemConv.h"
+#include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/Menu.h"
 #include "upgrade/IUpgrade.h"
+#include "upgrade/UpgradeManager.h"
 #include "upgrade/deposit/ContainerTransfer.h"
 #include "upgrade/deposit/TestSupport.h"
+#include "upgrade/filter/FilterCommon.h"
 
 namespace abp::upgrade::restock {
 
 transfer::Result run(UpgradeContext const& ctx, Container& container, int face, bool advanced) {
+    // SB RestockUpgradeWrapper.restockFromHandler: InventoryHelper.transfer(container -> filtered
+    // backpack); every inserted chunk (at most a max stack) counts as one stack.
     transfer::Result out;
-    auto&            inv    = ctx.backpack().inventory();
-    auto             filter = transfer::effectiveFilter(
-        ctx,
-        advanced,
-        transfer::contentsMode(ctx, advanced) ? transfer::distinctItems(inv) : std::vector<core::ItemStackData>{}
-    );
+    auto&            backpack = ctx.backpack();
+    auto&            inv      = backpack.inventory();
+    auto             filter   = transfer::loadFilter(ctx, advanced);
     core::AccessContext const access{core::Source::Upgrade, ctx.player()};
     int                       size = container.getContainerSize();
     for (int s = 0; s < size; ++s) {
         auto const& stack = container.getItem(s);
         if (stack.isNull() || container.isSlotDisabled(s) || !container.canPullOutItem(s, face, stack)) continue;
         auto data = game::ItemConv::toData(stack);
-        if (data.empty() || !filter.passes(data, &game::ItemConv::tags())) continue;
-        auto r     = inv.insert(data, access);
-        int  moved = r.inserted + r.voided;
-        if (moved <= 0) continue;
-        container.removeItem(s, moved);
-        ++out.stacks;
-        out.items += moved;
+        if (data.empty() || !filtering::matchesContents(filter, backpack, data)) continue;
+        int left = data.count;
+        while (left > 0) {
+            int  chunk = std::min(std::max(1, data.maxStack), left);
+            auto r     = inv.insert(data.withCount(chunk), access);
+            int  moved = r.inserted + r.voided;
+            if (moved <= 0) break;
+            container.removeItem(s, moved);
+            ++out.stacks;
+            out.items += moved;
+            left      -= moved;
+            if (moved < chunk) break;
+        }
     }
     return out;
 }
@@ -77,6 +87,36 @@ public:
 
 ABP_REGISTER_UPGRADE(abp::upgrade::restock::RestockUpgrade);
 ABP_REGISTER_UPGRADE(abp::upgrade::restock::AdvancedRestockUpgrade);
+
+// ---- native tab (client: FilterTab "filter" at +3,+24) ------------------------------------------
+
+namespace abp::upgrade::restock {
+namespace {
+UpgradeTier tierOf(UpgradeContext const& ctx) {
+    auto* type = upgradeFor(ctx.state().item);
+    return type ? type->info().tier : UpgradeTier::Basic;
+}
+
+[[maybe_unused]] bool const kTabRegistered = [] {
+    filtering::registerSettingsFilterTab(filtering::SettingsFilterTab{
+        .upgrade = "restock",
+        .key     = "filter",
+        .spec    = [](UpgradeContext const& ctx) { return filtering::specFor("restock", tierOf(ctx)); },
+        .load    = [](UpgradeContext const& ctx) { return filtering::load(ctx, tierOf(ctx)); },
+        .store   = [](UpgradeContext const& ctx, core::Filter const& f) { filtering::store(ctx, tierOf(ctx), f); },
+    });
+    return true;
+}();
+} // namespace
+} // namespace abp::upgrade::restock
+
+ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{
+    "restock",
+    [](Player& player, abp::upgrade::UpgradeContext const& ctx) {
+        return abp::upgrade::filtering::tabTexts(player, "restock", abp::upgrade::restock::tierOf(ctx) == abp::upgrade::UpgradeTier::Advanced);
+    },
+});
+
 
 // ---- selftests -----------------------------------------------------------------------------------
 
@@ -145,14 +185,13 @@ ABP_REGISTER_SELFTEST("restock.advanced_contents_mode", [](Context& ctx) -> ll::
     fill(*bp, "minecraft:arrow", 1);
     c.setItem(0, game::ItemConv::make("minecraft:arrow", 64));
     c.setItem(1, game::ItemConv::make("minecraft:string", 64));
-    uc.settings()["contents"] = true;
+    setContents(uc, true, true);
     auto r = run(uc, c, kUp, true);
     ctx.check(r.stacks == 1 && countIn(*bp, "minecraft:arrow") == 65, "only items already in the backpack: " + describeResult(r));
     ctx.check(countIn(c, "minecraft:string") == 64, "string stays");
 
     // Tag matching (advanced): every item tagged like the ghost's tags.
-    uc.settings()["contents"] = false;
-    core::Filter f(16);
+    core::Filter f(16, core::FilterDefaults{.allowList = true});
     f.matchBy = core::MatchBy::Tag;
     f.tags    = {"minecraft:logs"};
     uc.settings()["filter"] = f.toJson();

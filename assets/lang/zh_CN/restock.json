@@ -1,12 +1,12 @@
 {
   "abp.upgrade.restock.name": "补货升级",
   "abp.upgrade.advanced_restock.name": "高级补货升级",
-  "abp.restock.contents": "仅补充背包中已有的物品：{}",
-  "abp.restock.contents.help": "§7开启后忽略过滤列表",
-  "abp.restock.describe.contents": "§7仅补充背包中已有的物品",
-  "abp.restock.describe.filter_all": "§7过滤：全部物品",
-  "abp.restock.describe.filter_allow": "§7白名单：{} 种物品",
-  "abp.restock.describe.filter_deny": "§7黑名单：{} 种物品",
-  "abp.restock.done": "已补货 {} 组物品",
-  "abp.restock.nothing": "没有可补充的物品"
+  "abp.restock.tab": "补货",
+  "abp.restock.tab.tooltip": "补货设置",
+  "abp.restock.tab.advanced": "高级补货",
+  "abp.restock.tab.advanced.tooltip": "高级补货设置",
+  "abp.restock.contents": "匹配背包内容：{}",
+  "abp.restock.describe.contents": "§7匹配背包内容",
+  "abp.restock.status.stacks_restocked": "已从容器补货 {} 组物品",
+  "abp.restock.status.nothing_to_restock": "没有物品可以从容器补货"
 }
