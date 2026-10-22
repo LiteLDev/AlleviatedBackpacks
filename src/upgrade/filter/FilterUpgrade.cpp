@@ -12,6 +12,7 @@
 #include "game/ItemConv.h"
 #include "net/NativeScreens.h"
 #include "mod/I18n.h"
+#include "mod/Log.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/filter/FilterCommon.h"
@@ -200,6 +201,7 @@ ABP_REGISTER_TAB_ACTION(abp::net::TabActionHandler{
         if (!data.is_object() || data.value("op", std::string{}) != "direction") return false;
         // SC Direction.next(): BOTH -> INPUT -> OUTPUT.
         setDirection(ctx, static_cast<Direction>((static_cast<int>(directionOf(ctx)) + 1) % 3));
+        abp::log().info("filter tab: upgrade slot={} op=direction direction={}", ctx.slot(), static_cast<int>(directionOf(ctx)));
         return true;
     },
 });

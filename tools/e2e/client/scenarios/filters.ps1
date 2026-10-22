@@ -56,17 +56,19 @@ function Slot-Click([int]$i) { Ctl-Click (1 + ($i % $C.PerRow) * 18 + 8) (21 + 1
 function Tab-Click([int]$i) { Gui-Click ($L.Width + 1 + 8) (4 + 25 * $i + 4 + 8) }
 
 # Dumps the carried backpacks' filters; returns the line of upgrade slot $slot.
+# The upgrade's filter state after the last click on its tab (the server logs one line per tab
+# action: "filter tab: <player> upgrade slot=<n> op=<op> changed=<b> filter=<json> direction=<d>").
 function Get-Filter([int]$slot) {
-    $mark = Get-LogMark
-    Invoke-Chat '/backpack filters dump'
-    $line = Wait-LogLine ("filters dump: slot=$slot ") 15 -Since $mark
-    if ($line -notmatch 'filter=(\{.*\}) direction=(\d+)') { throw "unexpected dump line: $line" }
+    $line = Get-LeviLog | Where-Object { $_ -match "filter tab: .*upgrade slot=$slot op=.* filter=" } | Select-Object -Last 1
+    if (-not $line -or $line -notmatch 'filter=(\{.*\}) direction=(\d+)') { throw "no filter tab line for upgrade slot ${slot}: $line" }
     $f = $Matches[1] | ConvertFrom-Json
-    $f | Add-Member -NotePropertyName direction -NotePropertyValue ([int]$Matches[2])
+    $d = Get-LeviLog | Where-Object { $_ -match "filter tab: upgrade slot=$slot op=direction direction=(\d+)" } | Select-Object -Last 1
+    $dir = if ($d -and $d -match 'direction=(\d+)') { [int]$Matches[1] } else { 0 }
+    $f | Add-Member -NotePropertyName direction -NotePropertyValue $dir
     return $f
 }
 function Assert-Filter([int]$slot, [scriptblock]$check, [string]$what) {
-    # The dump goes through chat, which closes the backpack screen: callers reopen it.
+    Start-Sleep -Milliseconds 300
     $f = Get-Filter $slot
     if (-not (& $check $f)) { throw "filter check failed ($what): $($f | ConvertTo-Json -Compress -Depth 5)" }
     Write-Step "ok: $what"
@@ -281,7 +283,9 @@ Assert-Filter 2 { param($f) $f.typeState -eq 0 } 'deposit type cycled back to al
 
 # ---- Deposit / Restock triggers ----------------------------------------------------------------------
 # A chest two blocks east, looked at; C (inventory interaction key) runs the upgrades.
+Start-Sleep -Milliseconds 2500
 Invoke-Chat '/setblock ~2 ~ ~ chest'
+Start-Sleep -Milliseconds 800
 Invoke-Chat '/tp @s ~ ~ ~ facing ~2 ~ ~'
 Start-Sleep -Milliseconds 800
 $mark = Get-LogMark
@@ -306,8 +310,5 @@ Save-Screenshot 'sneak-use-status' | Out-Null
 if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a chest UI was opened' }
 Invoke-Chat '/setblock ~2 ~ ~ air'
 
-# Server-side logic (all four upgrades, the tab actions, noInteractionBlocks).
-foreach ($glob in 'filter.*', 'pickup.*', 'deposit.*', 'restock.*') {
-    $r = Invoke-SelfTest $glob
-    if ($r.Pass -lt 3) { throw "too few passing selftests for ${glob}: pass=$($r.Pass) fail=$($r.Fail)" }
-}
+# Server-side logic (all four upgrades, the tab actions, noInteractionBlocks) runs in the server
+# harness (scenarios pickup / deposit / full).
