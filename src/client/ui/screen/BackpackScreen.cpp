@@ -172,8 +172,11 @@ public:
     [[nodiscard]] bool capturesKey(int vk) const override {
         auto const* m = net::screenModel();
         if (!m) return false;
-        if (vk == VK_ESCAPE_) return m->nested || mView == View::Settings;
-        if (vk == 'E') return true; // the inventory key closes container screens
+        // ESC and the inventory key close the screen (SB / vanilla container screens). Both are
+        // handled here rather than left to the host dialog scene: the dialog's own ESC handling is
+        // not reliable (ignored under synthetic input), and an uncaptured key also reaches vanilla's
+        // key bindings.
+        if (vk == VK_ESCAPE_ || vk == 'E') return true;
         if (m->kind == "menu") return vk == 'Q' || (vk >= '1' && vk <= '9');
         using input::KeyAction;
         if (input::keyMatches(KeyAction::OpenBackpack, vk) || input::keyMatches(KeyAction::Sort, vk)
@@ -1203,7 +1206,7 @@ bool BackpackScreenLayer::onKey(int vk, bool down) {
         send({{"action", "back"}});
         return true;
     }
-    if (vk == 'E') {
+    if (vk == VK_ESCAPE_ || vk == 'E') {
         requestClose();
         return true;
     }
