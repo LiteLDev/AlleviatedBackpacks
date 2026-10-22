@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:advanced_compacting_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "DRD",
-      "GCG",
+      " D ",
+      "G#G",
       "RRR"
     ],
     "key": {
-      "D": { "item": "minecraft:diamond" },
-      "R": { "item": "minecraft:redstone" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "C": { "item": "alleviatedbackpacks:compacting_upgrade" }
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      },
+      "#": {
+        "item": "alleviatedbackpacks:compacting_upgrade"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:compacting_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:advanced_compacting_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:compacting_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:advanced_compacting_upgrade",
+      "count": 1
+    }
   }
 }

@@ -4,20 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:advanced_refill_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " D ",
-      "GUG",
-      "RER"
+      "G#G",
+      "RRR"
     ],
     "key": {
-      "D": { "item": "minecraft:diamond" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "U": { "item": "alleviatedbackpacks:refill_upgrade" },
-      "R": { "item": "minecraft:redstone" },
-      "E": { "item": "minecraft:ender_pearl" }
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      },
+      "#": {
+        "item": "alleviatedbackpacks:refill_upgrade"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:refill_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:advanced_refill_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:refill_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:advanced_refill_upgrade",
+      "count": 1
+    }
   }
 }

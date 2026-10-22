@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:smelting_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       "RIR",
       "IBI",
       "RFR"
     ],
     "key": {
-      "R": { "item": "minecraft:redstone" },
-      "I": { "item": "minecraft:iron_ingot" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "F": { "item": "minecraft:furnace" }
+      "R": {
+        "item": "minecraft:redstone"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "F": {
+        "item": "minecraft:furnace"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:smelting_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:smelting_upgrade",
+      "count": 1
+    }
   }
 }

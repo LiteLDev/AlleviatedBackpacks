@@ -17,16 +17,17 @@
         "item": "minecraft:iron_ingot"
       },
       "B": {
-        "item": "alleviatedbackpacks:copper_backpack"
+        "item": "alleviatedbackpacks:leather_backpack"
       }
     },
     "unlock": [
       {
-        "item": "alleviatedbackpacks:copper_backpack"
+        "item": "alleviatedbackpacks:leather_backpack"
       }
     ],
     "result": {
-      "item": "alleviatedbackpacks:iron_backpack"
+      "item": "alleviatedbackpacks:iron_backpack",
+      "count": 1
     }
   }
 }

@@ -70,6 +70,26 @@ std::shared_ptr<IEnergyStorage> energyStorage(std::shared_ptr<game::Backpack> co
     return out;
 }
 
+std::shared_ptr<IFluidHandler> tankOf(upgrade::UpgradeContext const& ctx) {
+    auto const& slots = ctx.backpack().data().upgrades;
+    if (ctx.slot() < 0 || ctx.slot() >= static_cast<int>(slots.size())) return nullptr;
+    auto* type = upgrade::upgradeFor(slots[static_cast<std::size_t>(ctx.slot())].item);
+    if (!type) return nullptr;
+    auto& r  = registry();
+    auto  it = r.tanks.find(type->info().id);
+    return it == r.tanks.end() ? nullptr : it->second(ctx);
+}
+
+std::shared_ptr<IEnergyStorage> energyOf(upgrade::UpgradeContext const& ctx) {
+    auto const& slots = ctx.backpack().data().upgrades;
+    if (ctx.slot() < 0 || ctx.slot() >= static_cast<int>(slots.size())) return nullptr;
+    auto* type = upgrade::upgradeFor(slots[static_cast<std::size_t>(ctx.slot())].item);
+    if (!type) return nullptr;
+    auto& r  = registry();
+    auto  it = r.energy.find(type->info().id);
+    return it == r.energy.end() ? nullptr : it->second(ctx);
+}
+
 int slotRows(game::Backpack& backpack) { return core::capacity::slotRows(backpack.inventory().size()); }
 
 double stackMultiplier(game::Backpack& backpack) {

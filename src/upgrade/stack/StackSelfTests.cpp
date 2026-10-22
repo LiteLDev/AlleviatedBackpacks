@@ -15,7 +15,9 @@
 #include "mc/world/item/crafting/Recipe.h"
 #include "mc/world/item/crafting/Recipes.h"
 #include "mc/world/level/Level.h"
+#include "mc/world/level/GameType.h"
 
+#include "api/BackpackCapabilities.h"
 #include "core/StackMultiplier.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -300,6 +302,72 @@ ABP_REGISTER_SELFTEST("stack.gui_counts_and_split", [](Context& ctx) -> ll::coro
     ctx.check(mm.shownItem(player, 0).mCount == 64, "display still capped at 64");
     mm.close(player);
     ctx.check(countOf(*bp, "minecraft:stone") == 300, "no stone lost or duplicated");
+});
+
+ABP_REGISTER_SELFTEST("stack.sc_limits", [](Context& ctx) {
+    // SC InventoryHandler.getBaseStackLimit with the slot limit computed first.
+    auto bp = ctx.createBackpack(Tier::Iron);
+    ctx.installUpgrade(bp, "stack_starter", 0); // 96
+    ctx.check(limitOf(*bp, "minecraft:snowball") == 24, "starter: 16 * 1 + 32 * 16 / 64 = 24");
+    ctx.check(limitOf(*bp, "minecraft:diamond_sword") == 1, "starter: unstackables 1 * 1 + 32 / 64 = 1");
+    ctx.installUpgrade(bp, "stack_downgrade_tier_3", 1); // 1.5 / 32 -> slot limit 3
+    ctx.check(limitOf(*bp, "minecraft:stone") == 3, "1.5 / 32 -> 3");
+    ctx.check(limitOf(*bp, "minecraft:snowball") == 1, "max(1, (int) (16 * 3 / 64.0)) = 1");
+    // Shulker boxes and bundles keep their size (SC nonStackableItems).
+    auto big = ctx.createBackpack(Tier::Leather);
+    ctx.installUpgrade(big, "stack_tier_4");
+    ctx.check(limitOf(*big, "minecraft:red_shulker_box") == 1, "shulker boxes stay at 1");
+    ctx.check(limitOf(*big, "minecraft:undyed_shulker_box") == 1, "undyed shulker box stays at 1");
+    ctx.check(limitOf(*big, "minecraft:iron_sword") == 16, "swords x16");
+    ctx.check(limitOf(*big, "minecraft:stone") == 1024, "stone x16");
+});
+
+ABP_REGISTER_SELFTEST("stack.error_text", [](Context& ctx) {
+    auto bp = ctx.createBackpack(Tier::Leather);
+    ctx.installUpgrade(bp, "stack_tier_1");
+    bp->inventory().set(0, data("minecraft:stone", 100));
+    std::string reason;
+    ctx.check(!upgrade::remove(bp, 0, nullptr, &reason).has_value(), "removal refused");
+    ctx.check(reason == "There's at least one slot or upgrade that requires stack limit higher than 64", "SB text: " + reason);
+});
+
+ABP_REGISTER_SELFTEST("stack.tank_needs_multiplier", [](Context& ctx) {
+    auto bp = ctx.createBackpack(Tier::Iron); // 2 upgrade slots
+    ctx.installUpgrade(bp, "stack_tier_1", 0);
+    ctx.installUpgrade(bp, "tank", 1);
+    auto tank = api::backpack::tankOf(UpgradeContext(bp, 1));
+    ctx.require(tank != nullptr, "tank handler");
+    int cap = tank->tankCapacity(0);
+    ctx.require(cap > 0, "tank capacity");
+    // More than the base capacity (the capacity without the stack upgrade): x2 needed.
+    int filled = tank->fill(api::FluidStack{"minecraft:water", cap / 2 + 1000}, false);
+    ctx.require(filled == cap / 2 + 1000, "filled " + std::to_string(filled));
+    ctx.check(minimumMultiplierRequired(bp, 1) == 2, "tank needs x2, got " + std::to_string(minimumMultiplierRequired(bp, 1)));
+    std::string reason;
+    ctx.check(!upgrade::remove(bp, 0, nullptr, &reason).has_value(), "stack upgrade can't go while the tank needs it");
+    ctx.check(reason.find("64") != std::string::npos, "reason: " + reason);
+    tank->drainAny(2000, false);
+    ctx.check(minimumMultiplierRequired(bp, 1) == 1, "within the base capacity");
+    ctx.check(upgrade::remove(bp, 0, nullptr, &reason).has_value(), "removable now: " + reason);
+});
+
+ABP_REGISTER_SELFTEST("stack.convert_creative", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& mm     = ui::MenuManager::get();
+    auto& player = ctx.player();
+    auto  bp     = ctx.createBackpack(Tier::Leather);
+    ctx.installUpgrade(bp, "stack_starter");
+    ctx.require(ui::BackpackMenu::openBackpack(player, bp, "Stack", ui::BackpackMenu::View::Upgrades), "open upgrades view");
+    mm.forceShown(player);
+    co_await ctx.ticks(2);
+    mm.forceShown(player);
+    player.setPlayerGameType(GameType::Creative);
+    setCursor(player, game::ItemConv::make("alleviatedbackpacks:stack_conversion_starter_to_tier_4", 1));
+    (void)mm.simulate(player, {Action::Swap, {Where::Menu, 0}, {Where::Cursor, 0}, 1});
+    ctx.check(slotItem(*bp, 0) == itemIdOf("stack_tier_4"), "converted to tier 4");
+    ctx.check(cursorOf(player).mCount == 1, "creative: conversion item kept");
+    player.setPlayerGameType(GameType::Survival);
+    setCursor(player, ItemStack{});
+    mm.close(player);
 });
 
 } // namespace

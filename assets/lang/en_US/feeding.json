@@ -1,6 +1,6 @@
 {
   "abp.feeding.name": "Feeding Upgrade",
-  "abp.feeding.advanced.name": "Advanced Feeding Upgrade",
+  "abp.feeding.advanced.name": "Advanced Feeding upgrade",
   "abp.feeding.mode.always": "Whenever hungry",
   "abp.feeding.mode.half": "Half of the food is used",
   "abp.feeding.mode.full": "No nutrition is wasted",

@@ -4,17 +4,30 @@
     "description": {
       "identifier": "alleviatedbackpacks:stack_tier_3_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "XXX",
-      "XSX",
-      "XXX"
+      "MMM",
+      "MCM",
+      "MMM"
     ],
     "key": {
-      "X": { "item": "minecraft:diamond_block" },
-      "S": { "item": "alleviatedbackpacks:stack_tier_2_upgrade" }
+      "M": {
+        "item": "minecraft:diamond_block"
+      },
+      "C": {
+        "item": "alleviatedbackpacks:stack_tier_2_upgrade"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:stack_tier_2_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:stack_tier_3_upgrade", "count": 1 }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:stack_tier_2_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:stack_tier_3_upgrade",
+      "count": 1
+    }
   }
 }

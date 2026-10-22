@@ -4,17 +4,30 @@
     "description": {
       "identifier": "alleviatedbackpacks:stack_tier_4_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "XXX",
-      "XSX",
-      "XXX"
+      "MMM",
+      "MCM",
+      "MMM"
     ],
     "key": {
-      "X": { "item": "minecraft:netherite_block" },
-      "S": { "item": "alleviatedbackpacks:stack_tier_3_upgrade" }
+      "M": {
+        "item": "minecraft:netherite_block"
+      },
+      "C": {
+        "item": "alleviatedbackpacks:stack_tier_3_upgrade"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:stack_tier_3_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:stack_tier_4_upgrade", "count": 1 }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:stack_tier_3_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:stack_tier_4_upgrade",
+      "count": 1
+    }
   }
 }

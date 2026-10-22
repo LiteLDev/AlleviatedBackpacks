@@ -48,6 +48,12 @@ void addEnergyWrapper(EnergyWrapper wrapper);
 /// wrappers. nullptr without one.
 [[nodiscard]] std::shared_ptr<IEnergyStorage> energyStorage(std::shared_ptr<game::Backpack> const& backpack);
 
+/// The handler one installed upgrade contributes (its registered tank / energy factory applied to
+/// `ctx`), or nullptr when its type registered none. Used e.g. by Stack upgrades to find out the
+/// stack multiplier the upgrade's contents need (SC `IStackableContentsUpgrade`).
+[[nodiscard]] std::shared_ptr<IFluidHandler>  tankOf(upgrade::UpgradeContext const& ctx);
+[[nodiscard]] std::shared_ptr<IEnergyStorage> energyOf(upgrade::UpgradeContext const& ctx);
+
 /// SB sizing inputs of a backpack: slot rows (`core::capacity::slotRows` of its storage size) and
 /// stack multiplier (from its slot limit for 64-stack items; 1 without Stack upgrades).
 [[nodiscard]] int    slotRows(game::Backpack& backpack);

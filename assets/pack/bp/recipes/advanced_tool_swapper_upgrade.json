@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:advanced_tool_swapper_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "RDR",
-      "GTG",
-      "RDR"
+      " D ",
+      "G#G",
+      "RRR"
     ],
     "key": {
-      "R": { "item": "minecraft:redstone" },
-      "D": { "item": "minecraft:diamond" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "T": { "item": "alleviatedbackpacks:tool_swapper_upgrade" }
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      },
+      "#": {
+        "item": "alleviatedbackpacks:tool_swapper_upgrade"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:tool_swapper_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:advanced_tool_swapper_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:tool_swapper_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:advanced_tool_swapper_upgrade",
+      "count": 1
+    }
   }
 }

@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:pickup_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " P ",
       "SBS",
       "RRR"
     ],
     "key": {
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "P": { "item": "minecraft:piston" },
-      "R": { "item": "minecraft:redstone" },
-      "S": { "item": "minecraft:string" }
+      "P": {
+        "item": "minecraft:sticky_piston"
+      },
+      "S": {
+        "item": "minecraft:string"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:pickup_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:pickup_upgrade",
+      "count": 1
+    }
   }
 }

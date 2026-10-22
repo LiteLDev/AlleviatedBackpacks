@@ -6,13 +6,20 @@
 #include "upgrade/stack/StackUpgrade.h"
 
 #include <algorithm>
+#include <climits>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <format>
 #include <unordered_map>
 
+#include "mc/deps/shared_types/legacy/LevelSoundEvent.h"
 #include "mc/world/actor/player/Player.h"
+#include "mc/world/level/Level.h"
+
+#include "api/BackpackCapabilities.h"
+#include "core/Capacity.h"
+#include "upgrade/tank/Tank.h"
 
 #include "core/Codec.h"
 #include "core/StackMultiplier.h"
@@ -20,6 +27,7 @@
 #include "game/ItemConv.h"
 #include "mod/Config.h"
 #include "mod/I18n.h"
+#include "mod/Log.h"
 #include "mod/Module.h"
 #include "upgrade/UpgradeManager.h"
 
@@ -137,7 +145,8 @@ bool affects(core::ItemStackData const& item) {
     return result;
 }
 
-double totalMultiplier(game::Backpack const& backpack, int skipSlot, double extra) {
+namespace {
+std::vector<double> multipliersOf(game::Backpack const& backpack, int skipSlot, double extra) {
     std::vector<double> ms;
     auto const&         slots = backpack.data().upgrades;
     for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
@@ -146,20 +155,70 @@ double totalMultiplier(game::Backpack const& backpack, int skipSlot, double extr
         if (auto const* t = tierByItem(s.item.id)) ms.push_back(multiplierOf(*t));
     }
     if (extra != 1.0) ms.push_back(extra);
-    return core::stack::combine(ms);
+    return ms;
+}
+} // namespace
+
+double totalMultiplier(game::Backpack const& backpack, int skipSlot, double extra) {
+    return core::stack::combine(multipliersOf(backpack, skipSlot, extra));
 }
 
-bool fits(game::Backpack& backpack, double multiplier, Player* player, std::string& reason) {
-    if (core::stack::firstSlotOver(backpack.inventory(), multiplier, &affects) < 0) return true;
+int slotLimit(game::Backpack const& backpack, int skipSlot, double extra) {
+    return core::stack::slotLimitOf(multipliersOf(backpack, skipSlot, extra));
+}
+
+int minimumMultiplierRequired(std::shared_ptr<game::Backpack> const& backpack, int slot) {
+    if (!backpack) return 0;
+    UpgradeContext ctx(backpack, slot);
+    // SC: ceil(contents / base capacity), the base capacity being the capacity at multiplier 1.
+    // Handlers report the capacity at the current multiplier: divide it back out (the phase-1 tank
+    // scales by the whole-number multiplier, batteries by SB's adjusted one).
+    auto tank   = api::backpack::tankOf(ctx);
+    auto energy = tank ? nullptr : api::backpack::energyOf(ctx);
+    if (!tank && !energy) return 0;
+    double current  = tank ? static_cast<double>(tank::stackMultiplier(*backpack))
+                           : core::capacity::adjustedMultiplier(api::backpack::stackMultiplier(*backpack));
+    auto   required = [&](long long amount, long long capacity) {
+        if (amount <= 0 || capacity <= 0) return 0;
+        double base = static_cast<double>(capacity) / std::max(current, 1e-9);
+        if (base <= 0.0) return 0;
+        return static_cast<int>(std::min(std::ceil(static_cast<float>(amount) / base), static_cast<double>(INT_MAX)));
+    };
+    int need = 0;
+    if (tank) {
+        for (int i = 0; i < tank->tanks(); ++i) need = std::max(need, required(tank->fluidInTank(i).amount, tank->tankCapacity(i)));
+    }
+    if (energy) need = std::max(need, required(energy->stored(), energy->capacity()));
+    return need;
+}
+
+bool fits(
+    std::shared_ptr<game::Backpack> const& backpack,
+    double                                 multiplier,
+    int                                    ignoreUpgradeSlot,
+    Player*                                player,
+    std::string&                           reason,
+    std::vector<int>*                      errorUpgradeSlots
+) {
+    int    limit     = core::stack::slotLimitOf(multiplier);
+    double effective = static_cast<double>(limit) / 64.0;
+    bool   slotsOver = core::stack::firstSlotNeedingMore(backpack->inventory(), multiplier) >= 0;
+    std::vector<int> upgradesOver;
+    auto const&      slots = backpack->data().upgrades;
+    for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
+        if (i == ignoreUpgradeSlot || slots[static_cast<std::size_t>(i)].empty()) continue;
+        if (minimumMultiplierRequired(backpack, i) > effective) upgradesOver.push_back(i);
+    }
+    if (!slotsOver && upgradesOver.empty()) return true;
     reason = msg(
         player,
         "abp.stack.error.low_multiplier",
-        "There's at least one slot that requires a stack limit higher than {}.",
-        std::to_string(core::stack::baseSlotLimit(multiplier))
+        "There's at least one slot or upgrade that requires stack limit higher than {}",
+        std::to_string(limit)
     );
+    if (errorUpgradeSlots) *errorUpgradeSlots = std::move(upgradesOver);
     return false;
 }
-
 std::string formatMultiplier(double m) {
     auto num = [](double v) {
         if (v >= 1e6 || std::floor(v) == v) return std::format("{:.0f}", v);
@@ -189,13 +248,16 @@ public:
 
     [[nodiscard]] double multiplier() const { return multiplierOf(mDef); }
 
+    // SC StackUpgradeItem: the checks below project the slot limit after the change.
     bool canInstall(UpgradeContext const& ctx, std::string& reason) const override {
-        // The slot is still empty here; project the limit with this one added.
-        return fits(ctx.backpack(), totalMultiplier(ctx.backpack(), ctx.slot(), multiplier()), ctx.player(), reason);
+        // checkExtraInsertConditions: current limit / 64 x this multiplier; the target slot is ignored.
+        double whenAdded = static_cast<double>(slotLimit(ctx.backpack(), ctx.slot())) / 64.0 * multiplier();
+        return fits(ctx.backpackPtr(), whenAdded, ctx.slot(), ctx.player(), reason);
     }
 
     bool canRemove(UpgradeContext const& ctx, std::string& reason) const override {
-        return fits(ctx.backpack(), totalMultiplier(ctx.backpack(), ctx.slot()), ctx.player(), reason);
+        double whenRemoved = static_cast<double>(slotLimit(ctx.backpack(), ctx.slot())) / 64.0;
+        return fits(ctx.backpackPtr(), whenRemoved, -1, ctx.player(), reason);
     }
 
     bool canReplaceWith(UpgradeContext const& ctx, core::ItemStackData const& replacement, std::string& reason) const override {
@@ -203,7 +265,8 @@ public:
         if (!other) return canRemove(ctx, reason);
         double next = multiplierOf(*other);
         if (next >= multiplier()) return true; // same or higher tier never lowers the limit
-        return fits(ctx.backpack(), totalMultiplier(ctx.backpack(), ctx.slot(), next), ctx.player(), reason);
+        double whenRemoved = static_cast<double>(slotLimit(ctx.backpack(), ctx.slot())) / 64.0;
+        return fits(ctx.backpackPtr(), whenRemoved * next, -1, ctx.player(), reason);
     }
 
     void attach(UpgradeContext const& ctx, core::BackpackInventory& inventory) override {
@@ -216,53 +279,48 @@ public:
         // The product is cached and recomputed after `/backpack reload` (config multipliers).
         struct Cached {
             std::uint64_t generation = 0;
-            double        total      = 1.0;
+            int           limit      = 64;
         };
-        auto cached = std::make_shared<Cached>(Cached{gGeneration, totalMultiplier(ctx.backpack())});
+        auto cached = std::make_shared<Cached>(Cached{gGeneration, slotLimit(ctx.backpack())});
         auto weak   = std::weak_ptr<game::Backpack>(ctx.backpackPtr());
         inventory.addLimitModifier(ctx.hookOwner(), 0, [cached, weak](int, core::ItemStackData const& item, int current) {
             if (cached->generation != gGeneration) {
-                if (auto bp = weak.lock()) cached->total = totalMultiplier(*bp);
+                if (auto bp = weak.lock()) cached->limit = slotLimit(*bp);
                 cached->generation = gGeneration;
             }
-            return affects(item) ? core::stack::scaledLimit(current, cached->total) : current;
+            // SC InventoryHandler.getBaseStackLimit; non-stackable items keep their own size.
+            return affects(item) ? core::stack::stackLimit(current, cached->limit) : current;
         });
     }
 
+    // SC StorageContainerMenuBase: right-clicking an installed stack upgrade with a conversion item
+    // that fits it replaces the upgrade in place (if the target could be placed there), uses up one
+    // conversion item unless in creative and plays the smithing table sound. Otherwise nothing
+    // happens (no message).
     std::optional<int> useItemOn(Player& player, UpgradeContext const& ctx, core::ItemStackData const& item) override {
         auto const* conv = conversionByItem(item.id);
         if (!conv) return std::nullopt;
-        if (conv->from != mDef.id) {
-            player.sendMessage(trFor(player, "abp.stack.conversion.wrong", "§cThis conversion doesn't fit that upgrade."));
-            return 0;
-        }
+        if (conv->from != mDef.id) return 0;
         auto const* targetTier = tierById(conv->to);
         auto        target     = game::ItemConv::toData(game::ItemConv::make(itemIdOf(conv->to), 1));
         if (!targetTier || target.empty()) return 0;
-        // Conversions normally go up; with custom config multipliers they might not.
+        // slot.mayPlace(target): the target's install check with this slot ignored.
+        double      whenPlaced = static_cast<double>(slotLimit(ctx.backpack(), ctx.slot())) / 64.0 * multiplierOf(*targetTier);
         std::string reason;
-        if (!fits(ctx.backpack(), totalMultiplier(ctx.backpack(), ctx.slot(), multiplierOf(*targetTier)), &player, reason)) {
-            player.sendMessage(reason);
-            return 0;
-        }
+        if (!fits(ctx.backpackPtr(), whenPlaced, ctx.slot(), &player, reason)) return 0;
         auto& state = ctx.state();
         state.item  = target;
         ctx.backpack().markDirty();
         ctx.backpack().rebuildHooks();
-        player.sendMessage(trFor(
-            player,
-            "abp.stack.conversion.done",
-            "§aConverted to {}.",
-            trFor(player, "abp.stack." + std::string(targetTier->id) + ".name", targetTier->fallback)
-        ));
-        return 1;
+        player.getLevel().playSound(SharedTypes::Legacy::LevelSoundEvent::SmithingTableUse, player.getPosition(), 0.8f, 1.0f);
+        log().info("stack upgrade converted: {} -> {}", itemIdOf(mDef.id), itemIdOf(conv->to));
+        return player.isCreative() ? 0 : 1;
     }
 
     [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
-        double total = totalMultiplier(ctx.backpack());
         return {
             trFor(player, "abp.stack.describe.multiplier", "§7Stack size multiplier: §f{}", formatMultiplier(multiplier())),
-            trFor(player, "abp.stack.describe.total", "§7Slot limit (all stack upgrades): §f{}", std::to_string(core::stack::baseSlotLimit(total))),
+            trFor(player, "abp.stack.describe.total", "§7Slot limit (all stack upgrades): §f{}", std::to_string(slotLimit(ctx.backpack()))),
         };
     }
 

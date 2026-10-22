@@ -19,18 +19,25 @@ struct UpgradeSlot {
     [[nodiscard]] bool empty() const { return item.empty(); }
 };
 
+/// Sophisticated Backpacks' default backpack colours (ARGB).
+inline constexpr std::uint32_t kDefaultMainColor   = 0xFFCC613A;
+inline constexpr std::uint32_t kDefaultAccentColor = 0xFF622E1A;
+/// Phase-1 defaults: stored values equal to these are read as the SB defaults above.
+inline constexpr std::uint32_t kLegacyDefaultMainColor   = 0xFFA0703C;
+inline constexpr std::uint32_t kLegacyDefaultAccentColor = 0xFF5A3C1E;
 /// Everything persisted about one backpack, keyed by `uuid`.
 ///
 /// Settings blobs are free-form JSON owned by feature units:
 /// - `UpgradeSlot::settings`: per installed upgrade (travels with the upgrade item when removed).
 /// - `settings`: backpack-wide settings; each unit uses its own top-level key (e.g. "sort").
+
 struct BackpackData {
     static constexpr int kVersion = 1; ///< bump + add a migration in `fromJson` on format changes
 
     std::string              uuid;
     Tier                     tier        = Tier::Leather;
-    std::uint32_t            mainColor   = 0xFFA0703C; ///< ARGB
-    std::uint32_t            accentColor = 0xFF5A3C1E; ///< ARGB
+    std::uint32_t            mainColor   = kDefaultMainColor;   ///< ARGB
+    std::uint32_t            accentColor = kDefaultAccentColor; ///< ARGB
     BackpackInventory        inventory;
     std::vector<UpgradeSlot> upgrades;
     nlohmann::json           settings = nlohmann::json::object();

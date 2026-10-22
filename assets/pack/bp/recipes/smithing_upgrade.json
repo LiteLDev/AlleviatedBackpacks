@@ -4,18 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:smithing_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " S ",
       "IBI",
-      " I "
+      " C "
     ],
     "key": {
-      "I": { "item": "minecraft:iron_ingot" },
-      "S": { "item": "minecraft:smithing_table" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" }
+      "S": {
+        "item": "minecraft:smithing_table"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "C": {
+        "item": "minecraft:chest"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:smithing_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:smithing_upgrade",
+      "count": 1
+    }
   }
 }
