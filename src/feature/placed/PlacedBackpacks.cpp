@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <exception>
+#include <unordered_set>
 
 #include "ll/api/command/CommandHandle.h"
 #include "ll/api/event/EventBus.h"
@@ -154,13 +155,6 @@ bool isFluidContainer(ItemStack const& stack) {
 }
 
 bool hasEverlasting(game::Backpack const& bp) { return upgrade::hasActive(bp, "everlasting"); }
-bool hasInfinity(game::Backpack const& bp) {
-    for (auto const& s : bp.data().upgrades) {
-        if (s.empty()) continue;
-        if (auto* type = upgrade::upgradeFor(s.item); type && type->info().groupOrId().find("infinity") != std::string::npos) return true;
-    }
-    return false;
-}
 
 BlockPos posOf(BlockLocation const& l) { return BlockPos{l.x, l.y, l.z}; }
 
@@ -370,8 +364,26 @@ void PlacedBackpacks::save() const {
     db->saveData(std::string(kDbKey), j.dump(), DBHelpers::Category::Uncategorized);
 }
 
+namespace {
+PlacedBackpacks::PlacementHooks& placementHooks() {
+    static PlacedBackpacks::PlacementHooks hooks;
+    return hooks;
+}
+} // namespace
+
+void PlacedBackpacks::setPlacementHooks(PlacementHooks hooks) { placementHooks() = std::move(hooks); }
+
+bool PlacedBackpacks::sharesUuid(core::ItemStackData const& a, core::ItemStackData const& b) {
+    auto const& may = placementHooks().mayShareUuid;
+    return may && may(a, b);
+}
+
 void PlacedBackpacks::add(PlacedEntry entry) {
-    if (auto old = mByUuid.find(entry.uuid); old != mByUuid.end() && !(old->second == entry.loc)) {
+    auto shared = [&](BlockLocation const& other) {
+        auto it = mEntries.find(other);
+        return it != mEntries.end() && sharesUuid(it->second.item, entry.item);
+    };
+    if (auto old = mByUuid.find(entry.uuid); old != mByUuid.end() && !(old->second == entry.loc) && !shared(old->second)) {
         // The same backpack can't stand in two places: keep the newest.
         log().warn("placed backpack {} was registered at two positions; keeping the newest", entry.uuid);
         mEntries.erase(old->second);
@@ -383,18 +395,26 @@ void PlacedBackpacks::add(PlacedEntry entry) {
 void PlacedBackpacks::erase(BlockLocation const& loc) {
     auto it = mEntries.find(loc);
     if (it == mEntries.end()) return;
-    if (auto u = mByUuid.find(it->second.uuid); u != mByUuid.end() && u->second == loc) mByUuid.erase(u);
+    auto uuid = it->second.uuid;
     mSignals.erase(loc);
-    // Its jukeboxes stop playing at the block (picked up, broken, dropped).
-    upgrade::jukebox::Service::get().stopAll(it->second.uuid);
     // The entity drawing it goes too.
     if (auto level = ll::service::getLevel()) {
         if (auto dimension = level->getDimension(loc.dim).lock()) {
             auto& region = dimension->getBlockSourceFromMainChunkSource();
             if (region.hasChunksAt(posOf(loc), 0, false)) display::remove(region, loc);
         }
+    }    mEntries.erase(it);
+    // Another endpoint of a linked group may stand for the same storage: it takes over.
+    std::optional<BlockLocation> other;
+    for (auto const& [l, e] : mEntries) {
+        if (e.uuid == uuid) other = l;
     }
-    mEntries.erase(it);
+    if (auto u = mByUuid.find(uuid); u != mByUuid.end() && u->second == loc) {
+        if (other) u->second = *other;
+        else mByUuid.erase(u);
+    }
+    // Its jukeboxes stop playing at the block (picked up, broken, dropped).
+    if (!other) upgrade::jukebox::Service::get().stopAll(uuid);
 }
 
 // ---- actions ------------------------------------------------------------------------------------
@@ -414,9 +434,10 @@ PlacedBackpacks::PlaceResult PlacedBackpacks::place(BlockSource& region, BlockPo
     bool changed = false;
     auto bp      = storage.forItem(item, &changed); // binds a uuid on first use
     if (!bp) return PlaceResult::NoStorage;
-    if (auto other = findUuid(bp->uuid())) {
+    if (auto other = findUuid(bp->uuid()); other && !sharesUuid(other->item, game::ItemConv::toData(item))) {
         // An item bound to a backpack that is already placed (a copy): refuse instead of
-        // ending up with two blocks for one backpack.
+        // ending up with two blocks for one backpack. Linked-storage endpoints share their group's
+        // storage on purpose (placement hooks).
         log().warn("backpack {} is already placed at {} {} {}", bp->uuid(), other->loc.x, other->loc.y, other->loc.z);
         return PlaceResult::Failed;
     }
@@ -503,8 +524,16 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
         player.sendMessage(trFor(player, "abp.placed.blocked", "There is no room for the backpack here."));
         return false;
     }
+    // Creative: a linked-storage endpoint is placed as a new secondary endpoint, the hand keeps it.
+    bool keepInHand = false;
+    if (player.isCreative() && placementHooks().creativeCopy) {
+        if (auto copy = placementHooks().creativeCopy(player, item)) {
+            item       = *copy;
+            keepInHand = true;
+        }
+    }
     auto uuidBefore = game::backpackUuid(item);
-    bool creative   = player.isCreative();
+    bool creative   = player.isCreative() && !keepInHand;
     ItemStack placedItem = item;
     if (creative) {
         // SB BackpackItem.tryPlace: in creative the block gets a clone (new uuid, same contents)
@@ -533,7 +562,7 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
     }
     if (result != PlaceResult::Ok) {
         // place() may have bound a fresh uuid to the item before failing: keep that binding.
-        if (game::backpackUuid(item) != uuidBefore) {
+        if (!keepInHand && game::backpackUuid(item) != uuidBefore) {
             player.getInventory().setItem(slot, item);
             player.sendInventory(false);
         }
@@ -546,15 +575,15 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
     }
     // SB: the wool place sound at (volume + 1) / 2, pitch * 0.8.
     playSoundAt(region, target, "use.cloth", kWoolVolume, kWoolPitch);
+    // Survival: consumed, the block now is the backpack. Creative: the item stays (SB places a
+    // clone; a linked-storage endpoint places another endpoint of the same group).
     auto& inv = player.getInventory();
     if (creative) {
-        // the item stays; it may have been bound to a uuid just now
-        if (game::backpackUuid(item) != uuidBefore) inv.setItem(slot, item);
-    } else {
+        if (game::backpackUuid(item) != uuidBefore) inv.setItem(slot, item); // bound just now
+    } else if (!keepInHand) {
         inv.setItem(slot, ItemStack::EMPTY_ITEM());
     }
-    player.sendInventory(false);
-    mCooldowns[player.getOrCreateUniqueID().rawID] = mNow;
+    player.sendInventory(false);    mCooldowns[player.getOrCreateUniqueID().rawID] = mNow;
     return true;
 }
 
@@ -566,11 +595,7 @@ bool PlacedBackpacks::pickUp(Player& player, BlockPos const& pos) {
     int slot = player.getSelectedItemSlot();
     if (!player.getSelectedItem().isNull()) return false;
     auto uuid = at(loc)->uuid;
-    // SB BackpackBlock.hasPermissionsToPickup: Infinity upgrades are for admins only.
-    if (auto bp = game::Storage::get().find(uuid); bp && hasInfinity(*bp) && player.getCommandPermissionLevel() < CommandPermissionLevel::GameDirectors) {
-        player.sendMessage("§c" + trFor(player, "abp.placed.infinity_only_admin_pickup", "Only Admins can pickup backpack with Infinity Upgrade"));
-        return false;
-    }
+    // Admin Infinity upgrades: the infinity unit refuses the gesture before it gets here.
     auto stack = take(region, pos);
     if (!stack) return false;
     // SB putInPlayersHandAndRemove: the wool break sound at (volume + 1) / 2, pitch * 0.8.
@@ -856,6 +881,7 @@ void PlacedBackpacks::tickPlaced(int interval) {
     mJukeboxTicks += interval;
     bool jukeboxDue = mJukeboxTicks >= 10;
     if (jukeboxDue) mJukeboxTicks = 0;
+    std::unordered_set<std::string> ticked;
     for (auto const& loc : keys) {
         auto it = mEntries.find(loc); // upgrades / drops may change the map while we iterate
         if (it == mEntries.end()) continue;
@@ -879,6 +905,8 @@ void PlacedBackpacks::tickPlaced(int interval) {
             continue;
         }
         mMismatches.erase(e.loc);
+        // Linked-storage endpoints share one storage: its upgrades run once per pass.
+        if (!ticked.insert(e.uuid).second) continue;
         auto bp = storage.find(e.uuid);
         if (!bp) continue;
         try {

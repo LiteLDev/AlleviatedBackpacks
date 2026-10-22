@@ -23,6 +23,7 @@
 #include "mc/world/level/dimension/Dimension.h"
 
 #include "api/BackpackCapabilities.h"
+#include "feature/admin/SbConfig.h"
 #include "feature/placed/PlacedBackpacks.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -483,6 +484,7 @@ private:
             auto id = game::backpackItemId(t.tier);
             registerItemEnergy(id, [](ItemStack& stack) { return backpack::energyStorage(backpackOfItem(stack)); });
             registerItemFluid(id, [](ItemStack const& stack) -> std::shared_ptr<IFluidHandlerItem> {
+                if (!admin::sbServer().itemFluidHandlerEnabled) return nullptr; // SB server config
                 auto inner = backpack::fluidHandler(backpackOfItem(stack));
                 return inner ? std::make_shared<BackpackItemFluid>(stack, std::move(inner)) : nullptr;
             });

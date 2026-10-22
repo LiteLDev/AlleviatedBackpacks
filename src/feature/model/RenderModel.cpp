@@ -11,6 +11,7 @@
 #include "api/abp/Capabilities.h"
 #include "core/Fluid.h"
 #include "core/render/BackpackModel.h"
+#include "feature/gui/SbSettings.h"
 #include "game/Backpack.h"
 #include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
@@ -95,30 +96,14 @@ core::render::BackpackModel buildModel(game::Backpack& backpack) {
         m.battery = ratio;
     }
 
-    // Item display (SC ItemDisplaySettingsCategory "item_display": first selected slot).
-    if (auto it = backpack.data().settings.find("item_display"); it != backpack.data().settings.end() && it->is_object()) {
-        auto const& s    = *it;
-        int         slot = -1;
-        if (auto sl = s.find("slots"); sl != s.end() && sl->is_array() && !sl->empty() && (*sl)[0].is_number_integer()) slot = (*sl)[0].get<int>();
-        else if (auto one = s.find("slot"); one != s.end() && one->is_number_integer()) slot = one->get<int>();
-        auto const& inv = backpack.data().inventory;
-        if (slot >= 0 && slot < inv.size() && !inv.at(slot).empty()) {
-            core::render::DisplayModel d;
-            d.item = inv.at(slot).withCount(1);
-            auto key = std::to_string(slot);
-            auto num = [&](char const* many, char const* one) {
-                if (auto r = s.find(many); r != s.end() && r->is_object() && r->contains(key) && (*r)[key].is_number_integer()) return (*r)[key].get<int>();
-                if (auto r = s.find(one); r != s.end() && r->is_number_integer()) return r->get<int>();
-                return 0;
-            };
-            d.rotation = num("rotations", "rotation");
-            d.zOffset  = std::clamp(num("zOffsets", "zOffset"), -16, 16);
-            d.side     = s.value("displaySide", std::string("front"));
-            if (d.side != "left" && d.side != "right") d.side = "front";
-            m.display = std::move(d);
-        }
+    // Item display (P2-2 settings, SC ItemDisplaySettingsCategory; honours itemDisplayDisabled).
+    if (auto shown = feature::gui::displayedItem(backpack); shown && !shown->item.empty()) {
+        core::render::DisplayModel d;
+        d.item     = shown->item.withCount(1);
+        d.rotation = shown->rotation;
+        d.zOffset  = std::clamp(shown->zOffset, -16, 16);
+        m.display  = std::move(d);
     }
-
     // Upgrade activity (SC upgrade render data): cooking upgrades burning, jukebox playing.
     upgrade::forEachInstalled(bp, true, [&](upgrade::IUpgrade& u, upgrade::UpgradeContext const& ctx) {
         auto const& id = u.info().id;

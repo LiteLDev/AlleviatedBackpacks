@@ -13,6 +13,7 @@
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/anvil/NativeTestSupport.h"
 #include "upgrade/smithing/SmithingLogic.h"
 #include "upgrade/smithing/SmithingUpgrade.h"
 
@@ -91,6 +92,34 @@ ABP_REGISTER_SELFTEST("smithing.menu_flow", [](Context& ctx) -> ll::coro::CoroTa
     mm.close(player);
     ctx.check(!bp->data().upgrades[static_cast<std::size_t>(slot)].settings["addition"].is_null(), "inputs kept in the upgrade");
     ctx.check(cursorOf(player).isNull(), "cursor returned");
+});
+
+ABP_REGISTER_SELFTEST("smithing.native_tab", [](Context& ctx) {
+    auto& p    = ctx.player();
+    auto  bp   = ctx.createBackpack(core::Tier::Leather);
+    int   slot = ctx.installUpgrade(bp, "smithing");
+    anvil::test::NativeScope ns(ctx, p, bp);
+    auto smithing = [&] { return ns.tabData(slot)["smithing"]; };
+    ctx.require(smithing().is_object(), "smithing tab data sent: " + ns.tabData(slot).dump());
+
+    // Slot rules (vanilla SmithingMenu): an ingot is no template.
+    ns.setCursor(make("minecraft:netherite_ingot", 2));
+    ns.tab(slot, {{"click", "template"}, {"button", 0}});
+    ctx.check(smithing()["template"].is_null(), "an ingot doesn't go into the template slot");
+    ctx.check(ns.tab(slot, {{"click", "addition"}, {"button", 1}}), "right click puts one ingot into the addition slot");
+    ctx.check(ns.cursor().mCount == 1, "one ingot left on the cursor");
+    ns.setCursor(make("minecraft:netherite_upgrade_smithing_template"));
+    ctx.check(ns.tab(slot, {{"click", "template"}, {"button", 0}}), "template in");
+    ns.setCursor(make("minecraft:diamond_axe"));
+    ctx.check(ns.tab(slot, {{"click", "base"}, {"button", 0}}), "axe in");
+    auto result = smithing()["result"];
+    ctx.require(!result.is_null(), "result shown: " + smithing().dump());
+    ctx.check(core::ItemStackData::fromJson(result).id == "minecraft:netherite_axe", "netherite axe");
+    // Shift-click the result: into the backpack storage.
+    ctx.check(ns.tab(slot, {{"click", "result"}, {"button", 0}, {"shift", true}}), "shift-click the result");
+    ctx.check(bp->inventory().at(0).id == "minecraft:netherite_axe", "axe stored in the backpack");
+    ctx.check(smithing()["base"].is_null() && smithing()["template"].is_null() && smithing()["addition"].is_null(), "inputs consumed");
+    ns.setCursor({});
 });
 
 } // namespace

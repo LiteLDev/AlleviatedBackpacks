@@ -30,6 +30,7 @@
 #include "mc/world/level/block/BlockChangeContext.h"
 
 #include "core/Appearance.h"
+#include "feature/gui/SbSettings.h"
 #include "feature/model/RenderModel.h"
 #include "feature/model/DebugPose.h"
 #include <sstream>
@@ -101,7 +102,8 @@ std::shared_ptr<game::Backpack> partsBackpack(Tier tier, int variant, Player* pl
         upgrade::tank::fill(bp, {"milk", 1000000});
     } else if (variant == 2) {
         bp->inventory().insert(core::ItemStackData::of("minecraft:diamond_sword", 1, 1), {core::Source::Internal});
-        bp->data().settings["item_display"] = {{"slots", {0}}, {"rotations", {{"0", 45}}}};
+        feature::gui::selectItemDisplaySlot(*bp, 0);
+        feature::gui::rotateItemDisplay(*bp, 0, true);
     }
     bp->markDirty();
     return bp;

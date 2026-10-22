@@ -54,12 +54,14 @@ private:
 /// A station input slot backed by `StationRef::item(key)`.
 class InputSlot : public ui::Slot {
 public:
-    using Changed = std::function<void(Player&)>;
+    using Changed  = std::function<void(Player&)>;
+    using MayPlace = std::function<bool(ItemStack const&)>;
 
-    InputSlot(StationRef ref, std::string key, Changed changed = {})
+    InputSlot(StationRef ref, std::string key, Changed changed = {}, MayPlace mayPlace = {})
     : mRef(std::move(ref)),
       mKey(std::move(key)),
-      mChanged(std::move(changed)) {}
+      mChanged(std::move(changed)),
+      mMayPlace(std::move(mayPlace)) {}
 
     [[nodiscard]] ItemStack display(Player& player) const override;
     ItemStack               take(Player& player, int amount) override;
@@ -69,6 +71,14 @@ private:
     StationRef  mRef;
     std::string mKey;
     Changed     mChanged;
+    MayPlace    mMayPlace;
+};
+
+/// The output of the last take from an `OutputSlot`, valid until the end of the current request:
+/// if the framework hands the result back in the same request, the craft is undone.
+struct PendingUndo {
+    ItemStack                    result;
+    std::function<void(Player&)> undo;
 };
 
 class StationMenu;
@@ -76,6 +86,8 @@ class StationMenu;
 /// The station's output slot. Taking it calls `craft`, which consumes the inputs and returns the
 /// result plus a function that undoes the craft. If the framework hands the result back in the
 /// same request (the destination was full), the craft is undone, so no item is ever lost.
+/// `pending` (owned by the caller: the menu, or the native tab's click handler) must outlive the
+/// slot's use within a request.
 class OutputSlot : public ui::Slot {
 public:
     struct Crafted {
@@ -85,8 +97,9 @@ public:
     using Preview = std::function<ItemStack(Player&)>;
     using Craft   = std::function<std::optional<Crafted>(Player&)>;
 
-    OutputSlot(StationMenu& menu, Preview preview, Craft craft)
-    : mMenu(menu),
+    OutputSlot(StationRef ref, std::optional<PendingUndo>& pending, Preview preview, Craft craft)
+    : mRef(std::move(ref)),
+      mPending(pending),
       mPreview(std::move(preview)),
       mCraft(std::move(craft)) {}
 
@@ -96,9 +109,10 @@ public:
     int                     accept(Player& player, ItemStack const& stack) override;
 
 private:
-    StationMenu& mMenu;
-    Preview      mPreview;
-    Craft        mCraft;
+    StationRef                  mRef;
+    std::optional<PendingUndo>& mPending;
+    Preview                     mPreview;
+    Craft                       mCraft;
 };
 
 /// Base menu: rows 0/1 = station (subclass fills them in `buildStation`), rows 2..5 = backpack
@@ -121,10 +135,7 @@ public:
     int  quickMoveIn(Player& player, ItemStack const& stack) final;
 
     /// Pending undo of the last output take (valid until the end of the current request).
-    struct PendingUndo {
-        ItemStack                    result;
-        std::function<void(Player&)> undo;
-    };
+    using PendingUndo = anvil::PendingUndo;
     std::optional<PendingUndo> pendingUndo;
 
 protected:

@@ -13,6 +13,7 @@
 #include "mc/world/level/Spawner.h"
 
 #include "core/render/BackpackModel.h"
+#include "feature/gui/SbSettings.h"
 #include "feature/model/RenderModel.h"
 #include "feature/placed/DisplayEntity.h"
 #include "feature/placed/TestSite.h"
@@ -60,7 +61,10 @@ ABP_REGISTER_SELFTEST("model.render_info", [](Context& ctx) {
 ABP_REGISTER_SELFTEST("model.item_display", [](Context& ctx) {
     auto bp = ctx.createBackpack(Tier::Iron);
     bp->inventory().insert(core::ItemStackData::of("minecraft:diamond", 5), kInternal);
-    bp->data().settings["item_display"] = {{"slots", {0}}, {"rotations", {{"0", 90}}}, {"zOffsets", {{"0", -3}}}};
+    feature::gui::selectItemDisplaySlot(*bp, 0);
+    feature::gui::rotateItemDisplay(*bp, 0, true);
+    feature::gui::rotateItemDisplay(*bp, 0, true);
+    feature::gui::changeItemDisplayZOffset(*bp, 0, -3);
     auto m = model::buildModel(*bp);
     ctx.require(m.display.has_value(), "display item from the item display settings");
     ctx.check(m.display->item.id == "minecraft:diamond" && m.display->item.count == 1, "the slot's item, one");
@@ -75,7 +79,7 @@ ABP_REGISTER_SELFTEST("placed.display_entity", [](Context& ctx) -> ll::coro::Cor
     site.set(pos, "minecraft:air");
     auto bp = ctx.createBackpack(Tier::Diamond);
     bp->inventory().insert(core::ItemStackData::of("minecraft:emerald", 3), kInternal);
-    bp->data().settings["item_display"] = {{"slots", {0}}};
+    feature::gui::selectItemDisplaySlot(*bp, 0);
     placeAt(ctx, site, *bp, pos, 1);
     co_await ctx.ticks(6);
     auto loc   = locationOf(site.region(), pos);
