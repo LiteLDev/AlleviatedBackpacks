@@ -8,17 +8,18 @@
 
 #include "game/ItemConv.h"
 #include "mod/I18n.h"
+#include "net/NativeScreens.h"
 #include "ui/menu/MenuManager.h"
+#include "upgrade/UpgradeManager.h"
+#include "upgrade/crafting/Station.h"
 
 namespace abp::upgrade::crafting {
-
-// ---- model ------------------------------------------------------------------------------------
 
 namespace {
 
 constexpr int kGridSize = 9;
-/// Safety bound for shift-click crafting (a full grid of 64-stacks).
-constexpr int kMaxCrafts = 64 * kGridSize;
+/// Safety bound for one shift-click without refill (SC loops while the result stays the same).
+constexpr int kMaxShiftCrafts = 64 * kGridSize;
 
 nlohmann::json& gridJson(UpgradeContext const& ctx) {
     auto& settings = ctx.settings();
@@ -38,8 +39,7 @@ void putGrid(UpgradeContext const& ctx, int index, core::ItemStackData const& it
     gridJson(ctx)[static_cast<std::size_t>(index)] = item.empty() ? nlohmann::json(nullptr) : item.toJson();
 }
 
-/// The grid without counts: recipes depend on the kinds of items only, so count changes (every
-/// craft) keep the cached match.
+/// The grid without counts: recipes depend on the kinds of items only.
 nlohmann::json gridKinds(UpgradeContext const& ctx) {
     auto kinds = gridJson(ctx);
     for (auto& e : kinds) {
@@ -47,12 +47,6 @@ nlohmann::json gridKinds(UpgradeContext const& ctx) {
     }
     return kinds;
 }
-
-struct CraftCache {
-    bool                      valid = false;
-    nlohmann::json            kinds;
-    std::optional<CraftMatch> match;
-};
 
 Grid gridStacks(UpgradeContext const& ctx) {
     Grid grid;
@@ -63,7 +57,39 @@ Grid gridStacks(UpgradeContext const& ctx) {
     return grid;
 }
 
+struct CraftCache {
+    bool           valid = false;
+    nlohmann::json kinds;
+    CraftResults   results;
+    std::string    lastRecipe; ///< SC lastRecipe: kept selected while it still matches
+};
+
+bool flag(UpgradeContext const& ctx, std::string_view key, bool def) {
+    auto const& s  = ctx.settings();
+    if (!s.is_object()) return def;
+    auto        it = s.find(key);
+    return it != s.end() && it->is_boolean() ? it->get<bool>() : def;
+}
+
+void setFlag(UpgradeContext const& ctx, std::string_view key, bool value) {
+    auto& s = ctx.settings();
+    if (!s.is_object()) s = nlohmann::json::object();
+    s[std::string(key)] = value;
+    ctx.saveSettings();
+}
+
+bool installedHere(UpgradeContext const& ctx) {
+    auto const& slots = ctx.backpack().data().upgrades;
+    if (ctx.slot() < 0 || ctx.slot() >= static_cast<int>(slots.size())) return false;
+    auto const& s = slots[static_cast<std::size_t>(ctx.slot())];
+    if (s.empty()) return false;
+    auto* u = upgradeFor(s.item);
+    return u && u->info().id == kCraftingId;
+}
+
 } // namespace
+
+// ---- model --------------------------------------------------------------------------------------
 
 core::ItemStackData gridAt(UpgradeContext const& ctx, int index) {
     if (index < 0 || index >= kGridSize) return {};
@@ -78,180 +104,250 @@ void setGridAt(UpgradeContext const& ctx, int index, core::ItemStackData const& 
     ctx.saveSettings();
 }
 
-bool refillEnabled(UpgradeContext const& ctx) {
-    auto const& s  = ctx.settings();
-    auto        it = s.find(kRefillKey);
-    return it == s.end() || !it->is_boolean() || it->get<bool>();
+bool shiftIntoStorage(UpgradeContext const& ctx) { return flag(ctx, kShiftIntoStorageKey, true); }
+void setShiftIntoStorage(UpgradeContext const& ctx, bool value) { setFlag(ctx, kShiftIntoStorageKey, value); }
+bool refillEnabled(UpgradeContext const& ctx) { return flag(ctx, kRefillKey, false); }
+void setRefill(UpgradeContext const& ctx, bool value) { setFlag(ctx, kRefillKey, value); }
+
+CraftResults const& results(UpgradeContext const& ctx) {
+    auto& cache = ctx.transient<CraftCache>();
+    auto  kinds = gridKinds(ctx);
+    if (cache.valid && cache.kinds == kinds) return cache.results;
+    cache.results.matches  = matchAllCrafting(gridStacks(ctx));
+    cache.results.selected = 0;
+    for (int i = 0; i < static_cast<int>(cache.results.matches.size()); ++i) {
+        if (!cache.lastRecipe.empty() && cache.results.matches[static_cast<std::size_t>(i)].recipeId == cache.lastRecipe) {
+            cache.results.selected = i;
+            break;
+        }
+    }
+    if (!cache.results.matches.empty()) {
+        cache.lastRecipe = cache.results.matches[static_cast<std::size_t>(cache.results.selected)].recipeId;
+    }
+    cache.kinds = std::move(kinds);
+    cache.valid = true;
+    return cache.results;
 }
 
 std::optional<CraftMatch> currentMatch(UpgradeContext const& ctx) {
+    auto const& r = results(ctx);
+    if (r.matches.empty()) return std::nullopt;
+    return r.matches[static_cast<std::size_t>(std::clamp(r.selected, 0, static_cast<int>(r.matches.size()) - 1))];
+}
+
+void selectResult(UpgradeContext const& ctx, int index) {
+    (void)results(ctx);
     auto& cache = ctx.transient<CraftCache>();
-    auto  kinds = gridKinds(ctx);
-    if (cache.valid && cache.kinds == kinds) return cache.match;
-    cache.match = matchCrafting(gridStacks(ctx));
-    cache.kinds = std::move(kinds);
-    cache.valid = true;
-    return cache.match;
+    if (index < 0 || index >= static_cast<int>(cache.results.matches.size())) return;
+    cache.results.selected = index;
+    cache.lastRecipe       = cache.results.matches[static_cast<std::size_t>(index)].recipeId;
+    ctx.backpack().markDirty(); // the screen shows the new result
+}
+
+void injectResultsForTest(UpgradeContext const& ctx, std::vector<CraftMatch> matches) {
+    (void)results(ctx);
+    auto& cache            = ctx.transient<CraftCache>();
+    cache.results.matches  = std::move(matches);
+    cache.results.selected = 0;
+    cache.lastRecipe       = cache.results.matches.empty() ? std::string{} : cache.results.matches.front().recipeId;
+}
+
+void selectNextResult(UpgradeContext const& ctx) {
+    auto const& r = results(ctx);
+    int         n = static_cast<int>(r.matches.size());
+    if (n > 1) selectResult(ctx, (r.selected + 1) % n);
+}
+
+void selectPreviousResult(UpgradeContext const& ctx) {
+    auto const& r = results(ctx);
+    int         n = static_cast<int>(r.matches.size());
+    if (n > 1) selectResult(ctx, (r.selected + n - 1) % n);
 }
 
 ItemStack craftOnce(UpgradeContext const& ctx, Player& player) {
     auto match = currentMatch(ctx);
     if (!match || match->result.isNull()) return {};
-    std::array<core::ItemStackData, kGridSize> before;
-    std::vector<core::ItemStackData>           leftovers;
+    bool refill = refillEnabled(ctx);
     for (int i = 0; i < kGridSize; ++i) {
-        auto item                           = gridAt(ctx, i);
-        before[static_cast<std::size_t>(i)] = item;
+        auto item = gridAt(ctx, i);
         if (item.empty()) continue;
-        auto remainder  = remainderOf(game::ItemConv::toStack(item, 1));
-        item.count     -= 1;
-        if (item.count <= 0) {
-            item = remainder.isNull() ? core::ItemStackData{} : game::ItemConv::toData(remainder);
-        } else if (!remainder.isNull()) {
-            leftovers.push_back(game::ItemConv::toData(remainder));
+        auto remainder = game::ItemConv::toData(remainderOf(game::ItemConv::toStack(item, 1)));
+        if (remainder.empty() && refill && extractFromStorageOrPlayer(player, ctx.backpack(), item)) {
+            continue; // the cell keeps its count: the ingredient came from the backpack / player
+        }
+        item = item.withCount(item.count - 1);
+        if (!remainder.empty()) {
+            if (item.empty()) {
+                item = remainder;
+            } else if (item.sameItem(remainder)) {
+                item.count += remainder.count;
+            } else {
+                // SC: into the player's inventory, else dropped.
+                int left = addToPlayer(player, game::ItemConv::toStack(remainder, 1), remainder.count);
+                dropAt(player, remainder.withCount(left));
+            }
         }
         putGrid(ctx, i, item);
     }
-    if (refillEnabled(ctx)) {
-        auto& inv = ctx.backpack().inventory();
-        for (int i = 0; i < kGridSize; ++i) {
-            auto const& was = before[static_cast<std::size_t>(i)];
-            if (was.empty() || !gridAt(ctx, i).empty()) continue;
-            auto got = inv.extractMatching(
-                [&](core::ItemStackData const& s) { return s.sameItem(was); },
-                1,
-                core::AccessContext{core::Source::Upgrade, &player}
-            );
-            if (!got.empty()) putGrid(ctx, i, got);
-        }
-    }
     ctx.saveSettings();
-    for (auto& rest : leftovers) (void)giveBack(&player, ctx.backpack(), rest); // with a player: never lost
     return match->result;
 }
 
-int craftMax(UpgradeContext const& ctx, Player& player, bool intoBackpack) {
-    std::optional<ItemStack> first;
-    int                      crafts = 0;
-    for (; crafts < kMaxCrafts; ++crafts) {
+int craftShift(UpgradeContext const& ctx, Player& player) {
+    auto first = currentMatch(ctx);
+    if (!first || first->result.isNull()) return 0;
+    int  limit  = refillEnabled(ctx) ? std::max<int>(first->result.getMaxStackSize(), 1) : kMaxShiftCrafts;
+    bool toBp   = shiftIntoStorage(ctx);
+    auto target = game::ItemConv::toData(first->result);
+    int  crafts = 0;
+    for (; crafts < limit; ++crafts) {
         auto match = currentMatch(ctx);
         if (!match || match->result.isNull()) break;
-        auto const& result = match->result;
-        if (first && (!first->isStackable(result) || first->mCount != result.mCount)) break;
-        if (!deliver(player, ctx.backpack(), result, intoBackpack, true)) break;
+        auto result = game::ItemConv::toData(match->result);
+        if (result.id != target.id) break; // SC: while the result is still the same item
+        // SC mergeSlotStack: nothing fits anywhere -> nothing is crafted.
+        auto r    = ctx.backpack().inventory().insert(result, core::AccessContext{core::Source::Player, &player}, true);
+        int  room = r.inserted + r.voided + playerRoomFor(player, match->result);
+        if (room <= 0) break;
         auto out = craftOnce(ctx, player);
         if (out.isNull()) break;
-        if (!first) first = out;
-        deliver(player, ctx.backpack(), out, intoBackpack, false);
+        auto left = moveOut(player, ctx.backpack(), game::ItemConv::toData(out), toBp);
+        dropAt(player, left); // SC drops what didn't fit
     }
     return crafts;
 }
 
-void clearGrid(UpgradeContext const& ctx, Player& player) {
-    for (int i = 0; i < kGridSize; ++i) {
-        auto item = gridAt(ctx, i);
-        if (item.empty()) continue;
-        putGrid(ctx, i, stash(player, ctx.backpack(), item));
-    }
-    ctx.saveSettings();
+bool shiftGridCell(UpgradeContext const& ctx, Player& player, int index) {
+    auto item = gridAt(ctx, index);
+    if (item.empty()) return false;
+    auto left = moveOut(player, ctx.backpack(), item, true);
+    if (left.count == item.count) return false;
+    setGridAt(ctx, index, left);
+    return true;
 }
 
-// ---- menu -------------------------------------------------------------------------------------
+int quickMoveIntoGrid(UpgradeContext const& ctx, core::ItemStackData const& item) {
+    if (item.empty() || !allowedInUpgradeSlot(ctx.backpack(), item)) return 0;
+    int toTransfer = std::min(item.count, std::max(item.maxStack, 1));
+    int moved      = 0;
+    int max        = std::max(item.maxStack, 1);
+    for (int i = 0; i < kGridSize && toTransfer > 0; ++i) {
+        auto cur = gridAt(ctx, i);
+        if (cur.empty() || !cur.sameItem(item) || cur.count >= max) continue;
+        int n = std::min(toTransfer, max - cur.count);
+        putGrid(ctx, i, cur.withCount(cur.count + n));
+        toTransfer -= n;
+        moved      += n;
+    }
+    for (int i = 0; i < kGridSize && toTransfer > 0; ++i) {
+        if (!gridAt(ctx, i).empty()) continue;
+        putGrid(ctx, i, item.withCount(toTransfer));
+        moved      += toTransfer;
+        toTransfer  = 0;
+    }
+    if (moved > 0) ctx.saveSettings();
+    return moved;
+}
+
+// ---- native tab ---------------------------------------------------------------------------------
 
 namespace {
 
-class CraftingMenu : public TabMenu {
-public:
-    CraftingMenu(std::string title, UpgradeContext const& ctx)
-    : TabMenu(std::move(title), ctx, std::string(kCraftingId)) {}
+std::shared_ptr<StateSlot> gridSlot(UpgradeContext const& ctx, int index) {
+    return std::make_shared<StateSlot>(StateSlot::Ops{
+        .get      = [ctx, index] { return gridAt(ctx, index); },
+        .set      = [ctx, index](core::ItemStackData const& d) { setGridAt(ctx, index, d); },
+        .mayPlace = [ctx](core::ItemStackData const& d) { return allowedInUpgradeSlot(ctx.backpack(), d); },
+        .maxCount = {},
+        .valid    = [ctx] { return installedHere(ctx); },
+    });
+}
 
-protected:
-    void buildTab(Player& player) override {
-        for (int i = 0; i < kGridSize; ++i) {
-            setSlot(
-                kGridMenuSlots[i],
-                std::make_shared<StackSlot>(
-                    *this,
-                    [this, i] { return gridAt(mCtx, i); },
-                    [this, i](core::ItemStackData const& d) { setGridAt(mCtx, i, d); }
-                )
-            );
+std::shared_ptr<ResultSlot> resultSlot(UpgradeContext const& ctx) {
+    return std::make_shared<ResultSlot>(
+        ctx.backpack(),
+        ResultSlot::Ops{
+            .preview =
+                [ctx] {
+                    auto m = currentMatch(ctx);
+                    return m ? m->result : ItemStack{};
+                },
+            .craftOnce = [ctx](Player& p) { return craftOnce(ctx, p); },
+            .valid     = [ctx] { return installedHere(ctx); },
         }
-        setSlot(
-            kResultSlot,
-            std::make_shared<ResultSlot>(
-                *this,
-                ResultSlot::Ops{
-                    .preview =
-                        [this] {
-                            auto m = currentMatch(mCtx);
-                            return m ? m->result : ItemStack{};
-                        },
-                    .craftOnce = [this](Player& p) { return craftOnce(mCtx, p); },
-                    .craftMax  = [this](Player& p, bool intoBackpack) { return craftMax(mCtx, p, intoBackpack); },
-                }
-            )
-        );
-
-        auto info       = std::make_shared<ui::CallbackSlot>();
-        info->onDisplay = [this](Player& p) {
-            std::vector<std::string> lore{
-                trFor(p, "abp.crafting.help_click", "§7Click the result to craft one"),
-                trFor(p, "abp.crafting.help_shift", "§7Shift-click the result to craft as many as possible"),
-            };
-            if (valid()) {
-                if (auto m = currentMatch(mCtx))
-                    lore.push_back(trFor(p, "abp.crafting.recipe", "§8Recipe: {}", m->recipeId));
-            }
-            return ui::icon("minecraft:crafting_table", trFor(p, "abp.crafting.title", "Crafting"), lore);
-        };
-        info->onClick = [](ui::ClickContext const&) { return true; };
-        setSlot(kInfoSlot, info);
-
-        bool refill = refillEnabled(mCtx);
-        setSlot(
-            kRefillSlot,
-            std::make_shared<ui::ButtonSlot>(
-                ui::icon(
-                    refill ? "minecraft:hopper" : "minecraft:barrier",
-                    refill ? trFor(player, "abp.crafting.refill_on", "Refill grid from backpack: on")
-                           : trFor(player, "abp.crafting.refill_off", "Refill grid from backpack: off"),
-                    {trFor(player, "abp.crafting.refill_hint", "§7Used-up ingredients are refilled from the backpack"),
-                     trFor(player, "abp.crafting.click_to_toggle", "§7Click to change")}
-                ),
-                [this](ui::ClickContext const&) {
-                    if (!valid()) return;
-                    mCtx.settings()[std::string(kRefillKey)] = !refillEnabled(mCtx);
-                    mCtx.saveSettings();
-                    invalidate();
-                }
-            )
-        );
-        setSlot(
-            kClearSlot,
-            std::make_shared<ui::ButtonSlot>(
-                ui::icon(
-                    "minecraft:bucket",
-                    trFor(player, "abp.crafting.clear", "Clear grid"),
-                    {trFor(player, "abp.crafting.clear_hint", "§7Moves the grid into the backpack")}
-                ),
-                [this](ui::ClickContext const& c) {
-                    if (valid()) clearGrid(mCtx, c.player);
-                }
-            )
-        );
-    }
-};
-
-} // namespace
-
-std::shared_ptr<TabMenu> makeCraftingMenu(Player& player, UpgradeContext const& ctx) {
-    return std::make_shared<CraftingMenu>(trFor(player, "abp.crafting.title", "Crafting"), ctx);
+    );
 }
 
-// ---- upgrade ----------------------------------------------------------------------------------
+nlohmann::json itemJson(core::ItemStackData const& d) { return d.empty() ? nlohmann::json(nullptr) : d.toJson(); }
 
-namespace {
+nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
+    nlohmann::json grid = nlohmann::json::array();
+    for (int i = 0; i < kGridSize; ++i) grid.push_back(itemJson(gridAt(ctx, i)));
+    auto const&    r    = results(ctx);
+    nlohmann::json list = nlohmann::json::array();
+    for (auto const& m : r.matches) list.push_back(itemJson(game::ItemConv::toData(m.result)));
+    auto match = currentMatch(ctx);
+    return nlohmann::json{
+        {"grid",             std::move(grid)                                                      },
+        {"result",           match ? itemJson(game::ItemConv::toData(match->result)) : nullptr},
+        {"results",          std::move(list)                                                      },
+        {"selected",         r.selected                                                           },
+        {"shiftIntoStorage", shiftIntoStorage(ctx)                                                },
+        {"refill",           refillEnabled(ctx)                                                   },
+        {"tabLabel",         trFor(player, "abp.crafting.tab", "Craft")                           },
+        {"tabTooltip",       trFor(player, "abp.crafting.tab.tooltip", "Crafting")                },
+    };
+}
+
+bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+    if (handleTabOpen(player, ctx, data)) return true;
+    int  button = data.value("button", 0);
+    bool shift  = data.value("shift", false);
+    if (auto it = data.find("grid"); it != data.end() && it->is_number_integer()) {
+        int i = it->get<int>();
+        if (i < 0 || i >= kGridSize) return false;
+        if (shift) {
+            shiftGridCell(ctx, player, i);
+            ui::MenuManager::get().resyncPlayer(player);
+            return true;
+        }
+        clickSlot(player, gridSlot(ctx, i), button);
+        return true;
+    }
+    if (data.contains("result")) {
+        if (shift) {
+            craftShift(ctx, player);
+            ui::MenuManager::get().resyncPlayer(player);
+            return true;
+        }
+        clickSlot(player, resultSlot(ctx), button, true);
+        return true;
+    }
+    if (auto it = data.find("select"); it != data.end() && it->is_number_integer()) {
+        selectResult(ctx, it->get<int>());
+        return true;
+    }
+    if (data.value("next", false)) {
+        selectNextResult(ctx);
+        return true;
+    }
+    if (data.value("previous", false)) {
+        selectPreviousResult(ctx);
+        return true;
+    }
+    auto toggle = data.value("toggle", std::string{});
+    if (toggle == "shiftTarget") {
+        setShiftIntoStorage(ctx, !shiftIntoStorage(ctx));
+        return true;
+    }
+    if (toggle == "refill") {
+        setRefill(ctx, !refillEnabled(ctx));
+        return true;
+    }
+    return false;
+}
+
+// ---- upgrade ------------------------------------------------------------------------------------
 
 class CraftingUpgrade : public IUpgrade {
 public:
@@ -262,39 +358,13 @@ public:
             .nameKey      = "abp.crafting.name",
             .nameFallback = "Crafting Upgrade",
             .hasSettings  = true,
-            .toggleable   = false,
+            .toggleable   = false, // SC canBeDisabled() == false
         };
         return kInfo;
     }
 
-    void onRemove(UpgradeContext const& ctx) override {
-        // Grid contents go back into the backpack (or to the player); they never travel with the
-        // upgrade item. Without a player, what doesn't fit stays in the settings (and so travels
-        // with the item) instead of being lost.
-        bool kept = false;
-        for (int i = 0; i < kGridSize; ++i) {
-            auto item = gridAt(ctx, i);
-            if (item.empty()) continue;
-            auto rest = giveBack(ctx.player(), ctx.backpack(), item);
-            putGrid(ctx, i, rest);
-            kept = kept || !rest.empty();
-        }
-        if (!kept) ctx.settings().erase(std::string(kGridKey));
-        ctx.saveSettings();
-    }
-
-    void openSettings(Player& player, UpgradeContext const& ctx) override {
-        switchMenu(player, makeCraftingMenu(player, ctx.withPlayer(nullptr)));
-    }
-
-    [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
-        int used = 0;
-        for (int i = 0; i < kGridSize; ++i) used += gridAt(ctx, i).empty() ? 0 : 1;
-        return {
-            trFor(player, "abp.crafting.describe_grid", "§7Grid: {}/9 slots used", used),
-            refillEnabled(ctx) ? trFor(player, "abp.crafting.describe_refill_on", "§7Refill from backpack: on")
-                               : trFor(player, "abp.crafting.describe_refill_off", "§7Refill from backpack: off"),
-        };
+    [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const&) const override {
+        return {trFor(player, "abp.crafting.tooltip", "§7Crafting table in an upgrade tab")};
     }
 };
 
@@ -304,13 +374,12 @@ public:
 
 ABP_REGISTER_UPGRADE(abp::upgrade::crafting::CraftingUpgrade);
 
-ABP_REGISTER_CRAFTING_TAB(
-    abp::upgrade::crafting::TabEntry{
-        .upgradeId     = std::string(abp::upgrade::crafting::kCraftingId),
-        .order         = 0,
-        .iconItem      = "minecraft:crafting_table",
-        .labelKey      = "abp.crafting.button",
-        .labelFallback = "Crafting",
-        .make          = &abp::upgrade::crafting::makeCraftingMenu,
-    }
-);
+ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{std::string(abp::upgrade::crafting::kCraftingId), &abp::upgrade::crafting::tabData});
+ABP_REGISTER_TAB_ACTION(abp::net::TabActionHandler{std::string(abp::upgrade::crafting::kCraftingId), &abp::upgrade::crafting::tabAction});
+
+ABP_REGISTER_STATION_TAB(abp::upgrade::crafting::StationTab{
+    .upgradeId   = std::string(abp::upgrade::crafting::kCraftingId),
+    .quickMoveIn = [](Player&, abp::upgrade::UpgradeContext const& ctx, abp::core::ItemStackData const& item) {
+        return abp::upgrade::crafting::quickMoveIntoGrid(ctx, item);
+    },
+});
