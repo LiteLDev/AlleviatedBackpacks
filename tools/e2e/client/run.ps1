@@ -172,7 +172,12 @@ try {
         if (-not $KeepOtherMods) { Move-OtherModsAside }
         Remove-HeadlessInputLeftover   # of a killed run
         if ($script:Headless) { Install-HeadlessInputMod -ModsDir $script:ModsDir -PipeName $script:HeadlessPipe }
-        if ($remote) { Set-ExternalServer $hostInfo.port } else { Restore-TestWorld }
+        if ($remote) { Set-ExternalServer $hostInfo.port } else {
+            Restore-TestWorld
+            # Single-player test world: games of all slots share one signaling-service ID, and
+            # worlds opened for multiplayer knock each other out ("An error has occurred", "Blaze").
+            if ($script:Headless) { Set-WorldSinglePlayer (Join-Path (Get-WorldsDir) $script:WorldName) }
+        }
         Reset-CameraPerspective
         $prelaunch = Join-Path $PSScriptRoot "scenarios/$Scenario.prelaunch.ps1"
         if (Test-Path $prelaunch) { . $prelaunch }
