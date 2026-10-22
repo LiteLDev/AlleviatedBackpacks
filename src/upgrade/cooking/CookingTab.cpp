@@ -16,6 +16,7 @@
 #include "mc/world/item/ItemStack.h"
 
 #include "game/ItemConv.h"
+#include "upgrade/filter/FilterTab.h"
 #include "mod/I18n.h"
 #include "net/NativeScreens.h"
 #include "ui/menu/MenuManager.h"
@@ -64,8 +65,21 @@ core::ItemStackData tagItem(UpgradeContext const& ctx, bool fuel) {
     return it != s.end() && it->is_object() ? core::ItemStackData::fromJson(*it) : core::ItemStackData{};
 }
 
+/// The shared FilterControl spec: SC AutoCookingUpgradeTab shows the input filter as
+/// FilterLogicControl.Advanced and the fuel filter with its slots only.
+filtering::FilterSpec filterSpec(bool fuel, core::Filter const& f, int perRow) {
+    return filtering::FilterSpec{
+        .slots       = static_cast<int>(f.ghosts.size()),
+        .slotsPerRow = perRow,
+        .advanced    = !fuel,
+        .type        = fuel ? filtering::TypeButton::None : filtering::TypeButton::AllowList,
+    };
+}
+
 nlohmann::json filterJson(UpgradeContext const& ctx, bool fuel, core::Filter const& f, int perRow) {
     auto j      = f.toJson();
+    // The shared FilterControl state (client/ui/widgets/FilterControl.h).
+    j.update(filtering::tabJson(f, filterSpec(fuel, f, perRow)));
     j["slots"]  = static_cast<int>(f.ghosts.size());
     j["perRow"] = perRow;
     auto item   = tagItem(ctx, fuel);
@@ -161,6 +175,16 @@ bool filterAction(Player& player, CookingUpgrade& u, UpgradeContext const& ctx, 
         return true;
     }
     auto op = data.value("op", std::string{});
+    // Actions of the shared FilterControl.
+    if (op == "slot" || op == "type" || op == "primary" || op == "dur" || op == "nbt" || op == "anyTag" || op == "addTag"
+        || op == "removeTag") {
+        auto cursor = game::ItemConv::toData(crafting::cursorOf(player));
+        if (op == "slot" && !cursor.empty() && !filterAccepts(u, fuel, cursor)) return true;
+        int  perRow = fuel ? u.fuelFilterSlotsInRow() : u.inputFilterSlotsInRow();
+        auto one    = cursor.empty() ? core::ItemStackData{} : cursor.withCount(1);
+        if (filtering::applyAction(f, filterSpec(fuel, f, perRow), data, one)) save();
+        return true;
+    }
     if (op == "allowList") {
         f.mode = f.mode == core::FilterMode::Allow ? core::FilterMode::Deny : core::FilterMode::Allow;
     } else if (op == "primaryMatch") {
@@ -169,11 +193,6 @@ bool filterAction(Player& player, CookingUpgrade& u, UpgradeContext const& ctx, 
         f.matchDurability = !f.matchDurability;
     } else if (op == "nbt") {
         f.matchNbt = !f.matchNbt;
-    } else if (op == "addTag" || op == "removeTag") {
-        auto tag = data.value("tag", std::string{});
-        if (tag.empty() || tag.size() > 128) return false;
-        std::erase(f.tags, tag);
-        if (op == "addTag" && f.tags.size() < 64) f.tags.push_back(tag);
     } else {
         return false;
     }
