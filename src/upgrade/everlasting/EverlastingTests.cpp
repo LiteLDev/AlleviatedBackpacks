@@ -23,7 +23,16 @@
 #include "mc/legacy/ActorUniqueID.h"
 #include "mc/server/SimulatedPlayer.h"
 
+#include "mc/deps/shared_types/legacy/Difficulty.h"
+#include "mc/world/actor/ActorDefinitionIdentifier.h"
+#include "mc/world/actor/Mob.h"
+#include "mc/world/actor/boss/WitherBoss.h"
+#include "mc/world/actor/monster/EnderDragon.h"
+#include "mc/world/phys/AABB.h"
+
 #include "feature/admin/Admin.h"
+#include "feature/placed/PlacedBackpacks.h"
+#include "feature/placed/TestSite.h"
 #include "feature/wearable/Wearable.h"
 #include "feature/wearable/WearableConfig.h"
 #include "game/BackpackItem.h"
@@ -389,6 +398,66 @@ ABP_REGISTER_SELFTEST("everlasting.mob_drop", [](Context& ctx) -> ll::coro::Coro
     co_await ctx.ticks(2);
     ctx.check(drops.get(id) != nullptr, "survives lava");
     game::Storage::get().erase(*uuid);
+});
+
+// GX-2: SB BackpackBlock.canEntityDestroy is false for Everlasting backpacks: the Wither and the
+// Ender Dragon can't break the placed block.
+ABP_REGISTER_SELFTEST("everlasting.wither_and_dragon", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& sp = ctx.spawnPlayer();
+    co_await placed::test::toGround(ctx, sp);
+    auto& level = sp.getLevel();
+    struct Difficulty {
+        Level&                          level;
+        SharedTypes::Legacy::Difficulty saved;
+        ~Difficulty() { level.setDifficulty(saved); }
+    } difficulty{level, level.getDifficulty()};
+    level.setDifficulty(SharedTypes::Legacy::Difficulty::Normal); // bosses don't exist in peaceful
+
+    for (std::string_view boss : {"minecraft:wither", "minecraft:ender_dragon"}) {
+        placed::test::Site site(sp, boss == "minecraft:wither" ? 6 : 12);
+        auto plainPos = site.at(0, 1), stonePos = site.at(1, 1), everPos = site.at(2, 1);
+        for (auto const& p : {plainPos, stonePos, everPos}) site.set(p, "minecraft:air");
+        site.set(stonePos, "minecraft:stone");
+        auto plain = ctx.createBackpack(Tier::Leather);
+        auto ever  = ctx.createBackpack(Tier::Leather);
+        ctx.installUpgrade(ever, std::string(kId));
+        for (auto const& [bp, pos] : {std::pair{plain, plainPos}, std::pair{ever, everPos}}) {
+            site.touch(pos);
+            auto item = ctx.backpackItem(*bp);
+            ctx.require(
+                placed::PlacedBackpacks::get().place(site.region(), pos, item, 2) == placed::PlacedBackpacks::PlaceResult::Ok,
+                "placed"
+            );
+        }
+        auto above = site.at(1, 6).center();
+        auto* mob  = level.getSpawner().spawnMob(site.region(), ActorDefinitionIdentifier(std::string(boss)), nullptr, above, false, true, false);
+        ctx.require(mob != nullptr, "spawned " + std::string(boss));
+        AABB box{
+            Vec3{static_cast<float>(plainPos.x), static_cast<float>(plainPos.y), static_cast<float>(plainPos.z)},
+            Vec3{static_cast<float>(everPos.x) + 1.f, static_cast<float>(everPos.y) + 1.f, static_cast<float>(everPos.z) + 1.f}
+        };
+        if (boss == "minecraft:wither") {
+            auto& wither = static_cast<WitherBoss&>(*static_cast<Actor*>(mob));
+            for (int range : {0, 1, 2}) {
+                if (site.region().getBlock(stonePos).isAir()) break;
+                wither._destroyBlocks(level, box, site.region(), range, WitherBoss::WitherAttackType::Charge);
+            }
+        } else {
+            auto& dragon = static_cast<EnderDragon&>(*static_cast<Actor*>(mob));
+            (void)dragon._checkWalls(box);
+        }
+        co_await ctx.ticks(3);
+        bool stoneGone = site.region().getBlock(stonePos).isAir();
+        ctx.info(std::string(boss) + ": stone in the box broken=" + std::to_string(stoneGone) + ", plain backpack placed="
+                 + std::to_string(placed::PlacedBackpacks::isBackpackBlock(site.region().getBlock(plainPos))));
+        ctx.check(stoneGone, std::string(boss) + " breaks the blocks in the box");
+        ctx.check(placed::PlacedBackpacks::isBackpackBlock(site.region().getBlock(everPos)), std::string(boss) + ": the Everlasting backpack stays");
+        ctx.check(placed::PlacedBackpacks::get().findUuid(ever->uuid()).has_value(), "still registered");
+        ctx.check(site.collectBackpackDrops(everPos, ever->uuid()) == 0, "and never dropped");
+        site.collectBackpackDrops(plainPos, plain->uuid());
+        mob->remove();
+        co_await ctx.ticks(1);
+    }
 });
 
 } // namespace

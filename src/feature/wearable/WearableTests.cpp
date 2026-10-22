@@ -35,6 +35,15 @@
 #include "mc/world/level/block/actor/BlockActorType.h"
 #include "mc/world/level/block/actor/ChestBlockActor.h"
 #include "mc/world/level/dimension/DimensionType.h"
+#include "mc/entity/components_json_legacy/ExplodeComponent.h"
+#include "mc/entity/components_json_legacy/TransformationComponent.h"
+#include "mc/deps/ecs/gamerefs_entity/EntityContext.h"
+#include "mc/util/VariantParameterList.h"
+#include "mc/world/attribute/BaseAttributeMap.h"
+#include "mc/world/effect/EffectDuration.h"
+#include "mc/world/effect/MobEffectIds.h"
+#include "mc/world/effect/MobEffectInstance.h"
+#include "mc/world/phys/AABB.h"
 
 #include "core/WorldRules.h"
 #include "feature/admin/SbConfig.h"
@@ -473,6 +482,141 @@ ABP_REGISTER_SELFTEST("wearable.lazy_loot", [](Context& ctx) {
     ctx.check(again == bp && !changed, "second open reuses the backpack");
     ctx.check(bp->inventory().count([](core::ItemStackData const& s) { return !s.empty(); }) == stored, "no refill");
     game::Storage::get().erase(uuid);
+});
+
+// GX-2: SB onLivingUpdate plays the jukebox with `wrapper.play(livingEntity)`: the music is bound
+// to the mob and follows it.
+ABP_REGISTER_SELFTEST("wearable.mob_jukebox_follows", [](Context& ctx) -> ll::coro::CoroTask<> {
+    co_await groundPlayer(ctx);
+    DifficultyGuard difficulty(ctx.player().getLevel());
+    SbGuard         guard;
+    guard.add().chance = 0.0;
+    auto& service      = upgrade::jukebox::Service::get();
+    std::vector<upgrade::jukebox::SoundEvent> events;
+    service.setObserver([&](upgrade::jukebox::SoundEvent const& e) { events.push_back(e); });
+    struct Reset {
+        ~Reset() { upgrade::jukebox::Service::get().setObserver(nullptr); }
+    } reset;
+    auto* zombie = spawnMob(ctx, "minecraft:zombie", 3);
+    ctx.require(equipMob(*zombie, Tier::Iron, true), "equip with a jukebox");
+    auto uuid = game::backpackUuid(zombie->getArmor(ArmorSlot::Torso));
+    ctx.require(uuid.has_value(), "storage");
+    auto zid = zombie->getOrCreateUniqueID().rawID;
+    for (int i = 0; i < 40 && !service.playing(*uuid, 0); ++i) co_await ctx.ticks(1);
+    ctx.require(service.playing(*uuid, 0), "playing");
+    ctx.check(service.emitterEntity(*uuid, 0) == zid, "the music is attached to the zombie");
+    bool attached = std::any_of(events.begin(), events.end(), [&](auto const& e) {
+        return e.kind == upgrade::jukebox::SoundEvent::Kind::Play && e.entity == zid;
+    });
+    ctx.check(attached, "the play packet names the zombie as the emitter");
+    auto p = zombie->getPosition();
+    zombie->teleport(Vec3{p.x + 6.f, p.y, p.z}, zombie->getDimensionId(), Vec2{});
+    co_await ctx.ticks(30);
+    ctx.check(service.playing(*uuid, 0) && service.emitterEntity(*uuid, 0) == zid, "still playing from the zombie after it moved");
+    zombie->die(ActorDamageSource(SharedTypes::Legacy::ActorDamageCause::Fall, ""));
+    co_await ctx.ticks(3);
+    ctx.check(!service.playing(*uuid, 0), "stops with the mob");
+});
+
+// ---- GX-2: conversions and creepers -------------------------------------------------------------
+
+float bonusIn(ItemStack const& stack) {
+    if (stack.isNull() || !stack.mUserData || !stack.mUserData->contains(kMobHealthBonusKey, Tag::Type::Float)) return 0.f;
+    return static_cast<float>((*stack.mUserData)[kMobHealthBonusKey]);
+}
+
+void setMobHealth(Mob& mob, float value) {
+    (void)const_cast<BaseAttributeMap&>(*static_cast<Actor&>(mob).getAttributes()).setCurrentValue(SharedAttributes::HEALTH(), value);
+}
+
+ABP_REGISTER_SELFTEST("wearable.conversion_keeps_backpack", [](Context& ctx) -> ll::coro::CoroTask<> {
+    co_await groundPlayer(ctx);
+    DifficultyGuard difficulty(ctx.player().getLevel());
+    SbGuard         guard;
+    guard.add().chance     = 0.0;
+    guard.add().buffHealth = true;
+    auto& level  = ctx.player().getLevel();
+    auto* zombie = spawnMob(ctx, "minecraft:zombie", 4);
+    ctx.require(equipMob(*zombie, Tier::Gold, false), "equip");
+    auto  worn  = zombie->getArmor(ArmorSlot::Torso);
+    float bonus = bonusIn(worn);
+    ctx.require(bonus > 0.f, "the worn item remembers the health bonus (" + std::to_string(bonus) + ")");
+    float max = static_cast<float>(zombie->getMaxHealth());
+    setMobHealth(*zombie, max / 2);
+    auto zid = zombie->getOrCreateUniqueID();
+    auto pos = zombie->getPosition();
+
+    // zombie -> drowned (Bedrock: the transformation component).
+    VariantParameterList params{};
+    params.mSelf = zombie;
+    for (auto ev : {"minecraft:convert_to_drowned", "minecraft:start_transforming", "minecraft:start_drowned_transformation", "minecraft:become_drowned"}) {
+        if (zombie->getEntityContext().tryGetComponent<TransformationComponent>()) break;
+        bool ok = zombie->executeEvent(ev, params);
+        co_await ctx.ticks(2);
+        ctx.info(std::string("event ") + ev + " -> " + std::to_string(ok) + ", transformation "
+                 + std::to_string(static_cast<bool>(zombie->getEntityContext().tryGetComponent<TransformationComponent>())));
+    }
+    auto comp = zombie->getEntityContext().tryGetComponent<TransformationComponent>();
+    ctx.require(static_cast<bool>(comp), "the zombie got a transformation (convert to drowned)");
+    comp->mDelayTicks = 20; // (15 s in the game) the real countdown, shortened
+    for (int i = 0; i < 120 && level.fetchEntity(zid, false); ++i) co_await ctx.ticks(1);
+    if (auto* still = level.fetchEntity(zid, false)) {
+        if (auto c = still->getEntityContext().tryGetComponent<TransformationComponent>()) c->transformIfAble(*still, true);
+        co_await ctx.ticks(2);
+    }
+    ctx.require(level.fetchEntity(zid, false) == nullptr, "the zombie converted");
+    Mob* drowned = nullptr;
+    auto& bs     = ctx.player().getDimensionBlockSource();
+    for (auto* a : bs.getEntities(AABB{Vec3{pos.x - 4, pos.y - 4, pos.z - 4}, Vec3{pos.x + 4, pos.y + 4, pos.z + 4}}, 0.f)) {
+        if (a && a->getTypeName() == "minecraft:drowned") drowned = static_cast<Mob*>(a);
+    }
+    ctx.require(drowned != nullptr, "a drowned took its place");
+    auto chest = drowned->getArmor(ArmorSlot::Torso);
+    ctx.check(game::isBackpack(chest) && game::backpackTierOf(chest) == Tier::Gold, "the drowned wears the gold backpack");
+    ctx.check(isMobWorn(chest) && pendingLoot(chest).has_value(), "with its flags (spawnedWithBackpack, pending loot)");
+    ctx.check(backpackDropsNear(level, pos).empty(), "nothing dropped (drop_equipment can't drop it)");
+    float dMax = static_cast<float>(drowned->getMaxHealth());
+    float dBase = drowned->getAttribute(SharedAttributes::HEALTH()).mPtr->mDefaultMaxValue;
+    ctx.info("drowned max " + std::to_string(dMax) + " health " + std::to_string(drowned->getHealth()));
+    ctx.check(dMax >= 20.f + bonus - 0.5f && std::abs(dBase - (20.f + bonus)) < 0.6f, "health bonus moved to the drowned");
+    ctx.check(std::abs(static_cast<float>(drowned->getHealth()) - dMax / 2) <= 1.0f, "health ratio kept (1/2)");
+    drowned->despawn();
+});
+
+ABP_REGISTER_SELFTEST("wearable.creeper_loses_buffs", [](Context& ctx) -> ll::coro::CoroTask<> {
+    co_await groundPlayer(ctx);
+    DifficultyGuard difficulty(ctx.player().getLevel());
+    SbGuard         guard;
+    guard.add().chance = 0.0;
+    auto addEffect = [](Mob& m, MobEffectIds id) {
+        MobEffectInstance inst(static_cast<uint>(id), EffectDuration{2400});
+        m.addEffect(inst);
+    };
+    // Directly.
+    auto* plain = spawnMob(ctx, "minecraft:creeper", -8);
+    addEffect(*plain, MobEffectIds::MovementSpeed);
+    ctx.check(stripBeneficialEffects(*plain) == 0, "a creeper without a spawned backpack keeps everything");
+    plain->despawn();
+    auto* creeper = spawnMob(ctx, "minecraft:creeper", 8);
+    ctx.require(equipMob(*creeper, Tier::Iron, false), "equip");
+    addEffect(*creeper, MobEffectIds::MovementSpeed);
+    addEffect(*creeper, MobEffectIds::Poison);
+    // The real explosion (no block damage, tiny power).
+    VariantParameterList params{};
+    params.mSelf = creeper;
+    (void)creeper->executeEvent("minecraft:start_exploding_forced", params);
+    co_await ctx.ticks(1);
+    if (auto ex = creeper->getEntityContext().tryGetComponent<ExplodeComponent>()) {
+        ex->mBreaksBlocks    = false;
+        ex->mExplosionPower  = 0.5f;
+        ex->mCausesFire      = false;
+    }
+    auto id = creeper->getOrCreateUniqueID();
+    for (int i = 0; i < 80 && ctx.player().getLevel().fetchEntity(id, false); ++i) co_await ctx.ticks(1);
+    auto strip = lastCreeperStrip();
+    ctx.info("creeper strip: removed " + std::to_string(strip.removed) + ", kept " + std::to_string(strip.kept));
+    ctx.check(strip.removed >= 1, "the exploding creeper lost its beneficial effects");
+    ctx.check(strip.kept >= 1, "harmful ones stay (poison)");
 });
 
 // ---- loot chests -------------------------------------------------------------------------------

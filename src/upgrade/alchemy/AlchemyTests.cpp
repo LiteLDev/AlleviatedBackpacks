@@ -363,5 +363,119 @@ ABP_REGISTER_SELFTEST("alchemy.placed_targets", [](Context& ctx) -> ll::coro::Co
     p.removeAllEffects();
 });
 
+// ---- GX-2: SC's applyTo loop and the splash ---------------------------------------------------
+
+/// Filter 0 = splash Swiftness, filter 1 = Fire Resistance potion, both "Keep Active".
+Rig twoFilterRig(Context& ctx) {
+    auto splash = data(kSplashPotion, 1, kSwiftness);
+    auto r      = rig(ctx, false, splash);
+    ctx.require(setFilter(r.ctx(), 1, potion(kFireResistance)), "second filter");
+    auto s                   = settingsOf(r.ctx());
+    s.filters[0].condition   = Condition::Always;
+    s.filters[1].condition   = Condition::Always;
+    writeSettings(r.ctx(), s);
+    return r;
+}
+
+ABP_REGISTER_SELFTEST("alchemy.second_filter_same_check", [](Context& ctx) -> ll::coro::CoroTask<> {
+    // SC: the applying-exit runs after each slot, and the filter loop doesn't stop: filter 1 still
+    // visits slot 0 after filter 0's splash started applying, finds its potion there and uses it.
+    auto& p = ctx.player();
+    co_await readyPlayer(ctx, p);
+    auto r = twoFilterRig(ctx);
+    r.bp->inventory().set(0, potion(kFireResistance));
+    r.bp->inventory().set(1, data(kSplashPotion, 1, kSwiftness));
+    ctx.require(checkNow(r.ctx(&p), {&p}), "one check");
+    ctx.check(hasEffect(p, effect::Speed), "splash (filter 0, slot 1) thrown at once");
+    ctx.check(countIn(*r.bp, kSplashPotion) == 0 && countIn(*r.bp, kPotion) == 0, "both items taken in the same check");
+    ctx.check(applying(r.ctx()), "the potion (filter 1, slot 0) is being drunk");
+    co_await waitApplied(ctx, r);
+    ctx.check(hasEffect(p, effect::FireResistance), "fire resistance applied from the second item");
+    ctx.check(countIn(*r.bp, kGlassBottle) == 1, "its bottle returned");
+    p.removeAllEffects();
+});
+
+ABP_REGISTER_SELFTEST("alchemy.second_filter_first_slot_only", [](Context& ctx) -> ll::coro::CoroTask<> {
+    // ... but only the first slot: with the potion in slot 1 filter 1 stops after slot 0.
+    auto& p = ctx.player();
+    co_await readyPlayer(ctx, p);
+    auto r = twoFilterRig(ctx);
+    r.bp->inventory().set(0, data(kSplashPotion, 1, kSwiftness));
+    r.bp->inventory().set(1, potion(kFireResistance));
+    ctx.require(checkNow(r.ctx(&p), {&p}), "one check");
+    ctx.check(hasEffect(p, effect::Speed), "splash used");
+    ctx.check(countIn(*r.bp, kPotion, kFireResistance) == 1, "the potion in slot 1 is not reached in this check");
+    co_await waitApplied(ctx, r);
+    ctx.check(!hasEffect(p, effect::FireResistance), "no fire resistance yet");
+    co_await ctx.ticks(kCheckInterval + 1);
+    ctx.require(checkNow(r.ctx(&p), {&p}), "next check");
+    co_await waitApplied(ctx, r);
+    ctx.check(hasEffect(p, effect::FireResistance) && countIn(*r.bp, kPotion, kFireResistance) == 0, "used by the next check");
+    p.removeAllEffects();
+});
+
+ABP_REGISTER_SELFTEST("alchemy.inception_inventory", [](Context& ctx) -> ll::coro::CoroTask<> {
+    // SC getInventoryForUpgradeProcessing: with Inception the potion may sit in a backpack inside,
+    // and the bottle goes back through the same chain.
+    auto& p = ctx.player();
+    co_await readyPlayer(ctx, p);
+    auto r = rig(ctx, false, potion(kNightVision));
+    ctx.require(ctx.installUpgrade(r.bp, "inception") >= 0, "inception installed");
+    auto inner = ctx.createBackpack(Tier::Leather);
+    inner->inventory().insert(potion(kNightVision), kInternal);
+    ctx.require(r.bp->inventory().insert(game::ItemConv::toData(ctx.backpackItem(*inner)), core::AccessContext{core::Source::Player}).inserted == 1, "inner stored");
+    ctx.require(checkNow(r.ctx(&p), {&p}), "the potion inside the inner backpack is used");
+    ctx.check(countIn(*inner, kPotion) == 0, "taken from the inner backpack");
+    co_await waitApplied(ctx, r);
+    ctx.check(hasEffect(p, kNightVisionEffect), "applied");
+    ctx.check(countIn(*r.bp, kGlassBottle) == 1, "the bottle goes into the first inventory with room (main)");
+    p.removeAllEffects();
+});
+
+ABP_REGISTER_SELFTEST("alchemy.splash_falloff", [](Context& ctx) -> ll::coro::CoroTask<> {
+    // ThrownPotion.applySplash: distance to the feet, < 4 blocks, 1 - d / 4; 1 for the entity hit.
+    Vec3 impact{0.f, 1.62f, 0.f};
+    int  a = 0, b = 0, c = 0, d = 0;
+    auto hits = splashHits(
+        impact,
+        {{reinterpret_cast<Actor*>(&a), Vec3{0.f, 0.f, 0.f}},
+         {reinterpret_cast<Actor*>(&b), Vec3{2.f, 1.62f, 0.f}},
+         {reinterpret_cast<Actor*>(&c), Vec3{0.f, 1.62f, 3.9f}},
+         {reinterpret_cast<Actor*>(&d), Vec3{4.1f, 1.62f, 0.f}}},
+        reinterpret_cast<Actor*>(&a)
+    );
+    ctx.require(hits.size() == 3u, "three within 4 blocks (got " + std::to_string(hits.size()) + ")");
+    ctx.check(std::abs(hits[0].scale - 1.f) < 1e-4f, "entity hit: full strength");
+    ctx.check(std::abs(hits[1].scale - 0.5f) < 1e-4f, "2 blocks: half");
+    ctx.check(std::abs(hits[2].scale - 0.025f) < 1e-3f, "3.9 blocks: 2.5%");
+
+    // In the world: a bystander 2 blocks away gets a shorter effect than the wearer.
+    auto& p = ctx.player();
+    co_await readyPlayer(ctx, p);
+    auto& other = ctx.spawnPlayer("abp_splash_bystander");
+    auto  feet  = p.getFeetPos();
+    other.teleport(Vec3{feet.x + 2.f, feet.y, feet.z}, p.getDimensionId(), Vec2{});
+    co_await ctx.ticks(5);
+    other.removeAllEffects();
+    auto impactAt = splashImpact(p);
+    ctx.check(std::abs(impactAt.y - p.getEyePos().y) < 1e-3f, "potion breaks at eye height");
+    auto splash = data(kSplashPotion, 1, kFireResistance);
+    auto r      = rig(ctx, false, splash);
+    auto s      = settingsOf(r.ctx());
+    s.filters[0].condition = Condition::Always;
+    writeSettings(r.ctx(), s);
+    r.bp->inventory().insert(splash, kInternal);
+    ctx.require(checkNow(r.ctx(&p), {&p}), "splash thrown");
+    auto const* mine   = p.getEffect(static_cast<uint>(effect::FireResistance));
+    auto const* theirs = other.getEffect(static_cast<uint>(effect::FireResistance));
+    ctx.require(mine && mine->mId != 0, "wearer affected");
+    ctx.require(theirs && theirs->mId != 0, "bystander 2 blocks away affected");
+    int dm = mine->mDuration->mValue, dt = theirs->mDuration->mValue;
+    ctx.info("splash durations: wearer " + std::to_string(dm) + ", bystander " + std::to_string(dt));
+    ctx.check(dt < dm && dt > dm / 4, "bystander gets a shorter effect (fall-off)");
+    p.removeAllEffects();
+    other.removeAllEffects();
+});
+
 } // namespace
 } // namespace abp::upgrade::alchemy

@@ -1,8 +1,18 @@
 // Selftests of linked storage: linked.*
 
+#include "ll/api/service/Bedrock.h"
+
+#include "mc/deps/core/string/HashedString.h"
 #include "mc/platform/UUID.h"
+#include "mc/world/inventory/CraftingContainer.h"
+#include "mc/world/item/crafting/CraftingContext.h"
+#include "mc/world/item/crafting/Recipe.h"
+#include "mc/world/item/crafting/Recipes.h"
+#include "mc/world/level/ILevel.h"
+#include "mc/world/level/Level.h"
 #include "mc/server/SimulatedPlayer.h"
 #include "mc/world/PlayerUIContainer.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/actor/player/Inventory.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
@@ -10,6 +20,7 @@
 #include "feature/admin/Admin.h"
 #include "feature/dedup/Dedup.h"
 #include "feature/linked/Linked.h"
+#include "feature/linked/LinkedCrafting.h"
 #include "feature/placed/PlacedBackpacks.h"
 #include "feature/placed/TestSite.h"
 #include "game/Backpack.h"
@@ -215,6 +226,101 @@ ABP_REGISTER_SELFTEST("linked.screen_click", [](Context& ctx) -> ll::coro::CoroT
     ctx.check(gotBound, "the bound linker went to the inventory");
     player.mPlayerUIContainer->setItem(0, ItemStack::EMPTY_ITEM());
     ui::MenuManager::get().close(player);
+});
+
+// ---- GX-2: SC's ender_linker_endpoint crafting recipe ------------------------------------------------
+
+ABP_REGISTER_SELFTEST("linked.craft_recipe", [](Context& ctx) {
+    auto level = ll::service::getLevel();
+    ctx.require(level != nullptr, "level");
+    auto const& all = level->getRecipes().mRecipes.get();
+    auto        it  = all.find(HashedString("crafting_table"));
+    ctx.require(it != all.end(), "crafting recipes");
+    for (auto t : {"leather", "copper", "iron", "gold", "diamond", "netherite"}) {
+        auto id = std::string("alleviatedbackpacks:ender_linker_endpoint_") + t;
+        auto r  = it->second.find(id);
+        ctx.require(r != it->second.end() && r->second, id + " registered");
+        auto const& results = r->second->getResultItems();
+        ctx.check(results.size() == 1 && results[0].getTypeName() == kLinkerId, id + ": crafts a linker");
+        // The ingredients match a linker and the backpack in any grid position.
+        CraftingContainer grid(3, 3);
+        grid.setItem(4, linker());
+        grid.setItem(7, game::ItemConv::make(std::string("alleviatedbackpacks:") + t + "_backpack"));
+        CraftingContext cc(Bedrock::NotNullNonOwnerPtr<ILevel>(Bedrock::NonOwnerPointer<ILevel>(static_cast<ILevel const&>(*level))));
+        ctx.check(r->second->matches(grid, cc), id + " matches linker + backpack");
+    }
+
+    // SC getPlan.
+    auto& service = Service::get();
+    auto  a       = ctx.createBackpack(Tier::Iron);
+    auto  aItem   = ctx.backpackItem(*a);
+    ctx.check(planFor(linker(), aItem) == CraftPlan::CreatePrimary, "unlinked + unlinked: CREATE_PRIMARY");
+    auto bound = linker();
+    ctx.require(service.link("owner", bound, aItem) == LinkResult::Success, "group");
+    ctx.check(planFor(linker(), aItem) == CraftPlan::BindExisting, "unlinked + endpoint: BIND_EXISTING_ENDPOINT");
+    auto empty     = ctx.createBackpack(Tier::Leather);
+    auto emptyItem = ctx.backpackItem(*empty);
+    ctx.check(planFor(bound, emptyItem) == CraftPlan::AddSecondary, "bound + unlinked: ADD_SECONDARY");
+    ctx.check(!planFor(bound, aItem).has_value(), "bound + endpoint: no recipe");
+    auto full = ctx.createBackpack(Tier::Leather);
+    full->inventory().insert(data("minecraft:dirt", 3), kInternal);
+    ctx.check(service.checkLink(bound, ctx.backpackItem(*full)) == LinkResult::EndpointHasContents, "ADD with contents refused (SC diagnostic)");
+    ctx.check(service.checkLink(bound, emptyItem) == LinkResult::Success, "ADD of an empty backpack allowed");
+});
+
+ABP_REGISTER_SELFTEST("linked.craft_finalize", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& player = ctx.player();
+    co_await ctx.ticks(1);
+    player.getInventory().removeAllItems();
+    player.mPlayerUIContainer->setItem(0, ItemStack::EMPTY_ITEM());
+    auto countLinkers = [&](bool boundOnly) {
+        int n = 0;
+        for (int i = 0; i < 36; ++i) {
+            auto const& s = player.getInventory().getItem(i);
+            if (isLinker(s) && (!boundOnly || linkerGroup(s))) n += s.mCount;
+        }
+        auto const& c = player.mPlayerUIContainer->getItem(0);
+        if (isLinker(c) && (!boundOnly || linkerGroup(c))) n += c.mCount;
+        return n;
+    };
+
+    int const gridSlot = static_cast<int>(PlayerUISlot::Crafting3x3Input1) + 4;
+    player.mPlayerUIContainer->setItem(gridSlot, ItemStack::EMPTY_ITEM());
+
+    // CREATE_PRIMARY: the grid had a plain linker + the backpack; the crafted plain linker is on
+    // the cursor. The backpack goes back into its grid slot as the PRIMARY endpoint.
+    auto bp       = ctx.createBackpack(Tier::Iron);
+    auto consumed = ctx.backpackItem(*bp);
+    player.mPlayerUIContainer->setItem(0, linker());
+    ctx.require(finalizeCraft(player, CraftPlan::CreatePrimary, linker(), consumed, gridSlot), "finalised");
+    ItemStack primary = player.mPlayerUIContainer->getItem(gridSlot);
+    ctx.check(roleOf(primary) == Role::Primary, "the backpack stays in the grid as the PRIMARY endpoint (SC remainder)");
+    ctx.check(game::backpackUuid(primary) == bp->uuid(), "still the same backpack");
+    auto cursor = player.mPlayerUIContainer->getItem(0);
+    ctx.check(isLinker(cursor) && cursor.mCount == 1 && linkerGroup(cursor) == endpointOf(primary)->group, "the crafted linker is bound to the group");
+    player.mPlayerUIContainer->setItem(gridSlot, ItemStack::EMPTY_ITEM());
+
+    // ADD_SECONDARY: the bound linker was consumed; the crafted item becomes the backpack.
+    ItemStack boundLinker = cursor;
+    auto      second      = ctx.createBackpack(Tier::Leather);
+    auto      secondItem  = ctx.backpackItem(*second);
+    second.reset();
+    player.mPlayerUIContainer->setItem(0, linker()); // what the recipe delivered
+    ctx.require(finalizeCraft(player, CraftPlan::AddSecondary, boundLinker, secondItem, gridSlot), "finalised");
+    auto sec = player.mPlayerUIContainer->getItem(0);
+    ctx.check(roleOf(sec) == Role::Secondary && game::backpackUuid(sec) == bp->uuid(), "the crafted item is a secondary endpoint of the group");
+    ctx.check(countLinkers(false) == 0, "no linker left (the bound one was used up)");
+    ctx.check(player.mPlayerUIContainer->getItem(gridSlot).isNull(), "nothing stays in the grid");
+    player.mPlayerUIContainer->setItem(0, ItemStack::EMPTY_ITEM());
+
+    // BIND_EXISTING_ENDPOINT, the crafted linker shift-clicked onto a stack of plain linkers:
+    // one is split off and bound.
+    ctx.give(player, linker(4), 7);
+    ctx.require(finalizeCraft(player, CraftPlan::BindExisting, linker(), primary, gridSlot), "finalised");
+    ctx.check(countLinkers(true) == 1 && countLinkers(false) == 4, "one of the 4 linkers is bound");
+    ctx.check(roleOf(player.mPlayerUIContainer->getItem(gridSlot)) == Role::Primary, "the endpoint stays in the grid, unchanged");
+    player.mPlayerUIContainer->setItem(gridSlot, ItemStack::EMPTY_ITEM());
+    player.getInventory().removeAllItems();
 });
 
 } // namespace

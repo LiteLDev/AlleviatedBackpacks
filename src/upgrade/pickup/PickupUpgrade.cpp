@@ -13,6 +13,7 @@
 #include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/filter/FilterCommon.h"
+#include "upgrade/inception/Inception.h"
 
 namespace abp::upgrade::pickup {
 
@@ -44,8 +45,8 @@ public:
             cache.valid  = true;
         }
         if (!filtering::matchesContents(cache.filter, ctx.backpack(), item)) return;
-        auto r = ctx.backpack().inventory().insert(item, core::AccessContext{core::Source::Pickup, ctx.player()});
-        item.count -= r.inserted + r.voided;
+        // SC getInventoryForUpgradeProcessing().insertItem: with Inception the backpacks inside too.
+        item.count -= inception::insertForUpgrades(ctx.backpackPtr(), item, core::AccessContext{core::Source::Pickup, ctx.player()});
     }
 
     [[nodiscard]] std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {

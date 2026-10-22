@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "mc/deps/core/math/Vec3.h"
+
 #include "upgrade/IUpgrade.h"
 #include "upgrade/alchemy/AlchemyRules.h"
 
@@ -67,5 +69,18 @@ bool checkNow(UpgradeContext const& ctx, std::vector<Actor*> const& targets);
 void tickApplications();
 /// Ends every running application, putting the items back into their backpacks (world stops).
 void abortApplications();
+
+/// One entity a splash reaches, with its effect strength (ThrownPotion.applySplash).
+struct SplashHit {
+    Actor* actor = nullptr;
+    float  scale = 1.f;
+};
+/// The splash of an alchemy splash potion hitting `hit` at `impact` (vanilla's `applySplash`):
+/// of the `candidates` (entity, feet position) those closer than 4 blocks, with strength 1 for the
+/// entity hit and 1 - distance / 4 for the others.
+[[nodiscard]] std::vector<SplashHit>
+splashHits(Vec3 const& impact, std::vector<std::pair<Actor*, Vec3>> const& candidates, Actor const* hit);
+/// Where the potion of an alchemy splash on `target` breaks (SC: x + w/2, eye y, z + w/2).
+[[nodiscard]] Vec3 splashImpact(Actor& target);
 
 } // namespace abp::upgrade::alchemy

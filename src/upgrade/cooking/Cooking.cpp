@@ -27,6 +27,7 @@
 #include "mod/I18n.h"
 #include "mod/Log.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/inception/Inception.h"
 
 ABP_REGISTER_CONFIG("cooking", abp::upgrade::cooking::CookingConfig);
 
@@ -300,9 +301,14 @@ bool CookingUpgrade::advance(UpgradeContext const& ctx, int ticks) const {
     if (!mAuto) {
         runManual(s, e, ticks);
     } else {
+        // SC getInventoryForUpgradeProcessing: with Inception also the backpacks inside.
+        auto invs = inception::upgradeInventories(ctx.backpackPtr());
         AutoEnv a{ctx.backpack().inventory(), core::AccessContext{core::Source::Upgrade, ctx.player()}, [&ctx](CookState& st) {
                       pushExperienceToTanks(ctx, st);
                   }};
+        if (invs.size() > 1) {
+            for (auto const& bp : invs) a.chain.push_back(&bp->inventory());
+        }
         runAuto(s, e, a, ticks);
     }
     cd = Cooldowns{s.cooldown, s.outputCooldown, s.fuelCooldown, s.inputCooldown};
