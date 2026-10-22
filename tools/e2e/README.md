@@ -6,8 +6,8 @@ There are two harnesses, one per LeviLamina platform. Both run the real game bin
 |---|---|---|
 | Runs | Bedrock Dedicated Server + LeviLamina 26.51.7 (`bedrock_server_mod.exe`) | Minecraft 1.26.51 through LeviLauncher (instance `1.26.51.01`) |
 | Mod taken from | `bin/server/AlleviatedBackpacks` | `bin/client/AlleviatedBackpacks` |
-| Driven by | console stdin/stdout | real mouse/keyboard input (`SendInput`) and window screenshots |
-| Parallel runs | yes: 3 slots, so 3 runs at a time (more runs wait) | no: one game per machine (lock shared with BEI) |
+| Driven by | console stdin/stdout | **headless input** through the LeviHeadlessInput mod's pipe (game in the background, your mouse/keyboard untouched; `-Foreground` = real `SendInput`) and window screenshots |
+| Parallel runs | yes: 3 slots, so 3 runs at a time (more runs wait) | opt-in game-instance slots (`-Slot` / `$env:LEVI_E2E_SLOTS`, see below); default one game (slot 1, lock shared with BEI and BeetrootSkin) |
 | Speed | ~20 s plus the tests | ~2 min plus the tests |
 | Output | `server/out/<scenario>/` `server.log`, `selftest.json` | `client/out/<scenario>/` `*.png`, `client.log`, `selftest.json` |
 
@@ -19,7 +19,32 @@ pwsh -NoProfile -File tools/e2e/server/run.ps1 -Scenario smoke     # [-Build] [-
 pwsh -NoProfile -File tools/e2e/server/run.ps1 -Scenario full
 pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario smoke     # [-Build] [-KeepOpen] [-KeepOtherMods]
 pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario full
+pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario smoke -Foreground   # real SendInput (takes over the PC)
+pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario smoke -Slot 2       # a clone game instance
 ```
+
+### Headless input and parallel games
+
+Client runs are **headless** by default: [LeviHeadlessInput](../../../LeviHeadlessInput/README.md)
+(sibling project `%USERPROFILE%\Desktop\LeviHeadlessInput`, build it once with `xmake`;
+`$env:LEVI_HEADLESS_INPUT_DIR` can point at another `bin\LeviHeadlessInput`) is deployed next to
+our mod, and its `harness-shim.ps1` replaces `Click`, `Press-Key`, `Type-Text`, `Scroll`,
+`Move-Mouse`, `Focus-Game`, `Assert-GameForeground` and `Set-GameWindowSize` with versions that
+talk to the mod over a pipe; `[AbpE2E.Native]::Key/MouseButton/Wheel/Unicode/MoveRelative` (used
+directly by scenarios) are redirected too, so scenarios need no changes. The game is started
+straight from the instance folder without activation, stays at the back of the Z order, never
+pauses on focus loss, and neither sees nor grabs the real mouse and keyboard (it reads the mouse
+through GDK GameInput; the mod feeds it a virtual one). With `-KeepOpen` the run hands the game
+to the human (headless input off) while it waits.
+
+**Slots.** Slot 1 is the LeviLauncher instance (`bei-e2e.lock`). Slots 2.. are clones,
+`versions\<base>-hi<N>`, made on first use by LeviHeadlessInput's `clone-instance.ps1` (hard links
+and junctions; own `mods\`, `logs\`, worlds) with their own lock `hi<N>-e2e.lock`, so several client
+runs (of this and other projects) can play at once: `-Slot 2`, or `$env:LEVI_E2E_SLOTS = '1,2,3'`
+to take the first free one. Game processes are matched by instance folder, so a run only ever
+focuses or closes its own game. Only enable more slots once every harness on the machine does
+that (BEI's still treats every `Minecraft.Windows` process as its own). Remote modes use one BDS
+server slot each, as before. Windows Firewall may ask once per new clone exe path: Cancel is fine.
 
 ### Client modes (`-Mode`)
 
@@ -61,7 +86,7 @@ the server harness).
 ## Prerequisites
 
 - **Server:** [lip](https://github.com/futrime/lip) on `PATH`. The first `run.ps1` calls `server/install.ps1`. It runs `lip install github.com/LiteLDev/LeviLamina@26.51.7` in an empty folder, which brings in BDS 1.26.51, CrashLogger, PreLoader and PeEditor, and installs everything into `%LOCALAPPDATA%\abp-e2e\bds-base`. This takes about 1–3 minutes, once per machine. `install.ps1 -Force` reinstalls. Set `$env:ABP_E2E_HOME` to use a different folder.
-- **Client:** LeviLauncher at `%USERPROFILE%\Desktop\LeviLauncher.exe` (or `$env:ABP_E2E_LAUNCHER`). The instance `%APPDATA%\levilauncher.exe\versions\1.26.51.01` must have been started and signed in by hand once. The screen must stay unlocked, and no one should use the mouse during a run.
+- **Client:** LeviLauncher at `%USERPROFILE%\Desktop\LeviLauncher.exe` (or `$env:ABP_E2E_LAUNCHER`). The instance `%APPDATA%\levilauncher.exe\versions\1.26.51.01` must have been started and signed in by hand once. The screen must stay unlocked. In headless mode (the default) you can keep using the PC during a run; with `-Foreground` no one should use the mouse.
 
 ## What a run does
 
