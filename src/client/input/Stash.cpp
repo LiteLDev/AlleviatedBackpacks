@@ -215,6 +215,7 @@ struct SlotRects {
     std::string                                               screen;
     double                                                    since    = 0;
     double                                                    lastNote = 0;
+    double                                                    changed  = 0;
     int                                                       logs     = 0;
     bool                                                      dirty    = false;
     std::vector<std::pair<std::string, std::array<float, 3>>> rects;
@@ -236,10 +237,11 @@ void noteSlotRect(ContainerScreenController const* controller, std::string const
     for (auto& [k, r] : gRects.rects) {
         if (k != key) continue;
         known = true;
-        (void)r; // first position wins (some passes draw the icon elsewhere, e.g. raised on hover)
+        if (std::abs(r[0] - x) > 0.5f || std::abs(r[1] - y) > 0.5f) r = {x, y, s}, gRects.dirty = true, gRects.changed = t;
     }
-    if (!known) gRects.rects.emplace_back(key, std::array<float, 3>{x, y, s}), gRects.dirty = true;
-    if (!gRects.dirty || t - gRects.since < 0.8 || gRects.logs >= 6) return;
+    if (!known) gRects.rects.emplace_back(key, std::array<float, 3>{x, y, s}), gRects.dirty = true, gRects.changed = t;
+    // Screens slide in when they open: log once the positions stood still for a moment.
+    if (!gRects.dirty || t - gRects.since < 0.8 || t - gRects.changed < 0.4 || gRects.logs >= 6) return;
     gRects.dirty = false;
     ++gRects.logs;
     std::string line;
