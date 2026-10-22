@@ -16,6 +16,8 @@
 
 #include "client/input/InputRouter.h"
 #include "client/input/InputState.h"
+#include "client/net/ClientNet.h"
+#include "game/BackpackItem.h"
 
 namespace abp::client::input {
 
@@ -30,9 +32,16 @@ struct Hovered {
 };
 Hovered gHovered;
 
+bool ownSlot(std::string const& c, int i) {
+    return ((c == "hotbar_items" || c == "inventory_items" || c == "combined_hotbar_and_inventory_items") && i >= 0 && i < 36)
+        || (c == "armor_items" && i == 1) || c == "offhand_items";
+}
+
 void read(ContainerScreenController const& controller) {
     auto const& base                                = controller._getVisualItemStack(gHovered.collection, gHovered.index);
     static_cast<ItemStackBase&>(gHovered.item) = base;
+    snapshot().hoverBackpack = net::serverReady() && !gHovered.item.isNull() && game::isBackpack(gHovered.item) && gHovered.item.mCount == 1
+                            && ownSlot(gHovered.collection, gHovered.index);
 }
 
 void hovered(ContainerScreenController const& controller, std::string const& name, int index) {
@@ -49,12 +58,16 @@ void unhovered(ContainerScreenController const& controller, std::string const& n
     clearSlotHover();
 }
 
+ContainerScreenController const* gActiveController = nullptr; // the container screen ticking now
+
 void ticked(ContainerScreenController const& controller) {
+    gActiveController = &controller;
     if (gHovered.owner != reinterpret_cast<std::uintptr_t>(&controller) || gHovered.index < 0) return;
     read(controller);
 }
 
 void left(ContainerScreenController const& controller) {
+    if (gActiveController == &controller) gActiveController = nullptr;
     if (gHovered.owner == reinterpret_cast<std::uintptr_t>(&controller)) clearSlotHover();
 }
 } // namespace
@@ -118,7 +131,19 @@ LL_TYPE_INSTANCE_HOOK(AbpContainerLeaveHook, ll::memory::HookPriority::Normal, C
     origin();
 }
 
-void clearSlotHover() { gHovered = {}; }
+// Never keep a pointer to a destroyed controller.
+LL_TYPE_INSTANCE_HOOK(AbpContainerDtorHook, ll::memory::HookPriority::Normal, ContainerScreenController, &ContainerScreenController::$dtor, void) {
+    left(*this);
+    origin();
+}
+
+void clearSlotHover() {
+    gHovered                 = {};
+    snapshot().hoverBackpack = false;
+}
+
+ContainerScreenController const* activeContainerController() { return gActiveController; }
+void                             forgetContainerController() { gActiveController = nullptr; }
 
 void installSlotHover() {
     AbpContainerSlotHoveredHook::hook();
@@ -127,10 +152,13 @@ void installSlotHover() {
     AbpContainerTickHook::hook();
     AbpCraftingTickHook::hook();
     AbpContainerLeaveHook::hook();
+    AbpContainerDtorHook::hook();
 }
 
 void uninstallSlotHover() {
+    AbpContainerDtorHook::unhook();
     AbpContainerLeaveHook::unhook();
+    gActiveController = nullptr;
     AbpCraftingTickHook::unhook();
     AbpContainerTickHook::unhook();
     AbpContainerSlotUnhoveredHook::unhook();

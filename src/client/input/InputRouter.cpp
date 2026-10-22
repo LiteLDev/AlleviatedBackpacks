@@ -236,18 +236,33 @@ void onMouse(ll::event::MouseInputEvent& ev) {
     case MouseAction::ActionMiddle:
         button = ui::MouseButton::Middle;
         break;
+    case MouseAction::ActionX1:
+    case MouseAction::ActionX2:
+        // Side buttons only drive key bindings (Open Backpack may be bound to one).
+        if (ev.buttonData() == MouseAction::DataDown && snap.inLevel.load()
+            && onHotkeyMouseDown(mouseExtraCode(action == MouseAction::ActionX1 ? 1 : 2))) {
+            ev.cancel();
+        }
+        return;
     default:
         return;
     }
     auto& held = gHeldButtons[static_cast<std::size_t>(button)];
     bool  down = ev.buttonData() == MouseAction::DataDown;
     bool  live = snap.inLevel.load() && snap.cursorScreen.load();
+    if (down && button == ui::MouseButton::Right) {
+        snap.rightPressMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
 
     bool consume;
     if (down) {
         consume = live && overUiAt(x, y);
         held    = consume;
-        if (!consume && snap.inLevel.load()) onHotkeyMouseDown(button);
+        if (!consume && snap.inLevel.load() && onHotkeyMouseDown(mouseButtonCode(button))) {
+            ev.cancel(); // Open Backpack on a mouse button over a backpack slot
+            return;
+        }
         if (!live) return;
     } else {
         consume = held.exchange(false);
@@ -356,9 +371,11 @@ public:
         CompanionFocusLostHook::hook();
         installSlotHover();
         installHotkeys();
+        installStash();
     }
     void uninstall() {
         using namespace detail;
+        uninstallStash();
         uninstallHotkeys();
         uninstallSlotHover();
         CompanionFocusLostHook::unhook();

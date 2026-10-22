@@ -11,7 +11,7 @@
 //
 // Directions:
 //   client -> server: Hello, ScreenAction, KeyAction, ContentsRequest, RenderInfoRequest
-//   server -> client: Welcome, ScreenOpen, ScreenUpdate, ScreenClose, Contents, RenderInfo
+//   server -> client: Welcome, ScreenOpen, ScreenUpdate, ScreenClose, Contents, RenderInfo, StashInfo
 //
 // Bodies (JSON):
 //   Hello            {"version": "<mod version>", "features": [..]}
@@ -25,6 +25,8 @@
 //   Contents         ContentsModel::toJson()
 //   RenderInfoRequest{"uuid": "..."}
 //   RenderInfo       RenderInfo::toJson()
+//   StashInfo        {"q": n, "results": {"<area>:<slot>": 1|2}}     (answer to KeyAction stashQuery,
+//                                                                     see feature/stash/Stash.h)
 
 #include <string>
 
@@ -107,6 +109,10 @@ class ContentsPacket : public JsonPacket<ContentsPacket> {
     using JsonPacket::JsonPacket;
 };
 class RenderInfoPacket : public JsonPacket<RenderInfoPacket> {
+    using JsonPacket::JsonPacket;
+};
+/// Right-click stashing overlay results (P2-14, additive).
+class StashInfoPacket : public JsonPacket<StashInfoPacket> {
     using JsonPacket::JsonPacket;
 };
 

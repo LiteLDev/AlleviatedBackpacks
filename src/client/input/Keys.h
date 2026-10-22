@@ -10,12 +10,15 @@
 // | Inventory Interaction        | C                  | in game: Deposit/Restock on the looked-at block |
 // | Tool Swap                    | unbound            | in game                                       |
 // | Toggle Upgrade 1 / 2         | Alt+Z / Alt+X      | anywhere in a world                           |
-// | Toggle Upgrade 3..5          | unbound            | anywhere in a world (with Alt)                |
+// | Toggle Upgrade 3..5          | unbound            | anywhere in a world                           |
 // | Sort                         | middle mouse       | backpack screen, not over the player inventory |
 // | Transfer to Storage/Inventory| [ / ] (Shift = all)| backpack screen                               |
 //
-// Toggle Upgrade keys need Alt held (the game's bindings are single keys, so the modifier is
-// fixed and the binding's name says "Alt+").
+// Toggle Upgrade 1/2 need Alt held (SB's KeyModifier.ALT defaults; the game's bindings are single
+// keys, so the modifier stays fixed when they are remapped); 3..5 have no modifier, like SB's.
+// Open Backpack may be bound to a mouse button (also the side buttons). Bedrock's controls list
+// has no categories: each binding's description names SB's ("Sophisticated Backpacks" /
+// "Sophisticated Mods").
 
 #include "client/ui/UiLayer.h"
 
@@ -39,5 +42,7 @@ enum class KeyAction {
 [[nodiscard]] bool keyMatches(KeyAction action, int vk);
 /// The mouse button is bound to `action` (e.g. Sort = middle button). Any thread.
 [[nodiscard]] bool mouseMatches(KeyAction action, ui::MouseButton button);
+/// The key `action` is bound to, for display ("V", "Middle Button", "Not Bound"). Client thread.
+[[nodiscard]] std::string keyDisplayName(KeyAction action);
 
 } // namespace abp::client::input

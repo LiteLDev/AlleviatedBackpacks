@@ -33,6 +33,7 @@
 #include "client/Client.h"
 #include "client/input/InputRouter.h"
 #include "client/input/Keys.h"
+#include "client/input/Stash.h"
 #include "client/net/ClientNet.h"
 #include "client/render/RenderHooks.h"
 #include "client/tooltip/ContentsTooltip.h"
@@ -161,6 +162,16 @@ public:
     bool onScroll(float x, float y, float delta) override;
     bool onKey(int vk, bool down) override;
     bool onChar(std::string const& utf8) override;
+    /// Open Backpack from a binding the layer didn't receive (input/Hotkeys.cpp).
+    void openBackpackFromBinding() {
+        auto const* m = net::screenModel();
+        if (!m || !active()) return;
+        if (m->kind == "menu" || mView == View::Settings) {
+            if (m->kind == "menu") requestClose();
+            return;
+        }
+        openBackpackKey(*m);
+    }
 
 private:
     // ---- model caches ---------------------------------------------------------------------------
@@ -607,6 +618,9 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             p.item(mSlotStacks[i], x, y);
             render::decorateItemIcon(p, mSlotStacks[i], x, y);
             drawCount(p, d.count, x, y);
+            // Right-click stashing sign (SC onContainerScreenForeground: not on the hovered slot).
+            auto sign = input::stash::result("storage", ps.index, mSlotStacks[i]);
+            if (!(mHover.area == SlotRef::Area::Storage && mHover.index == ps.index)) input::stash::drawSign(p, sign, mSlotStacks[i], x, y);
         }
         if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index) highlight(x, y);
         else if (mDistSlots.size() > 1 && std::find(mDistSlots.begin(), mDistSlots.end(), SlotRef{SlotRef::Area::Storage, ps.index}) != mDistSlots.end()) highlight(x, y);
@@ -624,6 +638,8 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
                 p.item(s, x, y);
                 render::decorateItemIcon(p, s, x, y);
                 drawCount(p, s.mCount, x, y);
+                auto sign = input::stash::result("inventory", i, s);
+                if (!(mHover.area == SlotRef::Area::Inventory && mHover.index == i)) input::stash::drawSign(p, sign, s, x, y);
             }
             if (mHover.area == SlotRef::Area::Inventory && mHover.index == i) highlight(x, y);
         }
@@ -731,9 +747,11 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
     auto* player = currentPlayer();
     if (!player) return;
     if (!player->mPlayerUIContainer->getItem(0).isNull()) {
-        // Carrying something: SB only shows the contents tooltip of backpacks.
+        // Carrying something: no item tooltip (SC), only the right-click stashing tooltip.
         auto const* s = stackAt(mHover);
-        if (s && game::isBackpack(*s)) tooltip::drawBackpackTooltip(p, *s, mx, my);
+        if (s && !s->isNull() && (mHover.area == SlotRef::Area::Storage || mHover.area == SlotRef::Area::Inventory)) {
+            input::stash::drawTooltip(p, areaName(mHover.area), mHover.index, *s, mx, my);
+        }
         return;
     }
     auto const* s = stackAt(mHover);
@@ -875,6 +893,11 @@ ItemStack const* BackpackScreenLayer::stackAt(SlotRef const& s) const {
 bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, float y) {
     auto const* m = net::screenModel();
     if (!m || !active()) return false;
+    // Open Backpack bound to a mouse button (SB handleGuiMouseKeyPress).
+    if (down && button != MouseButton::Left && input::mouseMatches(input::KeyAction::OpenBackpack, button)) {
+        openBackpackFromBinding();
+        return true;
+    }
     if (m->kind == "menu") return down ? menuMouse(*m, button, x, y) : true;
     if (mView == View::Settings) return settingsMouse(*m, button, down, x, y);
     if (!down) {
@@ -961,6 +984,10 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         return true;
     }
     if (button == MouseButton::Middle) return true;
+    // Right click with the cursor: SB's stashing into / from a backpack (input/Stash.h).
+    if (button == MouseButton::Right && (slot.area == SlotRef::Area::Storage || slot.area == SlotRef::Area::Inventory)) {
+        if (auto const* s = stackAt(slot); s && input::stash::rightClick(areaName(slot.area), slot.index, *s)) return true;
+    }
     double t      = now();
     bool   shift  = input::shiftDown();
     // With an item on the cursor the click happens on release: a drag over several slots
@@ -1836,6 +1863,8 @@ private:
 
 } // namespace
 bool nativeScreenActive() { return gLayer.active() && net::displayModel(); }
+
+void nativeScreenOpenBackpackKey() { gLayer.openBackpackFromBinding(); }
 
 } // namespace abp::client::ui
 
