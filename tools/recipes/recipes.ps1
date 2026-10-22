@@ -122,6 +122,8 @@ Recipe 'tool_swapper_upgrade' @('RWR', 'PBA', 'ISI') ([ordered]@{ R = $R; W = 'm
 Advanced 'advanced_tool_swapper_upgrade' 'tool_swapper_upgrade'
 Recipe 'anvil_upgrade' @('ADA', 'IBI', ' C ') ([ordered]@{ A = 'minecraft:anvil'; D = $D; I = $I; B = $B; C = $C })
 Recipe 'smithing_upgrade' @(' S ', 'IBI', ' C ') ([ordered]@{ S = 'minecraft:smithing_table'; I = $I; B = $B; C = $C })
+Recipe 'alchemy_upgrade' @('TGF', 'IBI', 'RPR') ([ordered]@{ T = 'minecraft:ghast_tear'; G = 'minecraft:glass_bottle'; F = 'minecraft:fermented_spider_eye'; I = $I; B = $B; R = 'minecraft:blaze_rod'; P = 'minecraft:ender_pearl' })
+Advanced 'advanced_alchemy_upgrade' 'alchemy_upgrade'
 Recipe 'battery_upgrade' @('GRG', 'RBR', 'GRG') ([ordered]@{ G = $G; R = 'minecraft:redstone_block'; B = $B })
 Recipe 'tank_upgrade' @('GGG', 'GBG', 'GGG') ([ordered]@{ G = 'minecraft:glass'; B = $B })
 Recipe 'pump_upgrade' @('GUG', 'PBS', 'GUG') ([ordered]@{ G = 'minecraft:glass'; U = 'minecraft:bucket'; P = 'minecraft:piston'; B = $B; S = 'minecraft:sticky_piston' })

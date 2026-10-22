@@ -53,32 +53,36 @@ ItemStack assembleFirst(Recipe const& recipe, CraftingContainer& container, Craf
 
 } // namespace
 
-std::optional<CraftMatch> matchCrafting(Grid const& grid) {
-    if (std::all_of(grid.begin(), grid.end(), [](ItemStack const& s) { return s.isNull() || s.mCount == 0; })) {
-        return std::nullopt;
-    }
+std::vector<CraftMatch> matchAllCrafting(Grid const& grid) {
+    std::vector<CraftMatch> out;
+    if (std::all_of(grid.begin(), grid.end(), [](ItemStack const& s) { return s.isNull() || s.mCount == 0; })) return out;
     auto level = ll::service::getLevel();
-    if (!level) return std::nullopt;
+    if (!level) return out;
     CraftingContainer container(3, 3);
     for (int i = 0; i < 9; ++i) {
         auto const& s = grid[static_cast<std::size_t>(i)];
         container.setItem(i, s.isNull() ? ItemStack::EMPTY_ITEM() : s);
     }
     CraftingContext context(levelPtr(*level));
-
-    auto const* recipes = recipesFor(*level, kCraftingTag);
-    if (!recipes) return std::nullopt;
-    std::shared_ptr<Recipe> best;
+    auto const*     recipes = recipesFor(*level, kCraftingTag);
+    if (!recipes) return out;
+    std::vector<std::pair<int, std::shared_ptr<Recipe>>> matched;
     for (auto const& [id, recipe] : *recipes) {
-        if (!recipe) continue;
-        if (best && recipe->mPriority >= best->mPriority) continue; // lower value wins, first one on ties
-        if (!recipe->matches(container, context)) continue;
-        best = recipe;
+        if (!recipe || !recipe->matches(container, context)) continue;
+        matched.emplace_back(recipe->mPriority, recipe);
     }
-    if (!best) return std::nullopt;
-    auto result = assembleFirst(*best, container, context);
-    if (result.isNull()) return std::nullopt;
-    return CraftMatch{best, best->mRecipeId, std::move(result)};
+    std::stable_sort(matched.begin(), matched.end(), [](auto const& a, auto const& b) { return a.first < b.first; });
+    for (auto const& [prio, recipe] : matched) {
+        auto result = assembleFirst(*recipe, container, context);
+        if (result.isNull()) continue;
+        // Bedrock registers some recipes more than once (e.g. per ingredient variant): offer each
+        // distinct result once, like the Java recipe book does.
+        bool dup = std::any_of(out.begin(), out.end(), [&](CraftMatch const& m) {
+            return m.result.mCount == result.mCount && game::ItemConv::toData(m.result).sameItem(game::ItemConv::toData(result));
+        });
+        if (!dup) out.push_back(CraftMatch{recipe, recipe->mRecipeId, std::move(result)});
+    }
+    return out;
 }
 
 std::vector<StonecutterOption> stonecutterOptions(ItemStack const& input) {

@@ -56,3 +56,5 @@ item.alleviatedbackpacks:tool_swapper_upgrade.tooltip=Automatically swaps item i
 item.alleviatedbackpacks:void_upgrade.tooltip=Voids items selected in filter
 item.alleviatedbackpacks:xp_pump_upgrade.tooltip=Pumps experience between Tank upgrade and player
 item.alleviatedbackpacks:battery_upgrade.tooltip=Replaces part of backpack's inventory with energy storage
+item.alleviatedbackpacks:alchemy_upgrade.tooltip=Automatically uses potions, food with effects, or milk buckets
+item.alleviatedbackpacks:advanced_alchemy_upgrade.tooltip=Automatically uses potions, food with effects, or milk buckets~LINEBREAK~Has additional effect filtering options

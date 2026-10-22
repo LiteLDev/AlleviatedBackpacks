@@ -1,3 +1,4 @@
+advanced_alchemy_upgrade.json
 advanced_compacting_upgrade.json
 advanced_deposit_upgrade.json
 advanced_feeding_upgrade.json
@@ -11,6 +12,7 @@ advanced_refill_upgrade.json
 advanced_restock_upgrade.json
 advanced_tool_swapper_upgrade.json
 advanced_void_upgrade.json
+alchemy_upgrade.json
 anvil_upgrade.json
 auto_blasting_upgrade_from_auto_smelting_upgrade.json
 auto_blasting_upgrade.json

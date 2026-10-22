@@ -136,6 +136,7 @@ bool isNextTierUpgrade(std::string_view sourceItemId, std::string_view resultIte
         {"smelting_upgrade",     "auto_smelting_upgrade"        },
         {"smoking_upgrade",      "auto_smoking_upgrade"         },
         {"blasting_upgrade",     "auto_blasting_upgrade"        },
+        {"alchemy_upgrade",      "advanced_alchemy_upgrade"     },
     };
     auto strip = [](std::string_view id) -> std::optional<std::string_view> {
         if (!id.starts_with(game::kNamespace) || id.size() <= game::kNamespace.size() + 1 || id[game::kNamespace.size()] != ':') {

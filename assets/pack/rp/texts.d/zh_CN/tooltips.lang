@@ -56,3 +56,5 @@ item.alleviatedbackpacks:tool_swapper_upgrade.tooltip=左击方块/实体时，�
 item.alleviatedbackpacks:void_upgrade.tooltip=销毁过滤器中选定的物品
 item.alleviatedbackpacks:xp_pump_upgrade.tooltip=在储罐升级与玩家之间泵送经验
 item.alleviatedbackpacks:battery_upgrade.tooltip=用能量存储替换背包的一部分物品栏
+item.alleviatedbackpacks:alchemy_upgrade.tooltip=自动使用药水、带效果的食物或奶桶
+item.alleviatedbackpacks:advanced_alchemy_upgrade.tooltip=自动使用药水、带效果的食物或奶桶~LINEBREAK~提供额外的效果过滤选项
