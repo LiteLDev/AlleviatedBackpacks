@@ -1,0 +1,36 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:auto_blasting_upgrade_from_auto_smelting_upgrade"
+    },
+    "tags": [
+      "crafting_table"
+    ],
+    "pattern": [
+      "III",
+      "ISI",
+      "TTT"
+    ],
+    "key": {
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "S": {
+        "item": "alleviatedbackpacks:auto_smelting_upgrade"
+      },
+      "T": {
+        "item": "minecraft:smooth_stone"
+      }
+    },
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:auto_smelting_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:auto_blasting_upgrade",
+      "count": 1
+    }
+  }
+}

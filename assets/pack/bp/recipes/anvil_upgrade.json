@@ -4,18 +4,39 @@
     "description": {
       "identifier": "alleviatedbackpacks:anvil_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "IAI",
+      "ADA",
       "IBI",
-      "III"
+      " C "
     ],
     "key": {
-      "I": { "item": "minecraft:iron_ingot" },
-      "A": { "item": "minecraft:anvil" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" }
+      "A": {
+        "item": "minecraft:anvil"
+      },
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "C": {
+        "item": "minecraft:chest"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:anvil_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:anvil_upgrade",
+      "count": 1
+    }
   }
 }

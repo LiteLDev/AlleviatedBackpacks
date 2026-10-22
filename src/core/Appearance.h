@@ -53,6 +53,23 @@ inline constexpr std::array<DyeInfo, 16> kDyes{{
 /// brightest channel keeps the average maximum. One colour returns itself. Empty -> nullopt.
 [[nodiscard]] std::optional<std::uint32_t> mixColors(std::span<std::uint32_t const> argb);
 
+/// Sophisticated Backpacks' colour mixing (SophisticatedCore `ColorHelper.calculateColor`,
+/// leather-armour style): no dyes -> `base` unchanged; otherwise the channel average of the dyes
+/// plus `base` when `base != defaultColor`, rescaled so the brightest channel equals the average
+/// of every colour's brightest channel. Result is opaque (0xFF alpha).
+[[nodiscard]] std::uint32_t calculateColor(std::uint32_t base, std::uint32_t defaultColor, std::span<std::uint32_t const> dyes);
+
+/// Which colours a dye at `dyeColumn` of a crafting grid feeds when the backpack is at
+/// `backpackColumn` (SB `StorageDyeRecipeBase`): columns at or left of the backpack feed the main
+/// colour, columns at or right of it the accent (trim) colour; the backpack's own column feeds both.
+struct DyeColumnTarget {
+    bool main   = false;
+    bool accent = false;
+};
+[[nodiscard]] constexpr DyeColumnTarget dyeColumnTarget(int dyeColumn, int backpackColumn) {
+    return {dyeColumn <= backpackColumn, dyeColumn >= backpackColumn};
+}
+
 /// "#RRGGBB"
 [[nodiscard]] std::string colorHex(std::uint32_t argb);
 

@@ -13,6 +13,7 @@
 #include "client/render/ModelState.h"
 #include "client/ui/gfx/Painter.h"
 #include "core/Tier.h"
+#include "feature/tiers/Tiers.h"
 #include "game/BackpackItem.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
@@ -32,6 +33,11 @@ bool drawBackpackIcon(ui::Painter& p, ItemStack const& stack, float x, float y, 
     auto           snap = modelFor(stack);
     ModelSnapshot  defaults;
     defaults.tier       = static_cast<int>(*tier);
+    // Unbound backpacks (e.g. SB's dyed creative-tab stacks) carry their colours on the item.
+    if (auto c = tiers::itemColors(stack)) {
+        defaults.mainColor   = c->main;
+        defaults.accentColor = c->accent;
+    }
     auto const&    s    = snap ? *snap : defaults;
     auto const&    m    = s.model;
     std::string    key  = std::string(kIconDir) + "c" + (m.battery ? "1" : "0") + (m.left ? "1" : "0") + (m.right ? "1" : "0");

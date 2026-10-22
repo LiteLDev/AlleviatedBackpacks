@@ -47,6 +47,43 @@ std::optional<std::uint32_t> mixColors(std::span<std::uint32_t const> colors) {
     return 0xFF000000u | (clamp(ar) << 16) | (clamp(ag) << 8) | clamp(ab);
 }
 
+std::uint32_t calculateColor(std::uint32_t base, std::uint32_t defaultColor, std::span<std::uint32_t const> dyes) {
+    if (dyes.empty()) return base;
+    // Integer / float steps as in SophisticatedCore's ColorHelper (Java int and float math).
+    int rgb[3]          = {0, 0, 0};
+    int sumMaxComponent = 0;
+    int numberOfColors  = 0;
+    if (base != defaultColor) {
+        float r = static_cast<float>((base >> 16) & 0xFF), g = static_cast<float>((base >> 8) & 0xFF), b = static_cast<float>(base & 0xFF);
+        sumMaxComponent = static_cast<int>(static_cast<float>(sumMaxComponent) + std::max(r, std::max(g, b)));
+        rgb[0]          = static_cast<int>(static_cast<float>(rgb[0]) + r);
+        rgb[1]          = static_cast<int>(static_cast<float>(rgb[1]) + g);
+        rgb[2]          = static_cast<int>(static_cast<float>(rgb[2]) + b);
+        ++numberOfColors;
+    }
+    for (auto dye : dyes) {
+        int r = static_cast<int>((dye >> 16) & 0xFF), g = static_cast<int>((dye >> 8) & 0xFF), b = static_cast<int>(dye & 0xFF);
+        sumMaxComponent += std::max({r, g, b});
+        rgb[0]          += r;
+        rgb[1]          += g;
+        rgb[2]          += b;
+        ++numberOfColors;
+    }
+    int   avgR            = rgb[0] / numberOfColors;
+    int   avgG            = rgb[1] / numberOfColors;
+    int   avgB            = rgb[2] / numberOfColors;
+    float avgMaxComponent = static_cast<float>(sumMaxComponent) / static_cast<float>(numberOfColors);
+    float maxAvgComponent = static_cast<float>(std::max({avgR, avgG, avgB}));
+    auto  scale           = [&](int c) {
+        if (maxAvgComponent <= 0.0f) return 0; // Java: (int) NaN == 0
+        return std::clamp(static_cast<int>(static_cast<float>(c) * avgMaxComponent / maxAvgComponent), 0, 255);
+    };
+    avgR = scale(avgR);
+    avgG = scale(avgG);
+    avgB = scale(avgB);
+    return 0xFF000000u | (static_cast<std::uint32_t>(avgR) << 16) | (static_cast<std::uint32_t>(avgG) << 8) | static_cast<std::uint32_t>(avgB);
+}
+
 std::string colorHex(std::uint32_t argb) { return std::format("#{:06X}", argb & 0xFFFFFFu); }
 
 FillStats fillStats(BackpackInventory const& inventory) {

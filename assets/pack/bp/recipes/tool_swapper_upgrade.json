@@ -4,21 +4,45 @@
     "description": {
       "identifier": "alleviatedbackpacks:tool_swapper_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "RSR",
+      "RWR",
       "PBA",
-      "RHR"
+      "ISI"
     ],
     "key": {
-      "R": { "item": "minecraft:redstone" },
-      "S": { "item": "minecraft:wooden_sword" },
-      "P": { "item": "minecraft:wooden_pickaxe" },
-      "A": { "item": "minecraft:wooden_axe" },
-      "H": { "item": "minecraft:wooden_shovel" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" }
+      "R": {
+        "item": "minecraft:redstone"
+      },
+      "W": {
+        "item": "minecraft:wooden_sword"
+      },
+      "P": {
+        "item": "minecraft:wooden_pickaxe"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "A": {
+        "item": "minecraft:wooden_axe"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "S": {
+        "item": "minecraft:wooden_shovel"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:tool_swapper_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:tool_swapper_upgrade",
+      "count": 1
+    }
   }
 }
