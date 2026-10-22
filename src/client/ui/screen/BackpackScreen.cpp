@@ -285,6 +285,7 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         mFilter       = {};
         mOpenTab      = -1;
         mTabsSig.clear();
+        mTabs.clear(); // a backpack without tabbed upgrades must not keep the previous screen's tabs
         mMatchesDirty = true;
         mView         = View::Storage;
         mSettingsTabs.clear();
