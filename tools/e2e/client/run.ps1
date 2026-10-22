@@ -43,6 +43,7 @@ param(
     [string]$ModDir,            # default: <repo>/bin/client/AlleviatedBackpacks
     [ValidateSet('local', 'remote-mod', 'remote-vanilla')][string]$Mode = 'local',
     [int]$LockTimeoutMinutes = 120,  # give up (exit 2, "NOT RUN") if the game lock is not free by then; 0 = wait forever
+    [int]$SlotWaitMinutes = 3,       # remote modes: no server slot by then -> release the game lock and queue again
     [int]$HostTimeoutMinutes = 15    # remote modes: max wait for the BDS host (slot + boot), game lock held
 )
 $ErrorActionPreference = 'Stop'
@@ -66,6 +67,8 @@ $script:HostDir = $null
 
 # Starts the BDS host (server harness, scenario client-host) in a free server slot and waits until
 # it is ready. Called with the game lock held, so a queued run does not hold a slot meanwhile.
+# Returns $null (host killed) when no slot became free within -SlotWaitMinutes: the caller then
+# gives the game lock back instead of blocking the game while every slot is busy.
 function Start-RemoteHost {
     $script:HostDir = Join-Path $outDir 'host'
     New-Item -ItemType Directory -Force $script:HostDir | Out-Null
@@ -79,18 +82,17 @@ function Start-RemoteHost {
     $ready = Join-Path $script:HostDir 'ready.json'
     $start = Get-Date
     $deadline = $start.AddMinutes($HostTimeoutMinutes)
+    $slotDeadline = $start.AddMinutes($SlotWaitMinutes)
     $nextReport = $start.AddSeconds(60)
     while (-not (Test-Path $ready)) {
         if ($script:HostProc.HasExited) { throw "the BDS host exited early (see $harnessLog)" }
-        if ((Get-Date) -gt $deadline) {
-            $msg = "the BDS host did not get ready in $HostTimeoutMinutes min (see $harnessLog)"
-            # Still queued for a server slot: the run could not start, it did not fail.
-            if (-not (Select-String -Path $harnessLog -Pattern 'acquired server slot' -Quiet -ErrorAction SilentlyContinue)) {
-                $script:HostSlotTimedOut = $true
-                $msg = "no free server slot within $HostTimeoutMinutes min"
-            }
-            throw $msg
+        if ((Get-Date) -gt $slotDeadline -and -not (Select-String -Path $harnessLog -Pattern 'acquired server slot' -Quiet -ErrorAction SilentlyContinue)) {
+            Write-Step "no free server slot within $SlotWaitMinutes min; stopping the host"
+            $script:HostProc.Kill($true); $script:HostProc.WaitForExit(15000) | Out-Null
+            $script:HostProc = $null
+            return $null
         }
+        if ((Get-Date) -gt $deadline) { throw "the BDS host did not get ready in $HostTimeoutMinutes min (see $harnessLog)" }
         if ((Get-Date) -ge $nextReport) {
             $last = Get-Content $harnessLog -Tail 1 -ErrorAction SilentlyContinue
             Write-Step ("waiting for the BDS host ({0:N1} min): {1}" -f ((Get-Date) - $start).TotalMinutes, $last)
@@ -116,11 +118,22 @@ $script:HostProc = $null
 $script:HostSlotTimedOut = $false
 try {
     if ($Build) { Invoke-ModBuild client; if ($remote) { Invoke-ModBuild server } }
-    # Game lock first, then the BDS host: a run queued for the game holds no server slot.
-    Enter-E2ELock -TimeoutMinutes $LockTimeoutMinutes
+    # Game lock first, then the BDS host: a run queued for the game holds no server slot. If no
+    # slot is free, give the game lock back and queue again (until -LockTimeoutMinutes).
+    $lockDeadline = if ($LockTimeoutMinutes -gt 0) { (Get-Date).AddMinutes($LockTimeoutMinutes) } else { [datetime]::MaxValue }
+    while ($true) {
+        $left = if ($LockTimeoutMinutes -gt 0) { [Math]::Max(1, [int][Math]::Ceiling(($lockDeadline - (Get-Date)).TotalMinutes)) } else { 0 }
+        Enter-E2ELock -TimeoutMinutes $left
+        if (-not $remote) { break }
+        try { $hostInfo = Start-RemoteHost } catch { Exit-E2ELock; throw }
+        if ($hostInfo) { break }
+        Exit-E2ELock
+        if ((Get-Date) -gt $lockDeadline) { $script:HostSlotTimedOut = $true; throw "no free server slot whenever the game lock was ours (within $LockTimeoutMinutes min)" }
+        Write-Step "released the game lock; queueing again in 30 s"
+        Start-Sleep -Seconds 30
+    }
     $lockAcquired = $true
     try {
-        if ($remote) { $hostInfo = Start-RemoteHost }
         if (Get-GameProcess) { Write-Step "closing a running game first"; Stop-Game }
         Restore-OtherMods
         if ($Mode -eq 'remote-vanilla') {

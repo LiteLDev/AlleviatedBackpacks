@@ -89,7 +89,7 @@ The run **fails** if any of these happen:
 **Client** (`client/run.ps1`):
 1. Optional `-Build`. This happens before the lock, so the game is not blocked while compiling.
 2. Takes the game lock (`-LockTimeoutMinutes`, default 120; `0` waits forever). While waiting it prints `waiting for game lock (<n> min), held by <pid, repo or command line>` every minute. If the lock is not free in time the run exits with code **2** and `NOT RUN` (not a test failure).
-3. Remote modes only: starts the BDS host (server harness, scenario `client-host`) **now, with the game lock held**, and waits up to `-HostTimeoutMinutes` (default 15) for it to be ready (if it is still queued for a server slot by then: exit code 2, `NOT RUN`). A run queued behind the game lock therefore holds no server slot.
+3. Remote modes only: starts the BDS host (server harness, scenario `client-host`) **now, with the game lock held**, and waits up to `-HostTimeoutMinutes` (default 15) for it to be ready. A run queued behind the game lock therefore holds no server slot. If the host gets no slot within `-SlotWaitMinutes` (default 3), the run kills it, **gives the game lock back** and queues again 30 s later, so a slot shortage never blocks the shared game; past `-LockTimeoutMinutes` it exits 2 (`NOT RUN`).
 4. Closes a running game.
 5. Deploys the mod to `mods\AlleviatedBackpacks`, always as a fresh copy.
 6. Moves every other mod except LeviLamina and CrashLogger (BEI, ...) to `versions\1.26.51.01\mods.abp-e2e-aside\`.
