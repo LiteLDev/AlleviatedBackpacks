@@ -72,13 +72,14 @@ Start-Sleep -Milliseconds 700
 Save-Screenshot 'tooltip-secondary' | Out-Null
 if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
 Press-Key 'E'
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 1500
 
-# The secondary opens the shared (leather) storage: open it from the hotbar.
+# The secondary (a copper backpack item) opens the shared leather storage: 27 slots.
 Press-Key '3'
-Start-Sleep -Milliseconds 400
+Start-Sleep -Milliseconds 1000
 $mark = Get-LogMark
 Press-Key 'B'
+Wait-LogLine "companion: native screen \d+ for 'Copper Backpack' \(27 slots" 10 -Since $mark | Out-Null
 Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'secondary-open' | Out-Null
@@ -107,18 +108,12 @@ Invoke-Chat '/backpack world untarget'
 $mark = Get-LogMark
 Invoke-Chat '/sbp list'
 Wait-LogLine 'sbp: list -> [1-9]\d* backpacks' 10 -Since $mark | Out-Null
-Press-Key 'T'
-Start-Sleep -Milliseconds 800
-Save-Screenshot 'sbp-list' | Out-Null
-Press-Key ESC
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 300
+Save-Screenshot 'sbp-list' | Out-Null # the chat lines show on the HUD for a few seconds
 
 $mark = Get-LogMark
 Invoke-Chat "/sbp give @s $netheriteUuid"
 Wait-LogLine "sbp: gave backpack $netheriteUuid to 1 players" 10 -Since $mark | Out-Null
-Press-Key 'T'
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 300
 Save-Screenshot 'sbp-give' | Out-Null
-Press-Key ESC
-Start-Sleep -Milliseconds 500
 Assert-NoErrors

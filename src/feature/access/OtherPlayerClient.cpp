@@ -56,7 +56,7 @@ void tryOpenLookedAt() {
     float pitch = radians(target.getRotation().x);
     float yaw   = radians(target.getYBodyRotation());
     if ((dx / len) * (-std::sin(yaw) * std::cos(pitch)) + (dz / len) * (std::cos(yaw) * std::cos(pitch)) <= 0.0f) return;
-    log().info("access: asking to open {}'s backpack", target.getRealName());
+    log().info("access: asking to open {}'s backpack", target.getNameTag());
     client::net::sendKeyAction(nlohmann::json{
         {"action", "openOtherPlayer"},
         {"target", target.getRuntimeID().rawID},
