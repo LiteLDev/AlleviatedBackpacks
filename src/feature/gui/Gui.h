@@ -28,7 +28,12 @@ struct GuiConfig {
     bool        sneakUseOpensWornBackpack = true;
     /// Defaults of the per-player / per-backpack options below.
     std::string defaultSortBy        = "name"; ///< name | count | mod | tag
-    bool        defaultOpenTabFirst  = true;
+    bool        defaultOpenTabFirst  = false; ///< SB `shiftClickOpenTab` default
+    /// SB `allowOpeningOtherPlayerBackpacks`: players may open a backpack another player wears
+    /// (and the backpack settings show the "Another player can open" toggle).
+    bool        allowOpeningOtherPlayerBackpacks = true;
+    /// SB `itemDisplayDisabled`: hides the Item Display settings tab.
+    bool        itemDisplayDisabled = false;
     bool        defaultNotifications = true;
     bool        defaultKeepHotbar    = true;
 };
@@ -36,8 +41,8 @@ struct GuiConfig {
 /// The GUI options. Resolution: backpack override -> player's global setting -> server default.
 struct Options {
     core::SortBy sortBy = core::SortBy::Name;
-    /// Shift-click on the upgrades page: into the upgrade slots first (true) or storage first.
-    bool openTabFirst = true;
+    /// SB "Shift Click Into Open Tab First" (`shiftClickOpenTab`, default off).
+    bool openTabFirst = false;
     /// Chat feedback (sorted / moved N items) and slot hints in item lore.
     bool notifications = true;
     /// "Move all" buttons leave the hotbar alone.
@@ -46,7 +51,7 @@ struct Options {
 
 /// Option keys (JSON keys in the backpack / player settings).
 inline constexpr char const* kSortBy        = "sortBy";
-inline constexpr char const* kOpenTabFirst  = "openTabFirst";
+inline constexpr char const* kOpenTabFirst  = "shiftClickOpenTab"; ///< SB's main setting name
 inline constexpr char const* kNotifications = "notifications";
 inline constexpr char const* kKeepHotbar    = "keepHotbar";
 
@@ -106,5 +111,22 @@ void notify(Player& player, game::Backpack const& backpack, std::string const& m
 /// Opens the memory / no-sort slot picker (a chest menu over the backpack's storage).
 enum class PickMode { Memory, NoSort };
 bool openSlotPicker(Player& player, std::shared_ptr<game::Backpack> backpack, PickMode mode, int page = 0);
+
+// ---- SB memory "Match NBT" / "Ignore NBT" ---------------------------------------------------------
+/// SC MemorySettingsCategory `ignoreNbt` (default true): memory slots match by item only.
+[[nodiscard]] bool memoryIgnoresNbt(game::Backpack const& backpack);
+/// Switches the mode and converts the remembered entries like SC (`setIgnoreNbt`).
+void setMemoryIgnoreNbt(game::Backpack& backpack, bool ignore);
+/// Whether `item` may go into a memory slot remembering `remembered` in this backpack's mode.
+[[nodiscard]] bool memoryAccepts(bool ignoreNbt, core::ItemStackData const& remembered, core::ItemStackData const& item);
+
+namespace detail {
+/// The backpack's GUI settings section (`settings.gui`), created when missing.
+nlohmann::json& guiSection(game::Backpack& backpack);
+/// Read-only view (nullptr when the backpack has none).
+[[nodiscard]] nlohmann::json const* guiSectionOf(game::Backpack const& backpack);
+/// After editing `memory` / `noSort` / `memoryIgnoreNbt` in the section directly.
+void slotSettingsChanged(game::Backpack& backpack, bool rebuildHooks);
+} // namespace detail
 
 } // namespace abp::feature::gui
