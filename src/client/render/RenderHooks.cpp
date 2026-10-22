@@ -32,20 +32,6 @@ std::vector<IconEntry>&                         icons() { static std::vector<Ico
 std::vector<std::pair<std::string, CarrierHook>>& carriers() { static std::vector<std::pair<std::string, CarrierHook>> v; return v; }
 std::vector<std::pair<std::string, PlacedHook>>&  placed() { static std::vector<std::pair<std::string, PlacedHook>> v; return v; }
 
-/// Built-in proof hook: dyed backpacks get the tier's grey texture tinted with the main colour.
-bool tintHook(IconContext const& c) {
-    if (c.info.mainColor == kDefaultMain && c.info.accentColor == kDefaultAccent) return false;
-    auto tier = core::tierFromInt(c.info.tier);
-    if (!tier) return false;
-    auto path = "textures/items/" + std::string(core::tierInfo(*tier).id) + "_backpack_dyed";
-    auto tint = ui::Color::rgb(c.info.mainColor & 0xFFFFFF);
-    c.painter.texture(path, {c.x, c.y, 16 * c.scale, 16 * c.scale}, 1.f, ui::Painter::Layer::Foreground, tint);
-    return false;
-}
-
-struct BuiltIns {
-    BuiltIns() { addIconHook("abp:tint", 0, tintHook); }
-} gBuiltIns;
 } // namespace
 
 core::screen::RenderInfo const* renderInfoFor(ItemStack const& stack) {

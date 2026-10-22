@@ -2,6 +2,8 @@
 
 #include "mc/deps/nbt/CompoundTag.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/world/item/Item.h"
+#include "mc/deps/core/math/Color.h"
 
 #include "game/ItemConv.h"
 
@@ -53,7 +55,17 @@ void setBackpackUuid(ItemStack& stack, std::string const& uuid) {
 ItemStack makeBackpackItem(core::Tier tier, std::string const& uuid) {
     auto s = ItemConv::make(backpackItemId(tier), 1, 0);
     if (!uuid.empty()) setBackpackUuid(s, uuid);
+    setBackpackTint(s, 0xFFCC613A); // SB default main colour; refreshed from the storage when carried
     return s;
+}
+
+void setBackpackTint(ItemStack& stack, std::uint32_t argb) {
+    if (stack.isNull() || !stack.mItem) return;
+    int rgb = static_cast<int>(argb & 0xFFFFFFu);
+    stack.mItem->setColor(stack, mce::Color(static_cast<uint>(rgb)));
+    auto tag = stack.mUserData ? stack.mUserData->clone() : std::make_unique<CompoundTag>();
+    tag->putInt("abp_tint", rgb); // tiers::kTintKey: we tinted it (not a cauldron dye)
+    stack.setUserData(std::move(tag));
 }
 
 } // namespace abp::game

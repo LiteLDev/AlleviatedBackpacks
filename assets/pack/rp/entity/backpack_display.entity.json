@@ -1,0 +1,21 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "alleviatedbackpacks:backpack_display",
+      "materials": { "default": "entity_alphatest" },
+      "textures": { "default": "textures/entity/alleviatedbackpacks/backpack/glass" },
+      "geometry": { "default": "geometry.alleviatedbackpacks.backpack_display" },
+      "animations": { "display": "animation.alleviatedbackpacks.backpack_display.item" },
+      "scripts": {
+        "pre_animation": [
+          "v.abp_rot = q.abp_model(13); v.abp_z = q.abp_model(14);"
+        ],
+        "animate": ["display"]
+      },
+      "render_controllers": ["controller.render.alleviatedbackpacks.backpack_display"],
+      "enable_attachables": true,
+      "hide_armor": false
+    }
+  }
+}

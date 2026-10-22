@@ -1,8 +1,23 @@
 {
-  "abp_placed_leather_backpack": { "textures": "textures/blocks/placed_leather_backpack" },
-  "abp_placed_copper_backpack": { "textures": "textures/blocks/placed_copper_backpack" },
-  "abp_placed_iron_backpack": { "textures": "textures/blocks/placed_iron_backpack" },
-  "abp_placed_gold_backpack": { "textures": "textures/blocks/placed_gold_backpack" },
-  "abp_placed_diamond_backpack": { "textures": "textures/blocks/placed_diamond_backpack" },
-  "abp_placed_netherite_backpack": { "textures": "textures/blocks/placed_netherite_backpack" }
+  "abp_placed_backpack_hidden": {
+    "textures": "textures/blocks/placed_backpack_hidden"
+  },
+  "abp_placed_copper_backpack": {
+    "textures": "textures/blocks/placed_copper_backpack"
+  },
+  "abp_placed_diamond_backpack": {
+    "textures": "textures/blocks/placed_diamond_backpack"
+  },
+  "abp_placed_gold_backpack": {
+    "textures": "textures/blocks/placed_gold_backpack"
+  },
+  "abp_placed_iron_backpack": {
+    "textures": "textures/blocks/placed_iron_backpack"
+  },
+  "abp_placed_leather_backpack": {
+    "textures": "textures/blocks/placed_leather_backpack"
+  },
+  "abp_placed_netherite_backpack": {
+    "textures": "textures/blocks/placed_netherite_backpack"
+  }
 }

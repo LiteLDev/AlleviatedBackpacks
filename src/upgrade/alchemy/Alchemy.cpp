@@ -140,7 +140,10 @@ EffectLookup lookupOf(Actor& entity) {
 
 bool hasEffect(Actor& entity, int id) { return lookupOf(entity)(id).has_value(); }
 
-bool isLiving(Actor& a) { return a.hasCategory(ActorCategory::Mob) && a.isAlive(); }
+/// (The display entity drawing a placed backpack, P2-11, is no living entity.)
+bool isLiving(Actor& a) {
+    return a.hasCategory(ActorCategory::Mob) && a.isAlive() && a.getTypeName() != "alleviatedbackpacks:backpack_display";
+}
 
 /// Living entities (players included: chunks don't list players) whose box intersects `box`.
 std::vector<Actor*> livingIn(BlockSource& region, AABB const& box) {

@@ -1,0 +1,6 @@
+tile.alleviatedbackpacks:placed_leather_backpack.name=Backpack
+tile.alleviatedbackpacks:placed_copper_backpack.name=Copper Backpack
+tile.alleviatedbackpacks:placed_iron_backpack.name=Iron Backpack
+tile.alleviatedbackpacks:placed_gold_backpack.name=Gold Backpack
+tile.alleviatedbackpacks:placed_diamond_backpack.name=Diamond Backpack
+tile.alleviatedbackpacks:placed_netherite_backpack.name=Netherite Backpack
