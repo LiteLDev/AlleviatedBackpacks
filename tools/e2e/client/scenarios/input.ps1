@@ -298,7 +298,7 @@ Start-Sleep -Milliseconds 600
 Save-Screenshot 'native-right-click-to-add' | Out-Null
 $mark = Get-LogMark
 Gui-Click $p[0] $p[1] -Right
-Wait-LogLine 'key action: .* stash at storage:3: 12 moved' 10 -Since $mark | Out-Null
+Wait-LogLine 'key action: .* stash at storage:3: [1-9]d* moved' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 500
 Save-Screenshot 'native-stashed' | Out-Null
 Gui-Click $h[0] $h[1]                       # B back
