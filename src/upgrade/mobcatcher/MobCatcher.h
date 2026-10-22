@@ -12,11 +12,14 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "upgrade/mobcatcher/MobCatcherLogic.h"
 
 class Actor;
+class ItemStack;
+class ItemStackBase;
 class Player;
 
 namespace abp::game {
@@ -85,5 +88,24 @@ CaptureResult release(Player& player, std::shared_ptr<game::Backpack> const& bac
 
 /// Shows a capture/release message above the hotbar (SB `displayClientMessage(msg, true)`).
 void showMessage(Player& player, CaptureResult const& result);
+
+// ---- linked storage (GX-2) ------------------------------------------------------------------------
+// SB resolves the mob catcher's backpack with `resolveForGlobalUpgradeProcessing`: a linked-storage
+// endpoint works only as its group's PRIMARY endpoint (it then captures into / releases from the
+// shared storage); a secondary endpoint is the no-op storage, so it never captures (the use
+// passes) and releasing from its screen does nothing. The primary endpoint item carries SB's
+// `linked_mob_catcher` projection (whether the group's storage has a catcher), refreshed while it
+// is carried.
+
+/// User data byte of SB's LINKED_MOB_CATCHER projection on a primary endpoint item.
+inline constexpr std::string_view kLinkedMobCatcherKey = "abp_link_mob_catcher";
+
+/// False for a linked endpoint that is not its group's registered primary (SB: Noop wrapper).
+[[nodiscard]] bool processesGlobalUpgrades(ItemStackBase const& stack);
+/// The LINKED_MOB_CATCHER projection written in `stack`.
+[[nodiscard]] bool linkedCatcherProjection(ItemStackBase const& stack);
+/// SB BackpackItem.inventoryTick: sets / clears the projection of an endpoint item. True if the
+/// item changed.
+bool refreshLinkedCatcherProjection(ItemStack& stack);
 
 } // namespace abp::upgrade::mobcatcher

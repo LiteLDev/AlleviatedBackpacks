@@ -80,7 +80,7 @@ bool sameKind(core::ItemStackData const& a, core::ItemStackData const& b) { retu
 std::optional<CompactingDefinition> vanilla(core::ItemStackData const& item, int grid) {
     auto c = findCompaction(item, grid);
     if (!c || c->result.empty()) return std::nullopt;
-    return CompactingDefinition{c->result, grid * grid};
+    return CompactingDefinition{c->result, grid * grid, c->remaining};
 }
 
 /// SC `CompactingUpgradeConfig.getCompactingResult` (override shapes of the item first).
@@ -91,7 +91,7 @@ std::optional<CompactingDefinition> configured(core::ItemStackData const& item, 
         auto c = findCompaction(item, shape);
         if (!c || c->result.empty() || sameKind(c->result, item)) return std::nullopt;
         if (!uncompactMatches(c->result, item, shape.count)) return std::nullopt;
-        return CompactingDefinition{c->result, shape.count};
+        return CompactingDefinition{c->result, shape.count, c->remaining};
     };
     for (auto const& o : cfg.additionalCompactingShapeOverrides) {
         auto parsed = ShapeOverride::parse(o);
@@ -205,9 +205,40 @@ struct Engine : std::enable_shared_from_this<Engine> {
         return inv.count([&](core::ItemStackData const& s) { return s.sameItem(item); });
     }
 
-    /// SC `fitsResultAndRemainingItems` (simulated insert of the result).
-    [[nodiscard]] static bool fits(core::BackpackInventory& inv, core::ItemStackData const& result) {
-        return inv.insert(result, kUpgradeAccess, true).remainder.empty();
+    /// SC `fitsResultAndRemainingItems`: without remainders a simulated insert of the result; with
+    /// them the result and then the remainders go into a copy of the slots, slot by slot as SC's
+    /// cloned inventory does (each slot's real limit and acceptance).
+    [[nodiscard]] static bool
+    fits(core::BackpackInventory& inv, core::ItemStackData const& result, std::vector<core::ItemStackData> const& remaining = {}) {
+        if (remaining.empty()) return inv.insert(result, kUpgradeAccess, true).remainder.empty();
+        std::vector<core::ItemStackData> slots;
+        slots.reserve(static_cast<std::size_t>(inv.size()));
+        for (int i = 0; i < inv.size(); ++i) slots.push_back(inv.at(i));
+        auto place = [&](core::ItemStackData item) {
+            for (int i = 0; i < inv.size() && item.count > 0; ++i) {
+                auto& s = slots[static_cast<std::size_t>(i)];
+                if (s.empty()) {
+                    if (!inv.at(i).empty()) continue;
+                    auto r = inv.insertInto(i, item, kUpgradeAccess, true);
+                    int  n = r.inserted + r.voided;
+                    if (n <= 0) continue;
+                    if (r.inserted > 0) s = item.withCount(r.inserted);
+                    item.count -= n;
+                } else if (s.sameItem(item)) {
+                    int room = inv.slotLimit(i, item) - s.count;
+                    if (room <= 0) continue;
+                    int n       = std::min(room, item.count);
+                    s.count    += n;
+                    item.count -= n;
+                }
+            }
+            return item.count <= 0;
+        };
+        if (!place(result)) return false;
+        for (auto const& r : remaining) {
+            if (!place(r)) return false;
+        }
+        return true;
     }
 
     /// SC `InventoryHelper.extractFromInventory`: up to `amount` of `item` from the slots in
@@ -236,7 +267,7 @@ struct Engine : std::enable_shared_from_this<Engine> {
         // SC: while a simulated extraction yields a full set (extract filters may refuse some slots).
         for (int guard = 0; extract(inv, stack, total, true) == total && guard < 100000; ++guard) {
             auto result = def.result;
-            if (!fits(inv, result)) {
+            if (!fits(inv, result, def.remaining)) {
                 if (inv.at(slot).sameItem(stack) && inv.at(slot).count >= inv.slotLimit(slot, stack)) {
                     fullSlotsToCompactLater[kindOf(result)] = slot;
                 }
@@ -253,6 +284,8 @@ struct Engine : std::enable_shared_from_this<Engine> {
                 return;
             }
             (void)inv.insert(result, kUpgradeAccess);
+            // SC: InventoryHelper.insertIntoInventory(remainingItems) after the result.
+            for (auto const& left : def.remaining) (void)inv.insert(left, kUpgradeAccess);
         }
     }
 
@@ -262,7 +295,7 @@ struct Engine : std::enable_shared_from_this<Engine> {
         auto const& stack = inv.at(slot);
         if (stack.empty() || !matches(stack) || stack.count < inv.slotLimit(slot, stack)) return;
         auto def = definition(stack);
-        if (def && stack.count >= stack.maxStack && !def->result.empty() && !fits(inv, def->result)) {
+        if (def && stack.count >= stack.maxStack && !def->result.empty() && !fits(inv, def->result, def->remaining)) {
             fullSlotsToCompactLater[kindOf(def->result)] = slot;
         }
     }

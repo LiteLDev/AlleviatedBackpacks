@@ -10,7 +10,12 @@
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockSource.h"
 
+#include "mc/world/inventory/CraftingContainer.h"
+
 #include "api/BackpackCapabilities.h"
+#include "core/Comparator.h"
+#include "feature/stash/Stash.h"
+#include "upgrade/deposit/ContainerTransfer.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
@@ -397,6 +402,66 @@ ABP_REGISTER_SELFTEST("inception.settings_menu", [](Context& ctx) {
     ctx.require(upgrade::install(bp, slot, *item, &player), "reinstalled");
     ctx.check(inventoryOrderOf(*bp) == InventoryOrder::InceptedFirst, "setting kept");
     mm.close(player);
+});
+
+// GX-2: every SB/SC user of getInventoryForUpgradeProcessing works with the backpacks inside:
+// pickup, restock, deposit, stash (and alchemy / auto-cooking, see their tests), plus the placed
+// backpack's IO (comparator).
+ABP_REGISTER_SELFTEST("inception.combined_inventory_users", [](Context& ctx) {
+    ConfigGuard<InceptionConfig> guard;
+    auto& player = ctx.player();
+    auto  outer  = ctx.createBackpack(Tier::Diamond); // 108 slots, 5 upgrade slots
+    auto  inner  = ctx.createBackpack(Tier::Leather);
+    int   incSlot = ctx.installUpgrade(outer, std::string(kId));
+    int  pickupSlot = ctx.installUpgrade(outer, "pickup");
+    int  innerSlot  = store(ctx, *outer, *inner);
+    ctx.require(innerSlot >= 0 && pickupSlot >= 0, "setup");
+    for (int i = 0; i < outer->inventory().size(); ++i) {
+        if (i != innerSlot) outer->inventory().set(i, data("minecraft:dirt", 64).withCount(64));
+    }
+    auto countIn = [](game::Backpack& bp, std::string_view id) {
+        return static_cast<int>(bp.inventory().count([&](core::ItemStackData const& s) { return s.id == id; }));
+    };
+
+    // Pickup: the full main inventory passes the item on to the backpack inside.
+    auto* pickup = upgradeFor(outer->data().upgrades[static_cast<std::size_t>(pickupSlot)].item);
+    ctx.require(pickup != nullptr, "pickup upgrade");
+    auto apples = data("minecraft:apple", 5);
+    pickup->onPickup(UpgradeContext(outer, pickupSlot, &player), apples);
+    ctx.check(apples.count == 0 && countIn(*inner, "minecraft:apple") == 5, "pickup went into the inner backpack");
+
+    // Restock: from a container into the inner backpack.
+    int restockSlot = ctx.installUpgrade(outer, "restock");
+    ctx.require(restockSlot >= 0, "restock installed");
+    CraftingContainer chest(3, 3);
+    chest.setItem(0, game::ItemConv::make("minecraft:bread", 7));
+    auto rs = restock::run(UpgradeContext(outer, restockSlot, &player), chest, 0, false);
+    ctx.check(rs.items == 7 && countIn(*inner, "minecraft:bread") == 7, "restock filled the inner backpack");
+
+    // Stash: a full main inventory still has space through the backpack inside.
+    ctx.check(feature::stash::stashable(&player, *outer, data("minecraft:stick", 3)) != feature::stash::Result::NoSpace, "stashable");
+    config::mut<InceptionConfig>().upgradesUseInventoriesOfBackpacksInBackpack = false;
+    ctx.check(feature::stash::stashable(&player, *outer, data("minecraft:stick", 3)) == feature::stash::Result::NoSpace, "config off: main only");
+    config::mut<InceptionConfig>().upgradesUseInventoriesOfBackpacksInBackpack = true;
+
+    // Comparator over the combined inventories (SB getInventoryForInputOutput).
+    std::vector<core::BackpackInventory const*> invs;
+    for (auto const& b : upgradeInventories(outer)) invs.push_back(&b->inventory());
+    ctx.check(core::comparatorSignal(invs) < core::comparatorSignal(outer->inventory()), "the inner backpack's free slots count");
+
+    // Deposit: from the backpacks inside too (incepted first: their items go first).
+    setOrder(outer, incSlot, InventoryOrder::InceptedFirst);
+    int depositSlot = ctx.installUpgrade(outer, "deposit");
+    ctx.require(depositSlot >= 0, "deposit installed");
+    CraftingContainer big(9, 6);
+    auto ds          = deposit::run(UpgradeContext(outer, depositSlot, &player), big, 0, false);
+    int  movedApples = 0;
+    for (int i = 0; i < big.getContainerSize(); ++i) {
+        if (big.getItem(i).getTypeName() == "minecraft:apple") movedApples += big.getItem(i).mCount;
+    }
+    ctx.check(ds.items > 0 && movedApples == 5 && countIn(*inner, "minecraft:apple") == 0, "deposit took the apples from the inner backpack");
+    big.removeAllItems();
+    chest.removeAllItems();
 });
 
 } // namespace

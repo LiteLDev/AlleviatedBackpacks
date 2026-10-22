@@ -204,6 +204,24 @@ LinkResult Service::link(std::string const& owner, ItemStack& linker, ItemStack&
     return LinkResult::AlreadyLinked;
 }
 
+LinkResult Service::checkLink(ItemStack const& linker, ItemStack const& endpoint) const {
+    if (!isLinker(linker) || endpoint.isNull()) return LinkResult::UnsupportedEndpoint;
+    if (!game::backpackTierOf(endpoint)) return LinkResult::UnsupportedEndpoint;
+    auto target   = linkerGroup(linker);
+    auto existing = endpointOf(endpoint);
+    if (target && !mGroups.find(*target)) target.reset();
+    if (!target && !existing) return LinkResult::Success;
+    if (target && !existing) {
+        ItemStack copy = endpoint;
+        return hasContents(copy) ? LinkResult::EndpointHasContents : LinkResult::Success;
+    }
+    if (!target && existing) {
+        auto const* group = mGroups.find(existing->group);
+        return group && group->hasEndpoint(existing->endpoint) ? LinkResult::Success : LinkResult::UnsupportedEndpoint;
+    }
+    return LinkResult::AlreadyLinked;
+}
+
 std::optional<ItemStack> Service::createSecondaryEndpointCopy(ItemStack const& endpoint) {
     auto d = endpointOf(endpoint);
     if (!d) return std::nullopt;

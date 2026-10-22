@@ -19,7 +19,10 @@
 #include "mc/world/phys/HitResultType.h"
 #include "mc/scripting/modules/minecraft/ScriptFacing.h"
 
+#include "feature/linked/Linked.h"
 #include "feature/tiers/Tiers.h"
+#include "game/PlayerScan.h"
+#include "mc/world/phys/AABB.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -340,6 +343,80 @@ ABP_REGISTER_SELFTEST("mobcatcher.native_screen", [](Context& ctx) -> ll::coro::
     nlohmann::json releaseAction{{"session", session}, {"action", "tab"}, {"slot", 0}, {"data", {{"release", mobs[0]["id"]}}}};
     ctx.check(net::handleScreenAction(p, releaseAction), "release action handled");
     ctx.check(capturedMobs(*bp).empty(), "released through the screen");
+});
+
+// GX-2: SB resolveForGlobalUpgradeProcessing: only the PRIMARY endpoint of a linked storage group
+// captures (into the shared storage) and releases; a secondary endpoint is the no-op storage.
+ABP_REGISTER_SELFTEST("mobcatcher.linked_endpoints", [](Context& ctx) -> ll::coro::CoroTask<> {
+    co_await groundPlayer(ctx);
+    co_await isolatePlayer(ctx, -30.f);
+    auto& p       = static_cast<SimulatedPlayer&>(ctx.player());
+    auto& service = linked::Service::get();
+    auto  shared  = ctx.createBackpack(Tier::Iron);
+    install(ctx, shared, kBasicId);
+    auto primaryItem = ctx.backpackItem(*shared);
+    auto l           = game::ItemConv::make(std::string(linked::kLinkerId), 1);
+    ctx.require(service.link("owner", l, primaryItem) == linked::LinkResult::Success, "group created from the catcher backpack");
+    auto other     = ctx.createBackpack(Tier::Leather);
+    auto otherItem = ctx.backpackItem(*other);
+    other.reset();
+    ctx.require(service.link("owner", l, otherItem) == linked::LinkResult::Success, "empty backpack added as secondary");
+    auto& secondaryItem = otherItem;
+    ctx.check(processesGlobalUpgrades(primaryItem), "primary processes the catcher");
+    ctx.check(!processesGlobalUpgrades(secondaryItem), "secondary resolves to the no-op storage");
+    ctx.check(game::backpackUuid(secondaryItem) == shared->uuid(), "(both show the shared storage)");
+
+    // LINKED_MOB_CATCHER projection.
+    ItemStack prim = primaryItem, sec = secondaryItem;
+    ctx.check(refreshLinkedCatcherProjection(prim) && linkedCatcherProjection(prim), "primary: projection set");
+    ctx.check(!refreshLinkedCatcherProjection(prim), "unchanged on the next refresh");
+    ctx.check(!refreshLinkedCatcherProjection(sec) && !linkedCatcherProjection(sec), "secondary: no projection");
+
+    int hand = p.getSelectedItemSlot();
+    ctx.give(p, secondaryItem, hand);
+    ctx.check(heldCatcherBackpack(p) == nullptr, "secondary in hand: no catcher");
+    auto* cow = spawnMob(ctx, "minecraft:cow", 2);
+    auto  id  = cow->getOrCreateUniqueID();
+    p.simulateLookAt(cow->getPosition());
+    ctx.check(p.simulateSneaking(), "sneaking");
+    p.simulateInteract(*cow);
+    co_await ctx.ticks(3);
+    ctx.check(capturedMobs(*shared).empty() && mobExists(p, id), "secondary: sneak + use doesn't capture (SB PASS)");
+
+    ctx.give(p, prim, hand);
+    ctx.check(heldCatcherBackpack(p) == shared, "primary in hand: the shared storage's catcher");
+    if (auto* again = static_cast<Mob*>(p.getLevel().fetchEntity(id, false))) p.simulateInteract(*again);
+    co_await ctx.ticks(3);
+    p.simulateStopSneaking();
+    ctx.require(capturedMobs(*shared).size() == 1, "primary captures into the shared storage");
+    auto mobId = capturedMobs(*shared)[0].id;
+
+    // Releasing from a screen opened through the secondary does nothing.
+    struct Reset {
+        Player& p;
+        ~Reset() { ui::MenuManager::get().close(p); }
+    } reset{p};
+    auto releaseFrom = [&](ItemStack const& item) {
+        ctx.give(p, item, hand);
+        ctx.require(ui::BackpackMenu::openFor(p, game::selectedSlot(p)), "open the endpoint in hand");
+        ui::MenuManager::get().forceShown(p);
+        for (auto const& h : net::TabActionRegistry::entries()) {
+            if (h.upgrade == std::string("mob_catcher") && h.handle) {
+                return h.handle(p, UpgradeContext(shared, 0, &p), nlohmann::json{{"release", mobId}});
+            }
+        }
+        return false;
+    };
+    ctx.check(releaseFrom(sec), "release action handled (secondary)");
+    ctx.check(capturedMobs(*shared).size() == 1, "secondary screen: the mob stays captured");
+    ui::MenuManager::get().close(p);
+    co_await ctx.ticks(1);
+    ctx.check(releaseFrom(prim), "release action handled (primary)");
+    ctx.check(capturedMobs(*shared).empty(), "primary screen: released");
+    auto pos = p.getPosition();
+    for (auto* a : p.getDimensionBlockSource().getEntities(AABB{Vec3{pos.x - 6, pos.y - 3, pos.z - 6}, Vec3{pos.x + 6, pos.y + 4, pos.z + 6}})) {
+        if (a && a->getTypeName() == "minecraft:cow") a->despawn();
+    }
 });
 
 } // namespace

@@ -42,6 +42,14 @@ enum class InventoryOrder { MainFirst, InceptedFirst };
 /// `upgradesUseInventoriesOfBackpacksInBackpack` is on: then also the backpacks stored inside it
 /// (slot order), after (main first) or before (incepted first) its own inventory.
 [[nodiscard]] std::vector<std::shared_ptr<game::Backpack>> upgradeInventories(std::shared_ptr<game::Backpack> const& backpack);
+/// SB `InceptionInventoryHandler.insertItem`: offers `item` to `upgradeInventories(backpack)` in
+/// order (each inventory's own hooks apply). Returns how many items were taken (inserted or voided).
+int insertForUpgrades(
+    std::shared_ptr<game::Backpack> const& backpack,
+    core::ItemStackData const&             item,
+    core::AccessContext const&             access,
+    bool                                   simulate = false
+);
 /// The backpacks stored inside `backpack` (slot order; resolved, uuids assigned when missing).
 [[nodiscard]] std::vector<std::shared_ptr<game::Backpack>> subBackpacks(std::shared_ptr<game::Backpack> const& backpack);
 

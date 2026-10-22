@@ -190,6 +190,11 @@ BackpackMenu::BackpackMenu(std::shared_ptr<game::Backpack> backpack, std::option
     if (mSource && mSource->kind == game::ItemLocation::Kind::Inventory) lockedInventorySlot = mSource->slot;
 }
 
+core::ItemStackData BackpackMenu::openedItem(Player& player) const {
+    if (!mSource) return {};
+    return game::ItemConv::toData(game::itemAt(player, *mSource));
+}
+
 int BackpackMenu::pageCount() const {
     return std::max(1, (mBackpack->inventory().size() + kPageSlots - 1) / kPageSlots);
 }

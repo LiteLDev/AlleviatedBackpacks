@@ -100,6 +100,42 @@ ABP_REGISTER_SELFTEST("compacting.recipe_lookup", [](Context& ctx) {
     ctx.check(cfg.compactingUpgrade.filterSlots == 9 && cfg.advancedCompactingUpgrade.filterSlots == 16, "SB filter slots");
 });
 
+// GX-2: SC returns the recipe's remaining items (honey bottles -> glass bottles).
+ABP_REGISTER_SELFTEST("compacting.recipe_remainders", [](Context& ctx) {
+    invalidateCache();
+    auto honey = findCompaction(data("minecraft:honey_bottle", 1), 2);
+    ctx.require(honey.has_value(), "4 honey bottles craft a honey block (2x2)");
+    ctx.check(honey->result.id == "minecraft:honey_block", "-> " + honey->result.id);
+    int bottles = 0;
+    for (auto const& r : honey->remaining) {
+        ctx.info("remaining: " + r.id + " x" + std::to_string(r.count));
+        if (r.id == "minecraft:glass_bottle") bottles += r.count;
+    }
+    ctx.check(bottles == 4, "one craft leaves 4 glass bottles (got " + std::to_string(bottles) + ")");
+    auto iron = findCompaction(data("minecraft:iron_ingot", 1), 3);
+    ctx.check(iron && iron->remaining.empty(), "iron block: no remainders");
+
+    // In a backpack (honey blocks don't uncraft into bottles: Compact Anything).
+    auto bp   = ctx.createBackpack(core::Tier::Iron);
+    int  slot = ctx.installUpgrade(bp, "compacting");
+    setSetting(bp, slot, kCompactAnythingKey, true);
+    (void)bp->inventory().insert(data("minecraft:honey_bottle", 9), kPickup);
+    ctx.check(countOf(*bp, "minecraft:honey_block") == 2 && countOf(*bp, "minecraft:honey_bottle") == 1
+                  && countOf(*bp, "minecraft:glass_bottle") == 8,
+              "2 blocks, 1 bottle left, 8 glass bottles back: "
+                  + counts(*bp, {"minecraft:honey_block", "minecraft:honey_bottle", "minecraft:glass_bottle"}));
+
+    // No room for the remainders: nothing is compacted (SC fitsResultAndRemainingItems).
+    auto full = ctx.createBackpack(core::Tier::Leather); // 27 slots
+    int  s2   = ctx.installUpgrade(full, "compacting");
+    setSetting(full, s2, kCompactAnythingKey, true);
+    for (int i = 0; i < 26; ++i) full->inventory().set(i, data("minecraft:dirt", 64).withCount(64));
+    full->inventory().set(26, data("minecraft:honey_bottle", 3));
+    (void)full->inventory().insert(data("minecraft:honey_bottle", 1), kPickup);
+    ctx.check(countOf(*full, "minecraft:honey_block") == 0 && countOf(*full, "minecraft:honey_bottle") == 4,
+              "no room for the glass bottles: not compacted: " + counts(*full, {"minecraft:honey_block", "minecraft:honey_bottle"}));
+});
+
 ABP_REGISTER_SELFTEST("compacting.advanced_after_insert", [](Context& ctx) {
     auto  bp   = ctx.createBackpack(core::Tier::Iron);
     int   slot = ctx.installUpgrade(bp, "advanced_compacting");

@@ -126,6 +126,11 @@ public:
     /// it is, at least every 2 seconds; it then plays there (and stops when the reports stop).
     /// Placed backpacks need no reports: the service asks `feature/placed` directly.
     void tickPlaced(std::shared_ptr<game::Backpack> const& backpack, int dim, Vec3 const& pos);
+    /// (GX-2) A backpack worn by a non-player entity (a mob that spawned with a jukebox backpack,
+    /// SB `playJukebox` / `wrapper.play(livingEntity)`) reports its wearer, at least every 2
+    /// seconds: the music is attached to that entity and follows it (stops when the reports stop
+    /// or the entity is gone).
+    void tickCarrier(std::shared_ptr<game::Backpack> const& backpack, std::int64_t entity);
 
     // ---- selftests ----------------------------------------------------------------------------
     void setObserver(std::function<void(SoundEvent const&)> fn) { mObserver = std::move(fn); }
@@ -173,9 +178,15 @@ private:
         std::int64_t lastSeen = 0;
     };
     [[nodiscard]] std::optional<Reported> reported(std::string const& uuid) const;
+    struct Carrier {
+        std::int64_t entity   = 0;
+        std::int64_t lastSeen = 0;
+    };
+    [[nodiscard]] std::optional<std::int64_t> reportedCarrier(std::string const& uuid) const;
 
     std::map<Key, Playback>                mPlaybacks;
     std::map<std::string, Reported>        mReported;
+    std::map<std::string, Carrier>         mCarriers;
     ll::event::ListenerPtr                 mTick;
     std::int64_t                           mNow = 0;
     std::function<void(SoundEvent const&)> mObserver;

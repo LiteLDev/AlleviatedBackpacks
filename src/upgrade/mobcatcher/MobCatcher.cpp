@@ -56,6 +56,9 @@
 
 #include "core/Capacity.h"
 #include "core/Codec.h"
+#include "feature/linked/Linked.h"
+#include "ui/menu/BackpackMenu.h"
+#include "ui/menu/MenuManager.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -78,6 +81,38 @@ ABP_REGISTER_CONFIG("mobcatcher", abp::upgrade::mobcatcher::MobCatcherConfig);
 namespace abp::upgrade::mobcatcher {
 
 MobCatcherConfig const& config() { return abp::config::get<MobCatcherConfig>(); }
+
+// ---- linked storage (SB BackpackLinkedStorageResolver / LINKED_MOB_CATCHER) ---------------------------
+
+bool processesGlobalUpgrades(ItemStackBase const& stack) {
+    auto e = linked::endpointOf(stack);
+    if (!e) return true; // not linked: its own storage
+    auto const& service = linked::Service::get();
+    // SB throws for an endpoint that is no longer registered; here it just can't capture.
+    return service.isEndpointMember(e->group, e->endpoint) && service.isPrimaryEndpoint(e->group, e->endpoint);
+}
+
+bool linkedCatcherProjection(ItemStackBase const& stack) {
+    return !stack.isNull() && stack.mUserData && stack.mUserData->contains(kLinkedMobCatcherKey, Tag::Type::Byte)
+        && static_cast<int>((*stack.mUserData)[kLinkedMobCatcherKey]) != 0;
+}
+
+bool refreshLinkedCatcherProjection(ItemStack& stack) {
+    auto e = linked::endpointOf(stack);
+    if (!e) return false;
+    bool has = false;
+    if (processesGlobalUpgrades(stack)) {
+        if (auto uuid = game::backpackUuid(stack); uuid && game::Storage::get().available()) {
+            if (auto bp = game::Storage::get().find(*uuid)) has = bestCatcher(*bp).has_value();
+        }
+    }
+    if (linkedCatcherProjection(stack) == has) return false;
+    auto tag = stack.mUserData ? stack.mUserData->clone() : std::make_unique<CompoundTag>();
+    if (has) tag->putByte(std::string(kLinkedMobCatcherKey), 1);
+    else tag->remove(kLinkedMobCatcherKey);
+    stack.setUserData(std::move(tag));
+    return true;
+}
 
 namespace {
 
@@ -548,6 +583,16 @@ ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
     [](Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
         auto id = data.value("release", std::string{});
         if (id.empty()) return false;
+        // SB MobCatcherHandler.release resolves the screen's backpack stack for global upgrade
+        // processing: opened from a secondary linked endpoint that is the no-op storage, which has
+        // no captured mobs, so nothing happens (no message).
+        if (auto* menu = dynamic_cast<ui::BackpackMenu*>(ui::MenuManager::get().current(player).get())) {
+            auto opened = menu->openedItem(player);
+            if (!opened.empty() && !processesGlobalUpgrades(game::ItemConv::toStack(opened, 1))) {
+                log().info("mob catcher: {} tried to release from a secondary linked endpoint: ignored (SB)", player.getRealName());
+                return true;
+            }
+        }
         auto result = release(player, ctx.backpackPtr(), id);
         if (!result.success && !result.message.empty()) {
             log().info("mob catcher: {} could not release a mob: {}", player.getRealName(), result.message);
@@ -585,6 +630,7 @@ std::unordered_map<std::int64_t, std::int64_t>   gLastUse; ///< player -> tick o
 std::shared_ptr<game::Backpack> heldCatcherBackpackImpl(Player& player, bool* advanced = nullptr) {
     auto const& held = player.getSelectedItem();
     if (held.isNull() || !game::isBackpack(held)) return nullptr;
+    if (!processesGlobalUpgrades(held)) return nullptr; // SB: a secondary endpoint resolves to Noop (PASS)
     auto uuid = game::backpackUuid(held);
     if (!uuid || !game::Storage::get().available()) return nullptr;
     auto bp = game::Storage::get().find(*uuid);
@@ -634,9 +680,25 @@ bool onUseTowardMob(Player& player) {
     return onInteract(player, *actor);
 }
 
+/// SB BackpackItem.inventoryTick for linked endpoints: keeps the LINKED_MOB_CATCHER projection of
+/// the carried endpoint items in step with the group's storage (every 20 ticks here).
+void refreshProjections(Level& level) {
+    if (!game::Storage::get().available()) return;
+    level.forEachPlayer([](Player& player) {
+        if (player.isClientSide()) return true;
+        for (auto const& carried : game::scanBackpacks(player)) {
+            ItemStack stack = game::itemAt(player, carried.where);
+            if (!linked::isEndpoint(stack)) continue;
+            if (refreshLinkedCatcherProjection(stack)) game::setItemAt(player, carried.where, stack);
+        }
+        return true;
+    });
+}
+
 void serve(Level& level) {
     ++gTick;
     gSeenThisTick.clear();
+    if (gTick % 20 == 0) refreshProjections(level);
     if (gPending.empty()) return;
     auto pending = std::move(gPending);
     gPending.clear();

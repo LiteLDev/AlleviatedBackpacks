@@ -20,6 +20,7 @@
 #include "mod/Log.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
+#include "upgrade/inception/Inception.h"
 
 namespace abp::feature::stash {
 
@@ -139,9 +140,16 @@ void putBack(Player& player, Location const& loc, ItemStack const& item) {
 
 bool sameType(core::ItemStackData const& a, core::ItemStackData const& b) { return !a.empty() && !b.empty() && a.id == b.id; }
 
-/// Inserts `item` into the backpack; returns how many went in (or were voided).
+/// Inserts `item` into the backpack; returns how many went in (or were voided). SB `stash` /
+/// `getItemStashable` insert through getInventoryForUpgradeProcessing: with an Inception upgrade
+/// the backpacks stored inside take what doesn't fit (in the upgrade's inventory order).
 int insert(Player* player, game::Backpack& bp, core::ItemStackData const& item, bool simulate) {
     if (item.empty()) return 0;
+    if (auto shared = game::Storage::get().find(bp.uuid()); shared && shared.get() == &bp) {
+        int n = upgrade::inception::insertForUpgrades(shared, item, access(player), simulate);
+        if (!simulate && n > 0) bp.markDirty();
+        return n;
+    }
     auto r = bp.inventory().insert(item, access(player), simulate);
     if (!simulate && (r.inserted > 0 || r.voided > 0)) bp.markDirty();
     return item.count - r.remainder.count;
