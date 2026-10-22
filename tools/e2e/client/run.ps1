@@ -97,10 +97,11 @@ try {
             # Joining the local world sometimes fails with "Connection timed out (Kelp)" and,
             # once it does, keeps failing in that game session: retry with a fresh game.
             for ($launch = 1; ; $launch++) {
+                if ($remote) { Clear-OurServerEntries }
                 Start-Game | Out-Null
                 Wait-GameReady -WithoutMod:($Mode -eq 'remote-vanilla')
                 try {
-                    if ($remote) { Enter-RemoteServer -Attempts 2 } else { Enter-TestWorld -Attempts 2 }
+                    if ($remote) { Enter-RemoteServer -Attempts 1 } else { Enter-TestWorld -Attempts 2 }
                     break
                 } catch {
                     if ($launch -ge 3) { throw }

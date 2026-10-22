@@ -123,6 +123,9 @@ public:
     void setPresentationGate(PresentationGate gate) { mGate = std::move(gate); }
     /// The player's open menu is virtual (shown by an observer, no container screen).
     [[nodiscard]] bool isVirtual(Player const& player) const;
+    /// The player's last `open` was refused by the gate (which already told them why), so callers
+    /// don't add a second, misleading message.
+    [[nodiscard]] bool lastOpenRefused(Player const& player) const;
 
     // ---- observers (additive hook: native renderers such as the client companion) ------------
     struct Observer {
@@ -182,6 +185,7 @@ private:
     std::vector<std::pair<int, Observer>>                      mObservers;
     PresentationGate                                           mGate;
     std::unordered_map<std::int64_t, int>                      mGuarded; ///< NavigationGuard depth per player
+    std::unordered_map<std::int64_t, bool>                     mRefused; ///< last open refused by the gate
     int                                                        mNextVirtualId = 1000;
     int                                                        mNextObserver = 1;
 

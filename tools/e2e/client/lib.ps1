@@ -509,7 +509,14 @@ function Assert-NoErrors {
 function Wait-GameReady([int]$TimeoutSeconds = 180, [switch]$WithoutMod) {
     Set-GameWindowSize
     if ($WithoutMod) {
-        Wait-LogLine '\[LeviLamina\] \d+ mod\(s\) enabled' $TimeoutSeconds | Out-Null
+        # With no mods at all LeviLamina logs "0 mod(s) loaded" and never "enabled"; that early line
+        # is sometimes missed after a game restart, so a running game counts as ready after 90 s.
+        try {
+            Wait-LogLine '\[LeviLamina\] (\d+ mod\(s\) enabled|0 mod\(s\) loaded)' ([Math]::Min(90, $TimeoutSeconds)) | Out-Null
+        } catch {
+            if (-not (Get-GameProcess)) { throw }
+            Write-Step "no LeviLamina mod line in the log; the game is running, continuing"
+        }
     } else {
         $hit = Wait-LogLine "$script:ModName enabled|Failed to (load|enable) mod $script:ModName" $TimeoutSeconds
         if ($hit -notmatch "$script:ModName enabled") { throw "LeviLamina failed to load $($script:ModName): $hit" }
@@ -558,28 +565,45 @@ $script:ExternalServerName = 'ABP-E2E'
 function Get-ExternalServersFile {
     $worlds = Get-WorldsDir
     if (-not $worlds) { throw "game data not found under $(Get-GameDataDir)" }
-    return Join-Path (Split-Path (Split-Path $worlds)) 'minecraftpe\external_servers.txt'
+    return Join-Path (Split-Path $worlds) 'minecraftpe\external_servers.txt' # minecraftWorlds -> com.mojang
 }
 
-# Puts our server first in the Servers tab (the file is restored afterwards).
+# Backs up the game's server list and drops stale entries of ours; Enter-RemoteServer adds the
+# server through the game's "Add server" dialog, Restore-ExternalServers puts the list back.
 function Set-ExternalServer([int]$Port) {
     $file = Get-ExternalServersFile
     New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
     $script:ExternalServersBackup = if (Test-Path $file) { Get-Content $file -Raw } else { $null }
-    # Enter-RemoteServer adds the server through the game's "Add server" dialog (which refuses a
-    # duplicate address/port), so only drop stale entries for this port here; Restore-ExternalServers
-    # puts the original list back afterwards.
-    $keep = @(if ($script:ExternalServersBackup) { $script:ExternalServersBackup -split "`r?`n" | Where-Object { $_ -and $_ -notmatch ":127\.0\.0\.1:$($Port):" } })
-    Set-Content -Path $file -Value $keep -Encoding UTF8
+    Clear-OurServerEntries
     $script:ExternalServerPort = $Port
     Write-Step "external server $script:ExternalServerName -> 127.0.0.1:$Port (added in game; list backed up from $file)"
+}
+
+# Drops our entries from the game's server list (the game must not be running: it rewrites the
+# file from memory when it exits).
+function Clear-OurServerEntries {
+    $file = Get-ExternalServersFile
+    if (-not (Test-Path $file)) { return }
+    $content = Get-Content $file -Raw
+    $keep    = @(Remove-OurServerEntries $content)
+    $removed = @($content -split "`r?`n" | Where-Object { $_ }).Count - $keep.Count
+    if ($removed -le 0) { return }
+    if ($keep.Count -eq 0) { Remove-Item $file -Force } else { Set-Content -Path $file -Value $keep -Encoding UTF8 }
+    Write-Step "removed $removed stale $script:ExternalServerName server entr$(if ($removed -eq 1) { 'y' } else { 'ies' }) from $file"
+}
+
+# The list without our entries (also ones an interrupted run left behind).
+function Remove-OurServerEntries([string]$content) {
+    if (-not $content) { return @() }
+    return @($content -split "`r?`n" | Where-Object { $_ -and $_ -notmatch ":$([regex]::Escape($script:ExternalServerName)):" })
 }
 
 function Restore-ExternalServers {
     if (-not (Get-Variable -Name ExternalServersBackup -Scope Script -ErrorAction SilentlyContinue)) { return }
     $file = Get-ExternalServersFile
-    if ($null -eq $script:ExternalServersBackup) { Remove-Item $file -ErrorAction SilentlyContinue }
-    else { Set-Content -Path $file -Value $script:ExternalServersBackup -NoNewline -Encoding UTF8 }
+    $keep = @(Remove-OurServerEntries $script:ExternalServersBackup)
+    if ($keep.Count -eq 0) { Remove-Item $file -ErrorAction SilentlyContinue }
+    else { Set-Content -Path $file -Value $keep -Encoding UTF8 }
     Remove-Variable -Name ExternalServersBackup -Scope Script
 }
 
@@ -608,6 +632,8 @@ function Enter-RemoteServer([int]$Attempts = 3) {
             Type-Text $text
         }
         & $fill $script:NameField $script:ExternalServerName
+        # The dialog refuses an address/port that is already listed ("already been added"):
+        # Clear-OurServerEntries runs before every game launch, and run.ps1 joins once per launch.
         & $fill $script:AddressField '127.0.0.1'
         & $fill $script:PortField "$script:ExternalServerPort"
         Start-Sleep -Milliseconds 500

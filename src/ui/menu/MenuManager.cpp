@@ -213,7 +213,11 @@ bool MenuManager::open(Player& player, std::shared_ptr<Menu> menu) {
     }
 
     auto presentation = mGate ? mGate(player, *menu) : Presentation::Chest;
-    if (presentation == Presentation::Refuse) return false;
+    if (presentation == Presentation::Refuse) {
+        mRefused[keyOf(player)] = true;
+        return false;
+    }
+    mRefused.erase(keyOf(player));
 
     auto key = keyOf(player);
     // Replacing a menu: close it first (a shown one gets a server-initiated ContainerClose that
@@ -515,6 +519,11 @@ void MenuManager::removeObserver(int id) {
 bool MenuManager::isVirtual(Player const& player) const {
     auto it = mSessions.find(keyOf(player));
     return it != mSessions.end() && it->second->virtualScreen;
+}
+
+bool MenuManager::lastOpenRefused(Player const& player) const {
+    auto it = mRefused.find(keyOf(player));
+    return it != mRefused.end() && it->second;
 }
 
 int MenuManager::containerIdOf(Player const& player) const {
@@ -1332,6 +1341,7 @@ void MenuManager::closeAll() {
 
 void MenuManager::uninstall() {
     closeAll();
+    mRefused.clear();
     auto& bus = ll::event::EventBus::getInstance();
     for (auto& l : mListeners) bus.removeListener(l);
     mListeners.clear();
