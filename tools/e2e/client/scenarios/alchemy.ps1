@@ -102,7 +102,8 @@ $c = Cond-Pos 1 3 0
 Gui-Move $c[0] $c[1]
 Start-Sleep -Milliseconds 500
 Save-Screenshot 'filter-set-keep-active' | Out-Null
-Gui-Click $s[0] $s[1] # cursor back into the storage
+$back = Storage-Pos 20 # an empty slot (clicking slot 9 again would be a double click)
+Gui-Click $back[0] $back[1]
 Tab-Action { Gui-Click $c[0] $c[1] } 'condition toggled'
 Gui-Move ($c[0] + 1) $c[1]
 Start-Sleep -Milliseconds 500
@@ -137,7 +138,9 @@ Save-Screenshot 'advanced-milk-condition' | Out-Null
 Gui-Click $t2[0] $t2[1]
 
 if ((Get-LeviLog -Since $screenMark) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
-Press-Key ESC
+$mark = Get-LogMark
+Press-Key 'E'
+Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 800
 
 # ---- the conditions for real -------------------------------------------------------------------------
@@ -174,14 +177,14 @@ if (-not $ok) { throw "UNDER_WATER: no water breathing: $st" }
 Write-Step "under water -> water breathing: $st"
 Start-Sleep -Seconds 2
 
-# HURT: 12 damage (20 -> 8, below 75%): a healing potion is drunk.
+# HURT: 12 damage (20 -> 8, below 75%): healing potions are drunk until it is no longer below 75%.
 Invoke-Chat '/effect @s clear'
 Invoke-Chat '/damage @s 12'
 $ok = $false
 for ($i = 0; $i -lt 10 -and -not $ok; $i++) {
     Start-Sleep -Seconds 1
     $st = Status-Line
-    $ok = $st -match 'healing=2 '
+    $ok = $st -match 'healing=[012] '
 }
 Save-Screenshot 'hurt-healed' | Out-Null
 if (-not $ok) { throw "HURT: no healing potion used: $st" }

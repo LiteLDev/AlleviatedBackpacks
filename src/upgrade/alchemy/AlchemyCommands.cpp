@@ -92,6 +92,7 @@ void setup(Player& player, CommandOutput& output) {
 void status(Player& player, CommandOutput& output) {
     std::string effects;
     for (auto const& e : player.getAllEffects()) {
+        if (e.mId == 0) continue; // empty entries of the effect table
         if (!effects.empty()) effects += ",";
         effects += std::to_string(e.mId) + ":" + std::to_string(e.mAmplifier);
     }
