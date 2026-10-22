@@ -232,19 +232,24 @@ ABP_REGISTER_SELFTEST("pickup.advanced_match_options", [](Context& ctx) {
     auto  set  = [&](core::Filter f) { setFilter(bp, slot, UpgradeTier::Advanced, f); };
     ctx.check(static_cast<int>(filtering::load(UpgradeContext(bp, slot), UpgradeTier::Advanced).ghosts.size()) == 16, "16 slots");
 
-    // Tag of a ghost item.
+    // Tags (SC): only the selected tag list counts; filter items are ignored in TAGS mode.
     core::Filter tag(filtering::kAdvancedSlots);
     tag.matchBy = core::MatchBy::Tag;
     tag.setGhost(15, data("minecraft:oak_log", 1));
     set(tag);
-    ctx.check(pickup(p, "minecraft:birch_log", 2) == 2, "tag of ghost: birch log is a log");
-    ctx.check(pickup(p, "minecraft:stone", 2) == 0, "tag of ghost: stone is not");
-    // Explicit tags.
-    tag.ghosts.assign(16, {});
-    tag.tags = {"minecraft:logs"};
+    ctx.check(pickup(p, "minecraft:birch_log", 2) == 0, "allow + no tags selected: nothing");
+    tag.addTag("minecraft:logs");
     set(tag);
-    ctx.check(pickup(p, "minecraft:spruce_log", 1) == 1, "explicit tag");
-    ctx.check(pickup(p, "minecraft:dirt", 1) == 0, "explicit tag rejects dirt");
+    ctx.check(pickup(p, "minecraft:spruce_log", 1) == 1, "selected tag");
+    ctx.check(pickup(p, "minecraft:dirt", 1) == 0, "selected tag rejects dirt");
+    // Match all tags.
+    tag.addTag("minecraft:is_food");
+    tag.matchAnyTag = false;
+    set(tag);
+    ctx.check(pickup(p, "minecraft:spruce_log", 1) == 0, "match all: a log is not food");
+    tag.matchAnyTag = true;
+    set(tag);
+    ctx.check(pickup(p, "minecraft:spruce_log", 1) == 1, "match any: a log is a log");
 
     // Namespace.
     core::Filter ns(filtering::kAdvancedSlots);

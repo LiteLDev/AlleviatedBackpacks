@@ -98,6 +98,11 @@ void store(UpgradeContext const& ctx, UpgradeTier tier, core::Filter filter);
 /// upgrade, for the native tab data.
 [[nodiscard]] nlohmann::json tabTexts(Player& player, std::string_view group, bool advanced);
 
+/// Registers the native tab of an upgrade family whose filter is `ctx.settings()["filter"]`
+/// (`registerSettingsFilterTab` with `specFor(group)`, `load`, `store`) plus its tab title and
+/// tooltip (`tabTexts`). Call at static-init time.
+void registerStandardFilterTab(std::string group);
+
 /// The filter editor of an installed upgrade (chest menu: simulated players, selftests): ghost
 /// slots + the shared control row, bound to `ctx.settings()["filter"]` (normalized for `tier`).
 /// "Back" returns to the backpack's upgrades page. Subclasses add buttons to the free control

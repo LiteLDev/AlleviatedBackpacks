@@ -92,32 +92,11 @@ public:
       }) {}
 };
 
-UpgradeTier tierOf(UpgradeContext const& ctx) {
-    auto* type = upgradeFor(ctx.state().item);
-    return type ? type->info().tier : UpgradeTier::Basic;
-}
-
 // Native tab (client: FilterTab "filter" at +3,+24): SC PickupUpgradeTab.
-[[maybe_unused]] bool const kTabRegistered = [] {
-    filtering::registerSettingsFilterTab(filtering::SettingsFilterTab{
-        .upgrade = "pickup",
-        .key     = "filter",
-        .spec    = [](UpgradeContext const& ctx) { return filtering::specFor("pickup", tierOf(ctx)); },
-        .load    = [](UpgradeContext const& ctx) { return filtering::load(ctx, tierOf(ctx)); },
-        .store   = [](UpgradeContext const& ctx, core::Filter const& f) { filtering::store(ctx, tierOf(ctx), f); },
-    });
-    return true;
-}();
+[[maybe_unused]] bool const kTabRegistered = (filtering::registerStandardFilterTab("pickup"), true);
 
 } // namespace
 } // namespace abp::upgrade::pickup
 
 ABP_REGISTER_UPGRADE(abp::upgrade::pickup::PickupUpgrade);
 ABP_REGISTER_UPGRADE(abp::upgrade::pickup::AdvancedPickupUpgrade);
-ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{
-    "pickup",
-    [](Player& player, abp::upgrade::UpgradeContext const& ctx) {
-        auto* type = abp::upgrade::upgradeFor(ctx.state().item);
-        return abp::upgrade::filtering::tabTexts(player, "pickup", type && type->info().tier == abp::upgrade::UpgradeTier::Advanced);
-    },
-});

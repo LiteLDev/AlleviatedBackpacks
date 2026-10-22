@@ -92,30 +92,9 @@ ABP_REGISTER_UPGRADE(abp::upgrade::restock::AdvancedRestockUpgrade);
 
 namespace abp::upgrade::restock {
 namespace {
-UpgradeTier tierOf(UpgradeContext const& ctx) {
-    auto* type = upgradeFor(ctx.state().item);
-    return type ? type->info().tier : UpgradeTier::Basic;
-}
-
-[[maybe_unused]] bool const kTabRegistered = [] {
-    filtering::registerSettingsFilterTab(filtering::SettingsFilterTab{
-        .upgrade = "restock",
-        .key     = "filter",
-        .spec    = [](UpgradeContext const& ctx) { return filtering::specFor("restock", tierOf(ctx)); },
-        .load    = [](UpgradeContext const& ctx) { return filtering::load(ctx, tierOf(ctx)); },
-        .store   = [](UpgradeContext const& ctx, core::Filter const& f) { filtering::store(ctx, tierOf(ctx), f); },
-    });
-    return true;
-}();
+[[maybe_unused]] bool const kTabRegistered = (filtering::registerStandardFilterTab("restock"), true);
 } // namespace
 } // namespace abp::upgrade::restock
-
-ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{
-    "restock",
-    [](Player& player, abp::upgrade::UpgradeContext const& ctx) {
-        return abp::upgrade::filtering::tabTexts(player, "restock", abp::upgrade::restock::tierOf(ctx) == abp::upgrade::UpgradeTier::Advanced);
-    },
-});
 
 
 // ---- selftests -----------------------------------------------------------------------------------

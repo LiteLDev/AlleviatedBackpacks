@@ -194,6 +194,33 @@ TEST(FilterLogic, StorageAndInventoryMatch) {
     EXPECT_FALSE(d.filterByInventory);
 }
 
+TEST(FilterLogic, LegacyGhostTagsKept) {
+    Tags t;
+    // Phase-1 JSON (no "v"): tag mode without tags matched the filter items' tags.
+    Filter old(2);
+    old.matchBy = MatchBy::Tag;
+    old.setGhost(0, item("minecraft:oak_log"));
+    auto j = old.toJson();
+    j.erase("v");
+    j.erase("legacyTags");
+    auto f = Filter::fromJson(j, 2);
+    EXPECT_TRUE(f.legacyGhostTags);
+    EXPECT_TRUE(f.passes(item("minecraft:birch_log"), &t));
+    EXPECT_FALSE(f.passes(item("minecraft:stone"), &t));
+    EXPECT_FALSE(f.isEmpty());
+    // Survives a save; selecting a tag switches to SC semantics.
+    auto g = Filter::fromJson(f.toJson(), 2);
+    EXPECT_TRUE(g.legacyGhostTags);
+    g.addTag("minecraft:stone_like");
+    EXPECT_TRUE(g.passes(item("minecraft:stone"), &t));
+    EXPECT_FALSE(g.passes(item("minecraft:birch_log"), &t));
+    // New filters never use it.
+    Filter n(2, FilterDefaults{.allowList = true});
+    n.matchBy = MatchBy::Tag;
+    n.setGhost(0, item("minecraft:oak_log"));
+    EXPECT_FALSE(Filter::fromJson(n.toJson(), 2).passes(item("minecraft:birch_log"), &t));
+}
+
 TEST(FilterLogic, JsonRoundTripAndDefaults) {
     Filter f(3, FilterDefaults{});
     f.matchAnyTag = false;

@@ -99,30 +99,9 @@ ABP_REGISTER_UPGRADE(abp::upgrade::deposit::AdvancedDepositUpgrade);
 
 namespace abp::upgrade::deposit {
 namespace {
-UpgradeTier tierOf(UpgradeContext const& ctx) {
-    auto* type = upgradeFor(ctx.state().item);
-    return type ? type->info().tier : UpgradeTier::Basic;
-}
-
-[[maybe_unused]] bool const kTabRegistered = [] {
-    filtering::registerSettingsFilterTab(filtering::SettingsFilterTab{
-        .upgrade = "deposit",
-        .key     = "filter",
-        .spec    = [](UpgradeContext const& ctx) { return filtering::specFor("deposit", tierOf(ctx)); },
-        .load    = [](UpgradeContext const& ctx) { return filtering::load(ctx, tierOf(ctx)); },
-        .store   = [](UpgradeContext const& ctx, core::Filter const& f) { filtering::store(ctx, tierOf(ctx), f); },
-    });
-    return true;
-}();
+[[maybe_unused]] bool const kTabRegistered = (filtering::registerStandardFilterTab("deposit"), true);
 } // namespace
 } // namespace abp::upgrade::deposit
-
-ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{
-    "deposit",
-    [](Player& player, abp::upgrade::UpgradeContext const& ctx) {
-        return abp::upgrade::filtering::tabTexts(player, "deposit", abp::upgrade::deposit::tierOf(ctx) == abp::upgrade::UpgradeTier::Advanced);
-    },
-});
 
 
 // ---- selftests -----------------------------------------------------------------------------------

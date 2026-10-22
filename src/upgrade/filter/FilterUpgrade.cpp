@@ -183,31 +183,14 @@ ABP_REGISTER_UPGRADE(abp::upgrade::filter::AdvancedFilterUpgrade);
 
 namespace abp::upgrade::filter {
 namespace {
-UpgradeTier tierOf(UpgradeContext const& ctx) {
-    auto* type = upgradeFor(ctx.state().item);
-    return type ? type->info().tier : UpgradeTier::Basic;
-}
-
-[[maybe_unused]] bool const kTabRegistered = [] {
-    filtering::registerSettingsFilterTab(filtering::SettingsFilterTab{
-        .upgrade = "filter",
-        .key     = "filter",
-        .spec    = [](UpgradeContext const& ctx) { return filtering::specFor("filter", tierOf(ctx)); },
-        .load    = [](UpgradeContext const& ctx) { return filtering::load(ctx, tierOf(ctx)); },
-        .store   = [](UpgradeContext const& ctx, core::Filter const& f) { filtering::store(ctx, tierOf(ctx), f); },
-    });
-    return true;
-}();
+[[maybe_unused]] bool const kTabRegistered = (filtering::registerStandardFilterTab("filter"), true);
 } // namespace
 } // namespace abp::upgrade::filter
 
 ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{
     "filter",
-    [](Player& player, abp::upgrade::UpgradeContext const& ctx) {
-        using namespace abp::upgrade;
-        auto j         = filtering::tabTexts(player, "filter", filter::tierOf(ctx) == UpgradeTier::Advanced);
-        j["direction"] = static_cast<int>(filter::directionOf(ctx));
-        return j;
+    [](Player&, abp::upgrade::UpgradeContext const& ctx) {
+        return nlohmann::json{{"direction", static_cast<int>(abp::upgrade::filter::directionOf(ctx))}};
     },
 });
 ABP_REGISTER_TAB_ACTION(abp::net::TabActionHandler{

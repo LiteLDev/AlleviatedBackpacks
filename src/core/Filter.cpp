@@ -15,9 +15,23 @@ bool Filter::hasOnlyEmptyFilters() const {
 }
 
 bool Filter::isEmpty() const {
-    if (matchBy == MatchBy::Tag) return tags.empty();
+    if (matchBy == MatchBy::Tag) return tags.empty() && (!legacyGhostTags || hasOnlyEmptyFilters());
     return hasOnlyEmptyFilters();
 }
+
+namespace {
+/// Phase-1 tag matching: the item has one of the tags of any filter item.
+bool legacyGhostTagMatch(Filter const& f, ItemStackData const& item, ITagProvider const* tagProvider) {
+    if (!tagProvider) return false;
+    for (auto const& g : f.ghosts) {
+        if (g.empty()) continue;
+        for (auto const& t : tagProvider->tagsOf(g)) {
+            if (tagProvider->hasTag(item, t)) return true;
+        }
+    }
+    return false;
+}
+} // namespace
 
 bool Filter::stackMatchesFilter(ItemStackData const& item, ItemStackData const& filter, ITagProvider const* tagProvider) const {
     if (filter.empty() || item.empty()) return false;
@@ -33,6 +47,7 @@ bool Filter::stackMatchesFilter(ItemStackData const& item, ItemStackData const& 
 }
 
 bool Filter::isTagMatch(ItemStackData const& item, ITagProvider const* tagProvider) const {
+    if (legacyGhostTags && tags.empty()) return legacyGhostTagMatch(*this, item, tagProvider);
     if (matchAnyTag) {
         if (!tagProvider) return false;
         return std::any_of(tags.begin(), tags.end(), [&](std::string const& t) { return tagProvider->hasTag(item, t); });
@@ -52,6 +67,11 @@ bool Filter::matches(ItemStackData const& item, ITagProvider const* tagProvider)
 }
 
 bool Filter::passes(ItemStackData const& item, ITagProvider const* tagProvider) const {
+    if (matchBy == MatchBy::Tag && legacyGhostTags && tags.empty()) {
+        // Phase-1 semantics of a stored tag filter built from items.
+        if (mode == FilterMode::Allow) return (emptyAllowsAll && hasOnlyEmptyFilters()) || isTagMatch(item, tagProvider);
+        return !isTagMatch(item, tagProvider);
+    }
     if (mode == FilterMode::Allow) {
         if (matchBy == MatchBy::Tag) return isTagMatch(item, tagProvider);
         if (hasOnlyEmptyFilters() && emptyAllowsAll) return true;
@@ -185,6 +205,7 @@ nlohmann::json Filter::toJson() const {
         {"anyTag",    matchAnyTag              },
         {"storage",   filterByStorage          },
         {"inventory", filterByInventory        },
+        {"legacyTags", legacyGhostTags         },
         {"ghosts",    std::move(g)             },
         {"tags",      tags                     },
     };
@@ -202,6 +223,7 @@ Filter Filter::fromJson(nlohmann::json const& j, int slots) {
         f.matchAnyTag     = j.value("anyTag", true);
         f.filterByStorage   = j.value("storage", false);
         f.filterByInventory = j.value("inventory", false);
+        f.legacyGhostTags   = j.value("legacyTags", false);
         if (auto it = j.find("ghosts"); it != j.end() && it->is_array()) {
             for (auto const& g : *it) f.ghosts.push_back(ItemStackData::fromJson(g));
         }
@@ -213,6 +235,8 @@ Filter Filter::fromJson(nlohmann::json const& j, int slots) {
     } catch (nlohmann::json::exception const&) {
         f = Filter{}; // wrong field types: default filter
     }
+    // Phase 1 (no version): a tag filter without tags used its filter items' tags.
+    if (j.is_object() && !j.contains("v") && f.matchBy == MatchBy::Tag && f.tags.empty()) f.legacyGhostTags = true;
     if (slots >= 0) f.ghosts.resize(static_cast<std::size_t>(slots));
     return f;
 }
