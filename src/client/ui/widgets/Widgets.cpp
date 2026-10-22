@@ -11,7 +11,18 @@ namespace abp::client::ui {
 
 namespace {
 int buttonIndex(MouseButton b) { return b == MouseButton::Left ? 0 : b == MouseButton::Right ? 1 : 2; }
+
+std::function<void()>& clickSound() {
+    static std::function<void()> fn;
+    return fn;
+}
 } // namespace
+
+void setButtonClickSound(std::function<void()> sound) { clickSound() = std::move(sound); }
+
+void playButtonClick() {
+    if (auto const& fn = clickSound()) fn();
+}
 
 // ---- Button ----------------------------------------------------------------------------------------
 
@@ -26,6 +37,7 @@ void Button::render(Painter& p, float mx, float my, double) {
 bool Button::mouseDown(MouseButton button, float x, float y) {
     if (!hovered(x, y)) return false;
     if (onClick) onClick(buttonIndex(button));
+    playButtonClick();
     return true;
 }
 
@@ -51,6 +63,7 @@ void ToggleButton::render(Painter& p, float mx, float my, double) {
 bool ToggleButton::mouseDown(MouseButton button, float x, float y) {
     if (!hovered(x, y)) return false;
     if (onClick) onClick(buttonIndex(button));
+    playButtonClick();
     return true;
 }
 
@@ -73,7 +86,10 @@ void UpgradeSwitch::render(Painter& p, float mx, float my, double) {
 
 bool UpgradeSwitch::mouseDown(MouseButton button, float x, float y) {
     if (!hovered(x, y)) return false;
-    if (button == MouseButton::Left && onToggle && (!state || state() >= 0)) onToggle();
+    // SC: the switch's click handler ignores the mouse button, and an inactive switch still toggles.
+    (void)button;
+    if (onToggle) onToggle();
+    playButtonClick();
     return true;
 }
 

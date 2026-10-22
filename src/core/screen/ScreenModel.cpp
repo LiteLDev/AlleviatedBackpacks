@@ -119,6 +119,8 @@ json BackpackScreenModel::toJson() const {
         {"size", storageSlots},
         {"slots", itemsJson(slots)},
         {"lim", slotLimits},
+        {"baseLim", baseSlotLimit},
+        {"inacc", inaccessible},
         {"upgrades", upgradesJson(upgrades)},
         {"memory", itemsJson(memory)},
         {"noSort", noSort},
@@ -150,6 +152,8 @@ BackpackScreenModel BackpackScreenModel::fromJson(json const& j) {
     m.slots.resize(static_cast<std::size_t>(m.storageSlots));
     m.slotLimits = value<std::vector<int>>(j, "lim", {});
     m.slotLimits.resize(static_cast<std::size_t>(m.storageSlots), 0);
+    m.baseSlotLimit = value<int>(j, "baseLim", 64);
+    m.inaccessible  = value<std::vector<bool>>(j, "inacc", {});
     m.upgrades    = upgradesFrom(j.value("upgrades", json::array()));
     m.memory      = itemsFrom(j.value("memory", json::array()));
     m.noSort      = value<std::vector<bool>>(j, "noSort", {});
@@ -203,6 +207,8 @@ json makePatch(BackpackScreenModel const& a, BackpackScreenModel const& b) {
         if (!same) p["memory"] = itemsJson(b.memory);
     }
     if (a.noSort != b.noSort) p["noSort"] = b.noSort;
+    if (a.baseSlotLimit != b.baseSlotLimit) p["baseLim"] = b.baseSlotLimit;
+    if (a.inaccessible != b.inaccessible) p["inacc"] = b.inaccessible;
     if (a.noSortColor != b.noSortColor) p["noSortColor"] = b.noSortColor;
     if (a.sortBy != b.sortBy) p["sortBy"] = b.sortBy;
     if (a.title != b.title) p["title"] = b.title;
@@ -256,6 +262,8 @@ bool applyPatch(BackpackScreenModel& m, json const& p) {
         if (auto it = p.find("upgrades"); it != p.end()) m.upgrades = upgradesFrom(*it);
         if (auto it = p.find("memory"); it != p.end()) m.memory = itemsFrom(*it);
         if (auto it = p.find("noSort"); it != p.end()) m.noSort = it->get<std::vector<bool>>();
+        if (auto it = p.find("baseLim"); it != p.end()) m.baseSlotLimit = it->get<int>();
+        if (auto it = p.find("inacc"); it != p.end()) m.inaccessible = it->get<std::vector<bool>>();
         if (auto it = p.find("noSortColor"); it != p.end()) m.noSortColor = it->get<std::uint32_t>();
         if (auto it = p.find("sortBy"); it != p.end()) m.sortBy = it->get<std::string>();
         if (auto it = p.find("title"); it != p.end()) m.title = it->get<std::string>();

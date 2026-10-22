@@ -32,6 +32,7 @@
 #include "client/ui/UiRoot.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "core/screen/CountFormat.h"
+#include "core/screen/SearchFilter.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "mod/Log.h"
@@ -255,6 +256,30 @@ void setLinkedEndpointProvider(LinkedEndpointProvider provider) { gLinkedProvide
 // ---- hover text --------------------------------------------------------------------------------------------
 
 namespace {
+std::string withoutFormatting(std::string_view s) { return core::screen::stripFormatCodes(s); }
+
+/// Backpacks are dyeable items (two-colour tint), so Bedrock adds its "Dyed" hover line; SB's
+/// backpack tooltip has no such line.
+void stripDyedLine(std::string& s) {
+    std::string const dyed = withoutFormatting(getI18n().get("item.dyed", nullptr));
+    if (dyed.empty() || dyed == "item.dyed") return;
+    std::string out;
+    std::size_t start = 0;
+    bool        first = true;
+    while (start <= s.size()) {
+        auto end  = s.find('\n', start);
+        auto line = std::string_view(s).substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (withoutFormatting(line) != dyed) {
+            if (!first) out += '\n';
+            out += line;
+            first = false;
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    s = std::move(out);
+}
+
 void appendLine(std::string& s, std::string const& line) {
     if (!s.empty() && s.back() != '\n') s += '\n';
     s += line;
@@ -327,6 +352,7 @@ void appendLines(::ItemStackBase const& stack, ::Level& level, ::Bedrock::Safety
     if (!level.isClientSide() || !net::serverReady() || stack.isNull()) return;
     auto& s = hovertext.mUnredactedString;
     appendUpgradeLines(stack, s);
+    if (game::backpackTierOf(stack.getTypeName())) stripDyedLine(s); // SB has no "Dyed" line
     // Bedrock passes `true` for every inventory tooltip (it is the "show category" flag there), and
     // has no advanced-tooltips toggle (F3+H): the UUID / linked endpoint lines follow
     // `abp::client::tooltip::advancedTooltips` instead (off by default, like Java).

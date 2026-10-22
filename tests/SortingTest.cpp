@@ -37,8 +37,41 @@ TEST(Sorting, SortByNames) {
         EXPECT_EQ(sortByFromString(toString(by)), by);
     }
     EXPECT_FALSE(sortByFromString("bogus").has_value());
+    // Sophisticated Core: NAME -> MOD -> COUNT -> TAGS -> NAME.
+    EXPECT_EQ(nextSortBy(SortBy::Name), SortBy::Mod);
+    EXPECT_EQ(nextSortBy(SortBy::Mod), SortBy::Count);
+    EXPECT_EQ(nextSortBy(SortBy::Count), SortBy::Tag);
     EXPECT_EQ(nextSortBy(SortBy::Tag), SortBy::Name);
-    EXPECT_EQ(nextSortBy(SortBy::Name), SortBy::Count);
+}
+
+TEST(Sorting, ByDisplayNameIgnoresCase) {
+    std::map<std::string, std::string> names{{"minecraft:a_block", "zebra"}, {"minecraft:b_block", "Apple"}, {"minecraft:c_block", "mango"}};
+    auto              byName = [&](ItemStackData const& i) { return names.at(i.id); };
+    BackpackInventory inv(3);
+    inv.set(0, item("minecraft:a_block", 1));
+    inv.set(1, item("minecraft:c_block", 1));
+    inv.set(2, item("minecraft:b_block", 1));
+    ASSERT_TRUE(sortInventory(inv, comparatorFor(SortBy::Name, nullptr, byName)));
+    EXPECT_EQ(ids(inv), (std::vector<std::string>{"minecraft:b_blockx1", "minecraft:c_blockx1", "minecraft:a_blockx1"}));
+    // Mod: namespace first, then the (case-sensitive) display name.
+    names["other:x"] = "Banana";
+    inv.set(1, item("other:x", 1));
+    ASSERT_TRUE(sortInventory(inv, comparatorFor(SortBy::Mod, nullptr, byName)));
+    EXPECT_EQ(ids(inv), (std::vector<std::string>{"minecraft:b_blockx1", "minecraft:a_blockx1", "other:xx1"}));
+}
+
+TEST(Sorting, ByTagMoreTagsFirstThenNames) {
+    FakeTags tags;
+    tags.map["minecraft:b"] = {"minecraft:z"};
+    tags.map["minecraft:a"] = {"minecraft:y"};
+    tags.map["minecraft:c"] = {"minecraft:q", "minecraft:x"};
+    BackpackInventory inv(4);
+    inv.set(0, item("minecraft:d", 1));
+    inv.set(1, item("minecraft:b", 1));
+    inv.set(2, item("minecraft:a", 1));
+    inv.set(3, item("minecraft:c", 1));
+    ASSERT_TRUE(sortInventory(inv, comparatorFor(SortBy::Tag, &tags)));
+    EXPECT_EQ(ids(inv), (std::vector<std::string>{"minecraft:cx1", "minecraft:ax1", "minecraft:bx1", "minecraft:dx1"}));
 }
 
 TEST(Sorting, ByNameMergesAndOrders) {

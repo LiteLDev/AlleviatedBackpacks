@@ -141,8 +141,8 @@ ABP_REGISTER_SELFTEST("gui.sort_button", [](Context& ctx) -> ll::coro::CoroTask<
     ctx.check(player.mPlayerUIContainer->getItem(0).isNull(), "button gives nothing");
     // Shift-click cycles the mode and saves it on the backpack.
     click(player, slot, true);
-    ctx.check(effective(&player, *bp).sortBy == core::SortBy::Count, "mode -> count");
-    ctx.check(backpackOverrides(*bp).value(kSortBy, "") == "count", "persisted per backpack");
+    ctx.check(effective(&player, *bp).sortBy == core::SortBy::Mod, "mode -> mod (SB order)");
+    ctx.check(backpackOverrides(*bp).value(kSortBy, "") == "mod", "persisted per backpack");
     ctx.check(invCount(player, "minecraft:hopper") == 0, "shift-click gives nothing");
     mm.close(player);
 });
