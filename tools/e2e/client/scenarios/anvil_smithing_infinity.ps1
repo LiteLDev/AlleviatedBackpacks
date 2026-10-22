@@ -153,8 +153,7 @@ $p = Inv-Pos 12; Gui-Click $p[0] $p[1]
 $mark = Get-LogMark; Gui-Click $add[0] $add[1]; Wait-TabAction $mark
 Gui-Move ($t[0] + 30) ($t[1] + 120)
 Start-Sleep -Milliseconds 800
-Save-Screenshot 'smithing-preview' | Out-Null
-Gui-Move $res[0] $res[1]
+Save-Screenshot 'smithing-preview' | Out-NullGui-Move $res[0] $res[1]
 Start-Sleep -Milliseconds 700
 Save-Screenshot 'smithing-result-hover' | Out-Null
 $mark = Get-LogMark

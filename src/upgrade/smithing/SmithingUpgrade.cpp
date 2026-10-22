@@ -21,6 +21,7 @@
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/anvil/StationNative.h"
+#include "upgrade/crafting/Station.h"
 
 namespace abp::upgrade::smithing {
 
@@ -149,6 +150,7 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
 
 bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
     if (!data.is_object()) return false;
+    if (crafting::handleTabOpen(player, ctx, data)) return true;
     auto ref = refFor(ctx);
     if (!ref.valid()) return false;
     auto which = data.value("click", std::string{});
@@ -164,6 +166,12 @@ bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& 
     return ok;
 }
 
+/// SC mergeStackToOpenUpgradeTab: template, base, addition (each with the vanilla slot rules).
+int quickMoveIn(Player& player, UpgradeContext const& ctx, core::ItemStackData const& item) {
+    auto ref = refFor(ctx);
+    return anvil::mergeIntoStation(player, {templateSlot(ref), baseSlot(ref), additionSlot(ref)}, item);
+}
+
 } // namespace
 
 } // namespace abp::upgrade::smithing
@@ -172,6 +180,7 @@ ABP_REGISTER_UPGRADE(abp::upgrade::smithing::SmithingUpgrade);
 
 ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{.upgrade = "smithing", .data = abp::upgrade::smithing::tabData});
 ABP_REGISTER_TAB_ACTION(abp::net::TabActionHandler{.upgrade = "smithing", .handle = abp::upgrade::smithing::tabAction});
+ABP_REGISTER_STATION_TAB(abp::upgrade::crafting::StationTab{.upgradeId = "smithing", .quickMoveIn = abp::upgrade::smithing::quickMoveIn});
 
 ABP_REGISTER_BACKPACK_BUTTON(abp::ui::BackpackButton{
     .id      = "smithing",

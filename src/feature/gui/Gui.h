@@ -28,7 +28,7 @@ struct GuiConfig {
     bool        sneakUseOpensWornBackpack = true;
     /// Defaults of the per-player / per-backpack options below.
     std::string defaultSortBy        = "name"; ///< name | count | mod | tag
-    bool        defaultOpenTabFirst  = true;
+    bool        defaultOpenTabFirst  = false; ///< SC SHIFT_CLICK_INTO_OPEN_TAB_FIRST default
     bool        defaultNotifications = true;
     bool        defaultKeepHotbar    = true;
 };
@@ -37,7 +37,7 @@ struct GuiConfig {
 struct Options {
     core::SortBy sortBy = core::SortBy::Name;
     /// Shift-click on the upgrades page: into the upgrade slots first (true) or storage first.
-    bool openTabFirst = true;
+    bool openTabFirst = false;
     /// Chat feedback (sorted / moved N items) and slot hints in item lore.
     bool notifications = true;
     /// "Move all" buttons leave the hotbar alone.

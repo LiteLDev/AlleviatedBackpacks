@@ -6,6 +6,8 @@
 // Tab actions:
 //   {"click":"left|right|result","button":0|1,"shift":b}   a click on one of the anvil's slots
 //   {"name":"text","default":"client name"}                  the item name box changed
+//   {"tabOpen":bool,"uuid":..}                                the tab opened / closed (shift-click
+//                                                             into the open tab, crafting/Station.h)
 
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
@@ -14,6 +16,7 @@
 #include "ui/menu/MenuManager.h"
 #include "upgrade/anvil/AnvilUpgrade.h"
 #include "upgrade/anvil/StationNative.h"
+#include "upgrade/crafting/Station.h"
 
 namespace abp::upgrade::anvil {
 namespace {
@@ -41,6 +44,7 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
 
 bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
     if (!data.is_object()) return false;
+    if (crafting::handleTabOpen(player, ctx, data)) return true;
     auto ref = refFor(ctx);
     if (!ref.valid()) return false;
     if (auto it = data.find("name"); it != data.end()) {
@@ -62,8 +66,17 @@ bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& 
     return ok;
 }
 
+/// SC mergeStackToOpenUpgradeTab: the anvil's two inputs (both take anything), stacks of the
+/// same item first, then empty slots.
+int quickMoveIn(Player& player, UpgradeContext const& ctx, core::ItemStackData const& item) {
+    auto ref = refFor(ctx);
+    return mergeIntoStation(player, {leftSlot(ref), rightSlot(ref)}, item);
+}
+
 } // namespace
 } // namespace abp::upgrade::anvil
+
+ABP_REGISTER_STATION_TAB(abp::upgrade::crafting::StationTab{.upgradeId = "anvil", .quickMoveIn = abp::upgrade::anvil::quickMoveIn});
 
 ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{.upgrade = "anvil", .data = abp::upgrade::anvil::tabData});
 ABP_REGISTER_TAB_ACTION(abp::net::TabActionHandler{.upgrade = "anvil", .handle = abp::upgrade::anvil::tabAction});

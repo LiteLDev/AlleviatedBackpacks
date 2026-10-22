@@ -6,6 +6,7 @@
 #include "mc/world/item/enchanting/EnchantUtils.h"
 #include "mc/world/item/enchanting/EnchantmentInstance.h"
 
+#include "feature/gui/Gui.h"
 #include "game/ItemConv.h"
 #include "selftest/SelfTest.h"
 #include "upgrade/anvil/AnvilLogic.h"
@@ -114,6 +115,39 @@ ABP_REGISTER_SELFTEST("anvil.native_too_expensive", [](Context& ctx) {
     ctx.check(anvil()["result"].is_null(), "no result to take");
     setLevel(p, 100);
     ctx.check(!ns.tab(slot, {{"click", "result"}, {"button", 0}}) && ns.cursor().isNull(), "can't be taken in survival");
+});
+
+ABP_REGISTER_SELFTEST("anvil.native_shift_click_into_open_tab", [](Context& ctx) {
+    auto& p    = ctx.player();
+    auto  bp   = ctx.createBackpack(core::Tier::Leather);
+    int   slot = ctx.installUpgrade(bp, "anvil");
+    NativeScope ns(ctx, p, bp);
+    auto        anvil = [&] { return ns.tabData(slot)["anvil"]; };
+    ctx.check(!feature::gui::effective(&p, *bp).openTabFirst, "SC default: shift-click into the open tab is off");
+    ctx.require(ctx.give(p, make("minecraft:iron_sword"), 9) == 9, "give sword");
+    ctx.require(ctx.give(p, make("minecraft:iron_ingot", 4), 10) == 10, "give ingots");
+    ns.tab(slot, {{"tabOpen", true}, {"uuid", bp->uuid()}});
+    auto session = net::nativeSession(p);
+    auto shift   = [&](int inv) {
+        return net::handleScreenAction(p, {{"session", session}, {"action", "click"}, {"area", "inventory"}, {"index", inv}, {"shift", true}});
+    };
+    // Off: the storage first.
+    shift(9);
+    ctx.check(bp->inventory().at(0).id == "minecraft:iron_sword" && anvil()["left"].is_null(), "setting off: into the storage");
+    bp->inventory().set(0, {});
+    ctx.give(p, make("minecraft:iron_sword"), 9);
+    // On: the open anvil tab first (first input, then the second).
+    feature::gui::setPlayerOption(p, feature::gui::kOpenTabFirst, nlohmann::json(true));
+    shift(9);
+    shift(10);
+    ctx.check(!anvil()["left"].is_null() && !anvil()["right"].is_null(), "setting on: sword and ingots into the anvil: " + anvil().dump());
+    ctx.check(bp->inventory().at(0).empty(), "nothing into the storage");
+    // Closed tab: back to the storage.
+    ns.tab(slot, {{"tabOpen", false}, {"uuid", bp->uuid()}});
+    ctx.give(p, make("minecraft:stone", 3), 11);
+    shift(11);
+    ctx.check(bp->inventory().at(0).id == "minecraft:stone", "tab closed: into the storage");
+    feature::gui::setPlayerOption(p, feature::gui::kOpenTabFirst, std::nullopt);
 });
 
 } // namespace

@@ -18,6 +18,7 @@
 
 #include "client/Client.h"
 #include "client/ui/screen/Tabs.h"
+#include "client/ui/tabs/crafting/StationWidgets.h"
 #include "client/ui/widgets/Widgets.h"
 #include "upgrade/anvil/StationTab.h"
 
@@ -120,6 +121,8 @@ public:
         mLeftKey           = leftKey();
         mDefaultName       = mLeft.isNull() ? std::string{} : mLeft.getHoverName();
         if (!mLeft.isNull() && mName.empty()) adoptLeftName();
+        // SC: shift-clicks go into the open tab (crafting/Station.h).
+        ::abp::client::ui::station::reportTabOpen(ctx, widgets);
         return {kWidth, kHeight};
     }
 

@@ -395,7 +395,7 @@ struct MainOption {
     bool        def;
 };
 constexpr MainOption kMainOptions[] = {
-    {"shiftClickIntoOpenTab", feature::gui::kOpenTabFirst, true},
+    {"shiftClickIntoOpenTab", feature::gui::kOpenTabFirst, false}, // SC default: off
     {"keepTabOpen", "keepTabOpen", true},
     {"keepSearchPhrase", "keepSearchPhrase", false},
 };

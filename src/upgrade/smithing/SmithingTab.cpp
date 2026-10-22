@@ -16,9 +16,11 @@
 
 #include "client/Client.h"
 #include "client/ui/screen/Tabs.h"
+#include "client/ui/tabs/crafting/StationWidgets.h"
 #include "client/ui/widgets/Widgets.h"
 #include "upgrade/anvil/StationTab.h"
 #include "upgrade/smithing/ArmorStandPreview.h"
+#include "upgrade/smithing/SlotSilhouettes.h"
 
 namespace abp::upgrade::smithing::client {
 namespace {
@@ -41,28 +43,6 @@ TemplateKind kindOf(ItemStack const& s) {
     return TemplateKind::Other;
 }
 
-/// Example items shown faded in an empty slot, one after the other (SC CyclingSlotBackground:
-/// 30 ticks per icon).
-class Cycler {
-public:
-    void set(std::vector<char const*> const& ids) {
-        if (ids == mIds) return;
-        mIds = ids;
-        mStacks.clear();
-        for (auto const* id : ids) mStacks.push_back(game::ItemConv::make(id, 1));
-    }
-    void draw(ui::Painter& p, float x, float y, double time) const {
-        if (mStacks.empty()) return;
-        auto i = static_cast<std::size_t>(std::floor(time / 1.5)) % mStacks.size();
-        if (mStacks[i].isNull()) return;
-        p.item(mStacks[i], x, y, 1, 0.3f);
-    }
-
-private:
-    std::vector<char const*> mIds;
-    std::vector<ItemStack>   mStacks;
-};
-
 class SmithingTab final : public ui::NativeTab {
 public:
     Size build(ui::TabContext const& ctx, ui::Rect area, ui::WidgetGroup& widgets) override {
@@ -79,12 +59,12 @@ public:
             return s;
         };
         auto& templ        = addSlot(area.x + 4, &mTemplate, "template");
-        templ.emptyIcon    = [this](ui::Painter& p, float x, float yy, double t) { mTemplateIcons.draw(p, x, yy, t); };
+        templ.emptyIcon    = [](ui::Painter& p, float x, float yy, double t) { silhouette::drawCycle(p, silhouette::kTemplateCycle, x, yy, t); };
         templ.emptyTooltip = [] {
             return std::vector<ui::TooltipLine>{{ctr("abp.smithing.missing_template", "Add Smithing Template"), 0xFFFFFF}};
         };
         auto& base        = addSlot(area.x + 22, &mBase, "base");
-        base.emptyIcon    = [this](ui::Painter& p, float x, float yy, double t) { mBaseIcons.draw(p, x, yy, t); };
+        base.emptyIcon    = [this](ui::Painter& p, float x, float yy, double t) { silhouette::drawCycle(p, baseCycle(), x, yy, t); };
         base.emptyTooltip = [this] {
             switch (kindOf(mTemplate)) {
             case TemplateKind::Netherite:
@@ -96,7 +76,7 @@ public:
             }
         };
         auto& addition        = addSlot(area.x + 40, &mAddition, "addition");
-        addition.emptyIcon    = [this](ui::Painter& p, float x, float yy, double t) { mAdditionIcons.draw(p, x, yy, t); };
+        addition.emptyIcon    = [this](ui::Painter& p, float x, float yy, double t) { silhouette::drawCycle(p, additionCycle(), x, yy, t); };
         addition.emptyTooltip = [this] {
             switch (kindOf(mTemplate)) {
             case TemplateKind::Netherite:
@@ -109,6 +89,8 @@ public:
         };
         addSlot(area.x + kWidth - 2 - 3 - 18, &mResult, "result");
         mArea = area;
+        // SC: shift-clicks go into the open tab (crafting/Station.h).
+        ::abp::client::ui::station::reportTabOpen(ctx, widgets);
         return {kWidth, kHeight};
     }
 
@@ -145,38 +127,29 @@ private:
         mBase         = stackFrom(s.value("base", nlohmann::json()));
         mAddition     = stackFrom(s.value("addition", nlohmann::json()));
         mResult       = stackFrom(s.value("result", nlohmann::json()));
-        mTemplateIcons.set({"minecraft:sentry_armor_trim_smithing_template", "minecraft:netherite_upgrade_smithing_template"});
+    }
+
+    /// SmithingTemplateItem.getBaseSlotEmptyIcons / getAdditionalSlotEmptyIcons (none without a template).
+    [[nodiscard]] std::vector<silhouette::Art const*> const& baseCycle() const {
+        static std::vector<silhouette::Art const*> const none;
         switch (kindOf(mTemplate)) {
         case TemplateKind::Netherite:
-            mBaseIcons.set(
-                {"minecraft:diamond_helmet",
-                 "minecraft:diamond_sword",
-                 "minecraft:diamond_chestplate",
-                 "minecraft:diamond_pickaxe",
-                 "minecraft:diamond_leggings",
-                 "minecraft:diamond_axe",
-                 "minecraft:diamond_boots",
-                 "minecraft:diamond_hoe",
-                 "minecraft:diamond_shovel"}
-            );
-            mAdditionIcons.set({"minecraft:netherite_ingot"});
-            break;
+            return silhouette::kNetheriteBaseCycle;
         case TemplateKind::Trim:
-            mBaseIcons.set({"minecraft:iron_helmet", "minecraft:iron_chestplate", "minecraft:iron_leggings", "minecraft:iron_boots"});
-            mAdditionIcons.set(
-                {"minecraft:iron_ingot",
-                 "minecraft:redstone",
-                 "minecraft:lapis_lazuli",
-                 "minecraft:quartz",
-                 "minecraft:diamond",
-                 "minecraft:emerald",
-                 "minecraft:amethyst_shard"}
-            );
-            break;
+            return silhouette::kTrimBaseCycle;
         default:
-            mBaseIcons.set({});
-            mAdditionIcons.set({});
-            break;
+            return none;
+        }
+    }
+    [[nodiscard]] std::vector<silhouette::Art const*> const& additionCycle() const {
+        static std::vector<silhouette::Art const*> const none;
+        switch (kindOf(mTemplate)) {
+        case TemplateKind::Netherite:
+            return silhouette::kNetheriteAdditionCycle;
+        case TemplateKind::Trim:
+            return silhouette::kTrimAdditionCycle;
+        default:
+            return none;
         }
     }
 
@@ -188,7 +161,6 @@ private:
     std::function<void(nlohmann::json)> mSend;
     ui::Rect                            mArea;
     ItemStack                           mTemplate, mBase, mAddition, mResult;
-    Cycler                              mTemplateIcons, mBaseIcons, mAdditionIcons;
 };
 
 } // namespace
