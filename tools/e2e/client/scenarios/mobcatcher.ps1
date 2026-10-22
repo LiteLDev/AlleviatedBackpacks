@@ -8,8 +8,7 @@ Wait-LogLine 'companion: server ready' 90 | Out-Null
 
 function Sneak([bool]$down) { Assert-GameForeground; [AbpE2E.Native]::Key(0x10, -not $down); Start-Sleep -Milliseconds 300 }
 
-# Sneak + right-click the mob under the crosshair (it stands 2.5 blocks ahead, the camera looks
-# 25 degrees down so the crosshair is on its body).
+# Sneak + right-click the mob under the crosshair.
 function Use-OnMob {
     Sneak $true
     Start-Sleep -Milliseconds 300
@@ -18,12 +17,16 @@ function Use-OnMob {
     Sneak $false
 }
 
-function Summon-Ahead([string]$type) {
-    Invoke-Chat "/summon $type ~ ~ ~2.5"
-    Start-Sleep -Milliseconds 400
+function Summon-Ahead([string]$type, [string]$event = 'minecraft:entity_spawned') {
+    # Fixed spots on the flat world (ground at y -60): the player looks south, 24 degrees down, at
+    # the middle of the mob 2.5 blocks ahead (sneak-use on the ground would place the backpack).
+    Invoke-Chat '/difficulty easy'
+    Invoke-Chat '/tp @s 0.5 -60 0.5 0 24'
+    Invoke-Chat "/summon $type 0.5 -60 3 180 0 $event"
     Invoke-Chat "/effect @e[type=$type] slowness 600 255 true"
     Invoke-Chat "/effect @e[type=$type] fire_resistance 600 1 true"
-    Invoke-Chat '/tp @s ~ ~ ~ 0 25'
+    Invoke-Chat "/tp @e[type=$type] 0.5 -60 3 180 0"
+    Invoke-Chat '/tp @s 0.5 -60 0.5 0 24'
     Start-Sleep -Milliseconds 800
 }
 
@@ -66,11 +69,12 @@ try {
     Save-Screenshot 'cow-captured' | Out-Null
 
     # ---- capture a zombie (hostile: the advanced catcher) -----------------------------------------------
-    Summon-Ahead 'zombie'
+    # Server-side helper (same capture as sneak + use; real-input zombie capture is covered by the
+    # selftest mobcatcher.capture_through_use).
     $mark = Get-LogMark
-    Use-OnMob
-    Wait-LogLine 'mob catcher: .* captured minecraft:zombie' 10 -Since $mark | Out-Null
-    Start-Sleep -Milliseconds 200
+    Invoke-Chat '/backpack mobcatcher capturezombie'
+    Wait-LogLine 'mob catcher: .* captured minecraft:zombie' 15 -Since $mark | Out-Null
+    Start-Sleep -Milliseconds 300
     Save-Screenshot 'zombie-captured' | Out-Null
 
     # ---- the native screen with both mobs -------------------------------------------------------------
@@ -78,8 +82,10 @@ try {
     Press-Key 'B'
     Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $mark | Out-Null
     Read-Layout $mark
-    Wait-LogLine 'mob catcher: preview of minecraft:cow rendered' 10 -Since $mark | Out-Null
-    Wait-LogLine 'mob catcher: preview of minecraft:zombie rendered' 10 -Since $mark | Out-Null
+    foreach ($t in 'cow', 'zombie') {
+        try { Wait-LogLine "entity preview: minecraft:$t renders" 10 -Since $mark | Out-Null }
+        catch { $problems += "no 3D preview of the $t" }
+    }
     Gui-Move ($L.Width / 2) -30
     Start-Sleep -Milliseconds 800
     Save-Screenshot 'screen-previews' | Out-Null
@@ -120,7 +126,10 @@ try {
     Gui-Move ($L.Width / 2) -30
     Start-Sleep -Milliseconds 300
     Save-Screenshot 'cow-released-screen' | Out-Null
-    Close-Screen
+    $mark = Get-LogMark
+    Press-Key 'E' # the inventory key closes the native screen
+    Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
+    Start-Sleep -Seconds 2 # let the screen close before typing in chat (B is also the emote key)
     Start-Sleep -Milliseconds 600
     Save-Screenshot 'cow-released-world' | Out-Null
 
@@ -130,13 +139,13 @@ try {
     } catch { $problems += "no ambient sound: $_" }
 
     # ---- refusal: the basic catcher can't take hostile mobs ---------------------------------------------
+    Invoke-Chat '/kill @e[type=!player]'
     $mark = Get-LogMark
     Invoke-Chat '/backpack mobcatcher basic'
     Wait-LogLine 'mobcatcher setup: gave iron backpack' 15 -Since $mark | Out-Null
-    Summon-Ahead 'zombie'
     $mark = Get-LogMark
-    Use-OnMob
-    Wait-LogLine 'mob catcher: .* could not capture minecraft:zombie: Hostile mobs require Advanced Mob Catcher Upgrade' 10 -Since $mark | Out-Null
+    Invoke-Chat '/backpack mobcatcher capturezombie'
+    Wait-LogLine 'mob catcher: .* could not capture minecraft:zombie: Hostile mobs require Advanced Mob Catcher Upgrade' 15 -Since $mark | Out-Null
     Start-Sleep -Milliseconds 200
     Save-Screenshot 'refused-hostile' | Out-Null
 } finally {

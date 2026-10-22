@@ -65,13 +65,15 @@ void saveCapturedMobs(game::Backpack& backpack, std::vector<CapturedMob> const& 
 /// `getBestUpgrade`). Disabled-by-server types (admin type gate) don't count.
 [[nodiscard]] std::optional<bool> bestCatcher(game::Backpack const& backpack);
 
+/// The backpack in the player's hand if it has a mob catcher (`advanced` receives the tier).
+[[nodiscard]] std::shared_ptr<game::Backpack> heldCatcherBackpack(Player& player, bool* advanced = nullptr);
+
 /// True if `actor` counts as hostile for slot cost and tier rules (SB `isHostile`).
 [[nodiscard]] bool isHostile(Actor const& actor);
 
 struct CaptureResult {
     bool        success = false;
-    std::string message;              ///< localized for the player ("" when nothing applies)
-    std::vector<std::string> params;  ///< translatable params (`%entity.cow.name`) for `message`
+    std::string message; ///< localized for the player ("" when nothing applies)
 };
 
 /// Captures `target` into `backpack` (SB `capture`); `advanced` selects the tier rules. Sends no

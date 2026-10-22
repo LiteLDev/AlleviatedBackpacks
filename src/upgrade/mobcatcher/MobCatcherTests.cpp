@@ -15,6 +15,9 @@
 #include "mc/world/level/BlockSource.h"
 #include "mc/world/level/Level.h"
 #include "mc/world/level/Spawner.h"
+#include "mc/world/phys/HitResult.h"
+#include "mc/world/phys/HitResultType.h"
+#include "mc/scripting/modules/minecraft/ScriptFacing.h"
 
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
@@ -122,7 +125,7 @@ ABP_REGISTER_SELFTEST("mobcatcher.capture_cow", [](Context& ctx) -> ll::coro::Co
     auto  id  = cow->getOrCreateUniqueID();
     auto  r   = capture(p, bp, *cow, false);
     ctx.require(r.success, "captured: " + r.message);
-    ctx.check(r.message.find("Captured") != std::string::npos && r.params.size() == 1 && r.params[0] == "%entity.cow.name", "message + name param");
+    ctx.check(r.message == "Captured Cow", "message names the mob: " + r.message);
     auto mobs = capturedMobs(*bp);
     ctx.require(mobs.size() == 1, "one mob stored");
     auto const& m = mobs[0];
@@ -263,7 +266,7 @@ ABP_REGISTER_SELFTEST("mobcatcher.release", [](Context& ctx) -> ll::coro::CoroTa
 
     auto r = release(p, bp, mobs[0].id);
     ctx.require(r.success, "released: " + r.message);
-    ctx.check(r.params.size() == 1 && r.params[0] == "Bessie", "message names the mob");
+    ctx.check(r.message == "Released Bessie", "message names the mob: " + r.message);
     ctx.check(capturedMobs(*bp).empty() && !bp->inventory().isSlotBlocked(0), "mob slots free again");
     int  cows = 0;
     auto pos  = p.getPosition();
@@ -320,5 +323,37 @@ ABP_REGISTER_SELFTEST("mobcatcher.native_screen", [](Context& ctx) -> ll::coro::
     ctx.check(capturedMobs(*bp).empty(), "released through the screen");
 });
 
+} // namespace
+} // namespace abp::upgrade::mobcatcher
+
+namespace abp::upgrade::mobcatcher {
+namespace {
+/// Bedrock clients send no entity interaction for mobs without one (zombies): their sneak-use hits
+/// the block behind the mob. The mob in the line of sight is captured instead (and no backpack is
+/// placed).
+ABP_REGISTER_SELFTEST("mobcatcher.capture_through_use", [](Context& ctx) -> ll::coro::CoroTask<> {
+    co_await groundPlayer(ctx);
+    auto&           p = static_cast<SimulatedPlayer&>(ctx.player());
+    DifficultyGuard difficulty(p.getLevel());
+    auto            bp = ctx.createBackpack(Tier::Netherite);
+    install(ctx, bp, kAdvancedId);
+    int hand = p.getSelectedItemSlot();
+    ctx.give(p, ctx.backpackItem(*bp), hand);
+    auto* zombie = spawnMob(ctx, "minecraft:zombie", 2.5f);
+    auto  id     = zombie->getOrCreateUniqueID();
+    auto  zp     = zombie->getPosition();
+    p.simulateLookAt(Vec3{zp.x, zp.y + 0.8f, zp.z});
+    ctx.check(p.simulateSneaking(), "sneaking");
+    co_await ctx.ticks(1);
+    auto hit = p.traceRay(5.f, true, true);
+    ctx.require(hit.mType == HitResultType::Entity, "the zombie is in the line of sight");
+    BlockPos ground{static_cast<int>(std::floor(zp.x)), static_cast<int>(std::floor(zp.y)) - 1, static_cast<int>(std::floor(zp.z))};
+    p.simulateUseItemInSlotOnBlock(hand, ground, ScriptModuleMinecraft::ScriptFacing::Up, Vec3{0.5f, 1.f, 0.5f});
+    co_await ctx.ticks(3);
+    p.simulateStopSneaking();
+    ctx.check(capturedMobs(*bp).size() == 1, "captured through the use on the block behind");
+    ctx.check(!mobExists(p, id), "zombie removed");
+    ctx.check(game::isBackpack(p.getSelectedItem()), "the backpack is still in the hand (not placed)");
+});
 } // namespace
 } // namespace abp::upgrade::mobcatcher

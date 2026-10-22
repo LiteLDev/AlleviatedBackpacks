@@ -5,6 +5,7 @@
 #include "upgrade/mobcatcher/MobCatcher.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <random>
 #include <set>
@@ -12,6 +13,8 @@
 
 #include "ll/api/command/CommandHandle.h"
 #include "ll/api/event/EventBus.h"
+#include "ll/api/event/player/PlayerInteractBlockEvent.h"
+#include "ll/api/event/player/PlayerUseItemEvent.h"
 #include "ll/api/event/world/ServerLevelTickEvent.h"
 #include "ll/api/memory/Hook.h"
 #include "ll/api/service/Bedrock.h"
@@ -25,6 +28,7 @@
 #include "mc/network/packet/TextPacket.h"
 #include "mc/network/packet/TextPacketPayload.h"
 #include "mc/network/packet/TextPacketType.h"
+#include "mc/locale/I18n.h"
 #include "mc/server/commands/CommandOrigin.h"
 #include "mc/server/commands/CommandOutput.h"
 #include "mc/world/actor/Actor.h"
@@ -42,6 +46,8 @@
 #include "mc/world/level/BlockPos.h"
 #include "mc/world/level/BlockSource.h"
 #include "mc/world/level/Level.h"
+#include "mc/world/level/Spawner.h"
+#include "mc/world/actor/ActorDefinitionIdentifier.h"
 #include "mc/world/level/dimension/Dimension.h"
 #include "mc/world/phys/AABB.h"
 #include "mc/world/phys/HitResult.h"
@@ -111,9 +117,29 @@ std::string entityNameKey(std::string const& type) {
     return "entity." + type + ".name";
 }
 
-/// The mob's name for messages: its custom name, else the client-translated type name.
-std::string nameParam(CapturedMob const& mob) {
-    return mob.displayName.empty() ? "%" + entityNameKey(mob.entityType) : mob.displayName;
+/// The mob's name for messages (SB getCapturedMobDisplayName): its custom name, else the entity
+/// type's name from the game's language files ("Cow"), else the id made readable.
+std::string mobName(CapturedMob const& mob) {
+    if (!mob.displayName.empty()) return mob.displayName;
+    auto key = entityNameKey(mob.entityType);
+    try {
+        auto s = getI18n().get(key, nullptr);
+        if (!s.empty() && s != key) return s;
+    } catch (...) {
+    }
+    auto        id = mob.entityType.substr(mob.entityType.find(':') + 1);
+    std::string out;
+    bool        upper = true;
+    for (char c : id) {
+        if (c == '_') {
+            out += ' ';
+            upper = true;
+        } else {
+            out += upper ? static_cast<char>(std::toupper(static_cast<unsigned char>(c))) : c;
+            upper = false;
+        }
+    }
+    return out;
 }
 
 void playSound(Player& player, Vec3 const& at, std::string const& name, float volume, float pitch) {
@@ -147,7 +173,7 @@ void playMobCatcherSound(Player& player, std::string const& name, float volume, 
 
 CaptureResult fail(Player& player, std::string text) {
     playMobCatcherSound(player, "note.bass", 0.7f, 0.8f);
-    return {false, std::move(text), {}};
+    return {false, std::move(text)};
 }
 
 // ---- entity data for the client preview -----------------------------------------------------------
@@ -345,10 +371,6 @@ void captureEffect(Player& player, Vec3 const& at) {
     auto& level = player.getLevel();
     auto& dim   = player.getDimension();
     level.spawnParticleEffect("minecraft:death_explosion_emitter", at, &dim);
-    for (int i = 0; i < 6; ++i) {
-        Vec3 p{at.x + (randomFloat() - 0.5f) * 0.5f, at.y + (randomFloat() - 0.5f) * 0.5f, at.z + (randomFloat() - 0.5f) * 0.5f};
-        level.spawnParticleEffect("minecraft:portal_reverse_particle", p, &dim);
-    }
     playSound(player, at, "random.pop", 0.7f, 0.7f + (randomFloat() - 0.5f) * 0.16f);
 }
 
@@ -550,7 +572,7 @@ std::set<std::pair<std::int64_t, std::int64_t>> gSeenThisTick;
 bool                                             gInstalled = false;
 
 /// The held backpack and its best catcher, if the player can capture with it.
-std::shared_ptr<game::Backpack> heldCatcherBackpack(Player& player, bool* advanced = nullptr) {
+std::shared_ptr<game::Backpack> heldCatcherBackpackImpl(Player& player, bool* advanced = nullptr) {
     auto const& held = player.getSelectedItem();
     if (held.isNull() || !game::isBackpack(held)) return nullptr;
     auto uuid = game::backpackUuid(held);
@@ -569,10 +591,30 @@ std::shared_ptr<game::Backpack> heldCatcherBackpack(Player& player, bool* advanc
 bool onInteract(Player& player, Actor& target) {
     if (!gInstalled || player.isClientSide() || !player.isSneaking()) return false;
     if (!Mob::tryGetFromEntity(target.getEntityContext(), false)) return false; // SB: LivingEntity only
-    if (!heldCatcherBackpack(player)) return false;
+    if (!heldCatcherBackpackImpl(player)) return false;
     auto key = std::make_pair(player.getOrCreateUniqueID().rawID, target.getOrCreateUniqueID().rawID);
     if (gSeenThisTick.insert(key).second) gPending.push_back({key.first, key.second});
     return true;
+}
+
+/// Bedrock clients only send an entity interaction for mobs that have one (a cow does, a zombie
+/// doesn't); for the others a sneak-use goes to the block behind the mob (or to the item, in the
+/// air). Java fires the interaction for every living entity: a mob in the player's line of sight
+/// within reach takes the use here instead (and the backpack is not placed / opened).
+bool onUseTowardMob(Player& player) {
+    if (!gInstalled || player.isClientSide() || !player.isSneaking() || !heldCatcherBackpackImpl(player)) return false;
+    constexpr float kReach = 5.0f; // Bedrock's entity pick range (creative); survival picks up to 3
+    auto            hit    = player.traceRay(kReach, true, true);
+    if (hit.mType != HitResultType::Entity) {
+        auto v = player.getViewVector();
+        log().info("mob catcher: {} sneak-used a catcher backpack with no mob in sight (hit {}, view {:.2f},{:.2f},{:.2f})", player.getRealName(), static_cast<int>(hit.mType), v.x, v.y, v.z);
+        return false;
+    }
+    auto actor = hit.mEntity.tryUnwrap();
+    if (!actor || actor.as_ptr() == &player) return false;
+    float range = player.isCreative() ? 5.0f : 3.0f;
+    if (player.getHeadPos().distanceTo(hit.mPos) > range + 0.01f) return false;
+    return onInteract(player, *actor);
 }
 
 void serve(Level& level) {
@@ -585,7 +627,7 @@ void serve(Level& level) {
         auto* target = level.fetchEntity(ActorUniqueID{job.target}, false);
         if (!player || !target) continue;
         bool advanced = false;
-        auto bp       = heldCatcherBackpack(*player, &advanced);
+        auto bp       = heldCatcherBackpackImpl(*player, &advanced);
         if (!bp) continue;
         try {
             auto result = capture(*player, bp, *target, advanced);
@@ -627,8 +669,20 @@ class MobCatcherModule {
 public:
     void install() {
         McPlayerInteractHook::hook();
-        mTick = ll::event::EventBus::getInstance().emplaceListener<ll::event::ServerLevelTickEvent>(
-            [](ll::event::ServerLevelTickEvent& ev) { serve(ev.level()); }
+        auto& bus = ll::event::EventBus::getInstance();
+        mTick     = bus.emplaceListener<ll::event::ServerLevelTickEvent>([](ll::event::ServerLevelTickEvent& ev) { serve(ev.level()); });
+        // Before the placed-backpack (High) and open-on-use handlers.
+        mUseOn = bus.emplaceListener<ll::event::PlayerInteractBlockEvent>(
+            [](ll::event::PlayerInteractBlockEvent& ev) {
+                if (!ev.isCancelled() && onUseTowardMob(ev.self())) ev.cancel();
+            },
+            ll::event::EventPriority::Highest
+        );
+        mUse = bus.emplaceListener<ll::event::PlayerUseItemEvent>(
+            [](ll::event::PlayerUseItemEvent& ev) {
+                if (!ev.isCancelled() && onUseTowardMob(ev.self())) ev.cancel();
+            },
+            ll::event::EventPriority::Highest
         );
         gInstalled = true;
     }
@@ -636,18 +690,27 @@ public:
         gInstalled = false;
         gPending.clear();
         gSeenThisTick.clear();
-        if (mTick) ll::event::EventBus::getInstance().removeListener(mTick);
-        mTick.reset();
+        auto& bus = ll::event::EventBus::getInstance();
+        for (auto* l : {&mTick, &mUseOn, &mUse}) {
+            if (*l) bus.removeListener(*l);
+            l->reset();
+        }
         McPlayerInteractHook::unhook();
     }
 
 private:
     ll::event::ListenerPtr mTick;
+    ll::event::ListenerPtr mUseOn;
+    ll::event::ListenerPtr mUse;
 };
 
 } // namespace
 
 // ---- public API -----------------------------------------------------------------------------------------
+
+std::shared_ptr<game::Backpack> heldCatcherBackpack(Player& player, bool* advanced) {
+    return heldCatcherBackpackImpl(player, advanced);
+}
 
 std::vector<CapturedMob> capturedMobs(game::Backpack const& backpack) {
     auto const& settings = backpack.data().settings;
@@ -738,7 +801,7 @@ CaptureResult capture(Player& player, std::shared_ptr<game::Backpack> const& bac
     captureEffect(player, effectAt);
     pushRenderInfo(player, *backpack);
     log().info("mob catcher: {} captured {} into {} at slot {} ({}x{}, cost {})", player.getRealName(), m.entityType, backpack->uuid(), m.slot, m.width, m.height, cost);
-    return {true, trFor(player, "abp.mobcatcher.status.captured", "Captured {}", "%1$s"), {nameParam(m)}};
+    return {true, trFor(player, "abp.mobcatcher.status.captured", "Captured {}", mobName(m))};
 }
 
 CaptureResult release(Player& player, std::shared_ptr<game::Backpack> const& backpack, std::string const& id) {
@@ -747,7 +810,7 @@ CaptureResult release(Player& player, std::shared_ptr<game::Backpack> const& bac
     auto it   = std::find_if(mobs.begin(), mobs.end(), [&](CapturedMob const& m) { return m.id == id; });
     if (it == mobs.end()) return {};
     auto failed = [&] {
-        return CaptureResult{false, message(player, "abp.mobcatcher.status.release_failed", "Could not release mob there"), {}};
+        return CaptureResult{false, message(player, "abp.mobcatcher.status.release_failed", "Could not release mob there")};
     };
 
     auto bytes = core::base64Decode(it->nbt);
@@ -762,7 +825,7 @@ CaptureResult release(Player& player, std::shared_ptr<game::Backpack> const& bac
     auto pos   = releasePosition(player, d);
     if (!pos) {
         playMobCatcherSound(player, "note.bass", 0.7f, 0.8f);
-        return {false, message(player, "abp.mobcatcher.status.no_release_space", "No valid release space there"), {}};
+        return {false, message(player, "abp.mobcatcher.status.no_release_space", "No valid release space there")};
     }
 
     float yaw            = player.getRotation().y;
@@ -779,22 +842,16 @@ CaptureResult release(Player& player, std::shared_ptr<game::Backpack> const& bac
     pushRenderInfo(player, *backpack);
     playMobCatcherSound(player, "random.pop", 0.7f, 1.2f);
     log().info("mob catcher: {} released {} from {}", player.getRealName(), released.entityType, backpack->uuid());
-    return {true, trFor(player, "abp.mobcatcher.status.released", "Released {}", "%1$s"), {nameParam(released)}};
+    return {true, trFor(player, "abp.mobcatcher.status.released", "Released {}", mobName(released))};
 }
 
 void showMessage(Player& player, CaptureResult const& result) {
     if (result.message.empty() || player.isSimulatedPlayer()) return;
-    auto pkt = TextPacket{};
-    if (result.params.empty()) {
-        TextPacketPayload::MessageOnly body;
-        body.mType = TextPacketType::Tip;
-        body.mMessage->assign(result.message);
-        pkt.mBody = body;
-    } else {
-        // Translated on the client: the entity's localized name comes from "%entity.<id>.name".
-        pkt.mBody     = TextPacketPayload::MessageAndParams(TextPacketType::JukeboxPopup, result.message, result.params);
-        pkt.mLocalize = true;
-    }
+    auto                           pkt = TextPacket{};
+    TextPacketPayload::MessageOnly body;
+    body.mType = TextPacketType::Tip;
+    body.mMessage->assign(result.message);
+    pkt.mBody = body;
     pkt.sendTo(player);
 }
 
@@ -828,6 +885,44 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
         log().info("mobcatcher setup: gave {} backpack {} with the {} upgrade", advanced ? "netherite" : "iron", bp->uuid(), type->info().id);
         output.success("ok");
     };
+    // `/backpack mobcatcher capture{cow,zombie}`: spawns the mob next to the player and captures it
+    // into the held backpack server-side (the same capture as sneak + use; e2e setup).
+    auto spawnAndCapture = [](CommandOrigin const& origin, CommandOutput& output, std::string const& type) {
+        using namespace abp;
+        auto* e = origin.getEntity();
+        if (!e || !e->isPlayer()) {
+            output.error("players only");
+            return;
+        }
+        auto& player   = static_cast<Player&>(*e);
+        bool  advanced = false;
+        auto  bp       = upgrade::mobcatcher::heldCatcherBackpack(player, &advanced);
+        if (!bp) {
+            output.error("hold a backpack with a mob catcher");
+            return;
+        }
+        auto  pos = player.getPosition();
+        auto* mob = player.getLevel().getSpawner().spawnMob(
+            player.getDimensionBlockSource(), ActorDefinitionIdentifier(type), nullptr, Vec3{pos.x + 2.f, pos.y, pos.z}, false, true, false
+        );
+        if (!mob) {
+            output.error("could not spawn " + type);
+            return;
+        }
+        auto r = upgrade::mobcatcher::capture(player, bp, *mob, advanced);
+        if (!r.success) {
+            log().info("mob catcher: {} could not capture {}: {}", player.getRealName(), type, r.message);
+            mob->despawn();
+        }
+        upgrade::mobcatcher::showMessage(player, r);
+        output.success(r.message);
+    };
+    cmd.overload().text("mobcatcher").text("capturecow").execute([spawnAndCapture](CommandOrigin const& o, CommandOutput& out) {
+        spawnAndCapture(o, out, "minecraft:cow");
+    });
+    cmd.overload().text("mobcatcher").text("capturezombie").execute([spawnAndCapture](CommandOrigin const& o, CommandOutput& out) {
+        spawnAndCapture(o, out, "minecraft:zombie");
+    });
     cmd.overload().text("mobcatcher").text("setup").execute([give](CommandOrigin const& o, CommandOutput& out) { give(o, out, true); });
     cmd.overload().text("mobcatcher").text("basic").execute([give](CommandOrigin const& o, CommandOutput& out) { give(o, out, false); });
 });

@@ -37,7 +37,7 @@
 #include "client/Client.h"
 #include "client/net/ClientNet.h"
 #include "client/ui/gfx/Painter.h"
-#include "client/ui/mobcatcher/EntityPreview.h"
+#include "client/render/EntityPreview.h"
 #include "client/ui/screen/StorageOverlay.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "client/ui/widgets/Tooltip.h"
@@ -86,16 +86,16 @@ std::string entityName(std::string const& type) {
 // ---- display entities (shared by the overlay; released when leaving the world) -------------------
 
 struct EntityCache {
-    std::unordered_map<std::string, std::unique_ptr<DisplayEntity>> entities; ///< by captured mob id
+    std::unordered_map<std::string, std::unique_ptr<render::DisplayEntity>> entities; ///< by captured mob id
     std::unordered_set<std::string>                                 failures;
     std::unordered_set<std::string>                                 logged;
 
-    DisplayEntity* get(mc::CapturedMob const& mob) {
+    render::DisplayEntity* get(mc::CapturedMob const& mob) {
         if (failures.contains(mob.id)) return nullptr;
         if (auto it = entities.find(mob.id); it != entities.end()) return it->second.get();
-        std::unique_ptr<DisplayEntity> e;
+        std::unique_ptr<render::DisplayEntity> e;
         try {
-            e = createDisplayEntity(mob.entityType, mob.look.value("data", nlohmann::json::array()));
+            e = render::createDisplayEntity(mob.entityType, mob.look.value("data", nlohmann::json::array()));
         } catch (...) {
         }
         if (!e) {
@@ -147,7 +147,7 @@ public:
                 double bbH   = mob.look.value("bbHeight", 1.8);
                 int    scale = mc::previewScale(bbW, bbH, static_cast<int>(b->w), static_cast<int>(b->h));
                 float  bottom = b->y + b->h / 2.f + static_cast<float>(bbH) * scale / 2.f;
-                if (!renderEntity(p, e->actor(), b->x + b->w / 2.f, bottom, static_cast<float>(scale), poseOf(mob), &clip)) {
+                if (!render::renderEntity(p, e->actor(), b->x + b->w / 2.f, bottom, static_cast<float>(scale), poseOf(mob), &clip)) {
                     cache().failures.insert(mob.id);
                     cache().entities.erase(mob.id);
                 } else if (cache().logged.insert(mob.id).second) {
@@ -302,7 +302,7 @@ private:
     }
 
     /// SB prepareEntityForRender: a per-mob body turn and a head that looks around now and then.
-    static EntityPose poseOf(mc::CapturedMob const& mob) {
+    static render::EntityPose poseOf(mc::CapturedMob const& mob) {
         auto  hash  = mc::javaUuidHash(mob.id);
         float time  = static_cast<float>(seconds() * 20.0) + mc::uuidFloat(hash, 3) * 200.f;
         float body  = (mc::uuidFloat(hash, 0) - 0.5f) * kBodyYawRange;
