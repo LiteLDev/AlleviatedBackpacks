@@ -37,6 +37,7 @@ inline constexpr std::string_view kBasicId          = "jukebox";
 inline constexpr std::string_view kAdvancedId       = "advanced_jukebox";
 inline constexpr int              kBasicSlots       = 1;
 inline constexpr int              kMaxAdvancedSlots = 16;
+inline constexpr int              kAdvancedSlots    = 12; ///< default of `advancedSlots()` (SC numberOfSlots)
 
 // ---- per-upgrade settings (ctx.settings()) --------------------------------------------------------
 //   {"discs": [item|null, ...], "shuffle": bool, "repeat": "all"|"one"|"no"}
@@ -121,8 +122,9 @@ public:
     [[nodiscard]] std::optional<std::int64_t> emitterEntity(std::string const& uuid, int slot) const;
     [[nodiscard]] std::size_t                 count() const { return mPlaybacks.size(); }
 
-    /// Placed backpacks report themselves here (feature/placed). Kept for that caller; the service
-    /// asks `feature::placed` directly whether a backpack is placed.
+    /// A backpack that is neither carried by a player nor placed (e.g. worn by a mob) reports where
+    /// it is, at least every 2 seconds; it then plays there (and stops when the reports stop).
+    /// Placed backpacks need no reports: the service asks `feature/placed` directly.
     void tickPlaced(std::shared_ptr<game::Backpack> const& backpack, int dim, Vec3 const& pos);
 
     // ---- selftests ----------------------------------------------------------------------------
@@ -165,7 +167,15 @@ private:
     [[nodiscard]] std::optional<UpgradeContext> validContext(Playback const& p) const;
     void                                        emit(SoundEvent const& ev) const;
 
+    struct Reported {
+        int          dim = 0;
+        Vec3         pos{};
+        std::int64_t lastSeen = 0;
+    };
+    [[nodiscard]] std::optional<Reported> reported(std::string const& uuid) const;
+
     std::map<Key, Playback>                mPlaybacks;
+    std::map<std::string, Reported>        mReported;
     ll::event::ListenerPtr                 mTick;
     std::int64_t                           mNow = 0;
     std::function<void(SoundEvent const&)> mObserver;

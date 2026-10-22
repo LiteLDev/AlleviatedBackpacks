@@ -83,6 +83,7 @@ void Service::install() {
 void Service::uninstall() {
     for (auto& [key, p] : mPlaybacks) stopSounds(p);
     mPlaybacks.clear();
+    mReported.clear();
     if (mTick) ll::event::EventBus::getInstance().removeListener(mTick);
     mTick = nullptr;
 }
@@ -111,6 +112,8 @@ bool Service::play(UpgradeContext const& ctx, Player* starter, std::optional<int
     // a carried one is attached to its carrier (SC: the menu's entity).
     if (auto at = placedAt(uuid)) {
         p.where = Emitter{std::nullopt, at->first, at->second};
+    } else if (auto r = reported(uuid)) {
+        p.where = Emitter{std::nullopt, r->dim, r->pos};
     } else {
         Player* carrier = starter && carries(*starter, uuid) ? starter : nullptr;
         if (!carrier) {
@@ -158,6 +161,7 @@ void Service::stopAll(std::string const& uuid) {
             ++it;
         }
     }
+    mReported.erase(uuid);
 }
 
 bool Service::next(UpgradeContext const& ctx) {
@@ -214,7 +218,15 @@ std::optional<std::int64_t> Service::emitterEntity(std::string const& uuid, int 
     return it == mPlaybacks.end() ? std::nullopt : it->second.where.entity;
 }
 
-void Service::tickPlaced(std::shared_ptr<game::Backpack> const&, int, Vec3 const&) {}
+void Service::tickPlaced(std::shared_ptr<game::Backpack> const& backpack, int dim, Vec3 const& pos) {
+    if (backpack) mReported[backpack->uuid()] = Reported{dim, pos, mNow};
+}
+
+std::optional<Service::Reported> Service::reported(std::string const& uuid) const {
+    auto it = mReported.find(uuid);
+    if (it == mReported.end() || mNow - it->second.lastSeen > 40) return std::nullopt;
+    return it->second;
+}
 
 // ---- playback ------------------------------------------------------------------------------------
 
@@ -308,9 +320,9 @@ std::optional<Service::Emitter> Service::locate(Playback const& p, bool deep) co
         if (deep && (!carries(*pl, p.uuid) || placedAt(p.uuid))) return std::nullopt;
         return Emitter{p.where.entity, static_cast<int>(pl->getDimensionId()), pl->getPosition()};
     }
-    auto at = placedAt(p.uuid);
-    if (!at) return std::nullopt;
-    return Emitter{std::nullopt, at->first, at->second};
+    if (auto at = placedAt(p.uuid)) return Emitter{std::nullopt, at->first, at->second};
+    if (auto r = reported(p.uuid)) return Emitter{std::nullopt, r->dim, r->pos};
+    return std::nullopt;
 }
 
 std::optional<UpgradeContext> Service::validContext(Playback const& p) const {
@@ -325,6 +337,7 @@ std::optional<UpgradeContext> Service::validContext(Playback const& p) const {
 
 void Service::tick() {
     ++mNow;
+    if (mNow % 100 == 0) std::erase_if(mReported, [&](auto const& e) { return mNow - e.second.lastSeen > 100; });
     if (mPlaybacks.empty()) return;
     auto const& cfg = config::get<JukeboxConfig>();
     for (auto it = mPlaybacks.begin(); it != mPlaybacks.end();) {
