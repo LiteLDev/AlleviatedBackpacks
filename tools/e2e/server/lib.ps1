@@ -189,6 +189,10 @@ function Set-ServerProperties([hashtable]$Overrides = @{}) {
         'server-port'                       = "$port"
         'server-portv6'                     = "$($port + 1)"
         'enable-lan-visibility'             = 'false'
+        # Real clients (client e2e remote modes) join 127.0.0.1:<port> directly: RakNet (the
+        # NetherNet default needs the online signaling service) and no allow list.
+        'transport'                         = 'raknet'
+        'allow-list'                        = 'false'
         'max-players'                       = '20'
         'player-idle-timeout'               = '0'
         'default-player-permission-level'   = 'operator'

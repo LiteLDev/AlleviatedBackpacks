@@ -566,9 +566,13 @@ function Set-ExternalServer([int]$Port) {
     $file = Get-ExternalServersFile
     New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
     $script:ExternalServersBackup = if (Test-Path $file) { Get-Content $file -Raw } else { $null }
-    $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    Set-Content -Path $file -Value "1:$($script:ExternalServerName):127.0.0.1:$($Port):$stamp" -Encoding UTF8
-    Write-Step "external server $script:ExternalServerName -> 127.0.0.1:$Port ($file)"
+    # Enter-RemoteServer adds the server through the game's "Add server" dialog (which refuses a
+    # duplicate address/port), so only drop stale entries for this port here; Restore-ExternalServers
+    # puts the original list back afterwards.
+    $keep = @(if ($script:ExternalServersBackup) { $script:ExternalServersBackup -split "`r?`n" | Where-Object { $_ -and $_ -notmatch ":127\.0\.0\.1:$($Port):" } })
+    Set-Content -Path $file -Value $keep -Encoding UTF8
+    $script:ExternalServerPort = $Port
+    Write-Step "external server $script:ExternalServerName -> 127.0.0.1:$Port (added in game; list backed up from $file)"
 }
 
 function Restore-ExternalServers {
@@ -579,9 +583,12 @@ function Restore-ExternalServers {
     Remove-Variable -Name ExternalServersBackup -Scope Script
 }
 
-# Play -> Servers -> our server (first additional server) -> Join; waits for the BDS to log the
-# spawn. Coordinates are fractions of the 1600x900 client area (calibrated on 1.26.51).
+# Play -> Servers -> "+ Add server" -> name / 127.0.0.1 / port -> "Add and play"; waits for the
+# BDS to log the spawn. (User-added servers are listed below the featured ones, out of view, so the
+# dialog is the deterministic path; the entry it adds is undone by Restore-ExternalServers.)
+# Coordinates are fractions of the client area (calibrated on 1.26.51 at 1280x720 and 1600x900).
 function Enter-RemoteServer([int]$Attempts = 3) {
+    if (-not $script:ExternalServerPort) { throw 'Enter-RemoteServer needs Set-ExternalServer first' }
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         Focus-Game
         $mark = Get-LogMark
@@ -591,10 +598,21 @@ function Enter-RemoteServer([int]$Attempts = 3) {
         Click $script:ServersTab[0] $script:ServersTab[1] -Relative
         Start-Sleep -Seconds 3
         Save-Screenshot "join-2-servers-$attempt" | Out-Null
-        Click $script:ServerEntry[0] $script:ServerEntry[1] -Relative
-        Start-Sleep -Seconds 3
-        Save-Screenshot "join-3-entry-$attempt" | Out-Null
-        Click $script:JoinButton[0] $script:JoinButton[1] -Relative
+        Click $script:AddServer[0] $script:AddServer[1] -Relative
+        Start-Sleep -Seconds 2
+        # The dialog keeps the text of an earlier attempt: clear each field before typing.
+        $fill = {
+            param($at, [string]$text)
+            Click $at[0] $at[1] -Relative
+            for ($i = 0; $i -lt 24; $i++) { Press-Key BACK 20 }
+            Type-Text $text
+        }
+        & $fill $script:NameField $script:ExternalServerName
+        & $fill $script:AddressField '127.0.0.1'
+        & $fill $script:PortField "$script:ExternalServerPort"
+        Start-Sleep -Milliseconds 500
+        Save-Screenshot "join-3-add-$attempt" | Out-Null
+        Click $script:AddAndPlay[0] $script:AddAndPlay[1] -Relative
         try {
             Wait-LogLine '\[host\].*Player Spawned' 90 -Since $mark | Out-Null
             Start-Sleep -Seconds 4
@@ -605,13 +623,18 @@ function Enter-RemoteServer([int]$Attempts = 3) {
             if ($attempt -eq $Attempts) { throw }
             Write-Step "remote join failed (attempt $attempt): $_; retrying"
             Save-Screenshot "join-failed-$attempt" | Out-Null
-            Press-Key ESC; Start-Sleep -Seconds 2; Press-Key ESC; Start-Sleep -Seconds 2
+            # Back to the title screen: connecting dialog / Play screen (never a third ESC: exit dialog).
+            Press-Key ESC; Start-Sleep -Seconds 3
+            Save-Screenshot "join-reset-$attempt" | Out-Null
         }
     }
 }
-$script:ServersTab  = @(0.62, 0.155)
-$script:ServerEntry = @(0.30, 0.55)
-$script:JoinButton  = @(0.30, 0.55)
+$script:ServersTab   = @(0.832, 0.13)   # "Servers" tab on the Play screen
+$script:AddServer    = @(0.176, 0.253)  # "+ Add server" at the top of the server list
+$script:NameField    = @(0.5, 0.20)     # "Add a new server" dialog fields
+$script:AddressField = @(0.5, 0.366)
+$script:PortField    = @(0.5, 0.532)
+$script:AddAndPlay   = @(0.693, 0.663)  # "Add and play"
 
 # Runs a console command on the remote host (remote modes).
 function Send-HostConsole([string]$Command) {
