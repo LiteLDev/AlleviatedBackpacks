@@ -13,6 +13,11 @@ Invoke-Chat '/clear @s'
 $mark = Get-LogMark
 Invoke-Chat '/backpack stations setup'
 Wait-LogLine 'stations setup: gave backpacks' 15 -Since $mark | Out-Null
+# SB's "Shift Click Into Open Tab First" is off by default; the stonecutter step below shift-clicks
+# into the open tab, so turn it on for this player.
+$mark = Get-LogMark
+Invoke-Chat '/backpack station opentab on'
+Wait-LogLine 'station opentab: on' 15 -Since $mark | Out-Null
 
 # ---- helpers ---------------------------------------------------------------------------------------
 $script:L = $null

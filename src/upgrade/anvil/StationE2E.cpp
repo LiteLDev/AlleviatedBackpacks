@@ -14,6 +14,7 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
+#include "feature/gui/Gui.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
@@ -77,6 +78,9 @@ void setup(Player& player, CommandOutput& output) {
     inv.setItem(11, game::ItemConv::make("minecraft:netherite_upgrade_smithing_template", 1));
     inv.setItem(12, game::ItemConv::make("minecraft:netherite_ingot", 1));
     inv.setItem(13, game::ItemConv::make("minecraft:diamond_chestplate", 1));
+    inv.setItem(15, game::ItemConv::make("minecraft:coast_armor_trim_smithing_template", 1));
+    inv.setItem(16, game::ItemConv::make("minecraft:iron_chestplate", 1));
+    inv.setItem(17, game::ItemConv::make("minecraft:gold_ingot", 1));
     player.addLevels(30 - playerLevel(player));
     player.sendInventory(false);
     log().info("station setup: station {} infinity {}", station->uuid(), infinite->uuid());
@@ -115,4 +119,15 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
     cmd.overload().text("station").text("probe").execute([](CommandOrigin const& origin, CommandOutput& output) {
         if (auto* p = abp::upgrade::anvil::playerOf(origin, output)) abp::upgrade::anvil::probe(*p, output);
     });
+    // SB's "Shift Click Into Open Tab First" for the calling player (the scenario's shortcut for
+    // the settings screen toggle).
+    for (bool on : {true, false}) {
+        cmd.overload().text("station").text("opentab").text(on ? "on" : "off").execute([on](CommandOrigin const& origin, CommandOutput& output) {
+            if (auto* p = abp::upgrade::anvil::playerOf(origin, output)) {
+                abp::feature::gui::setPlayerOption(*p, abp::feature::gui::kOpenTabFirst, nlohmann::json(on));
+                abp::log().info("station opentab: {}", on ? "on" : "off");
+                output.success("ok");
+            }
+        });
+    }
 });

@@ -70,6 +70,21 @@ int giveToInventory(Player& player, core::ItemStackData const& data) {
 }
 } // namespace
 
+int mergeIntoStation(Player& player, std::vector<std::shared_ptr<InputSlot>> const& slots, core::ItemStackData const& item) {
+    if (item.empty()) return 0;
+    int left = item.count;
+    for (int pass = 0; pass < 2 && left > 0; ++pass) {
+        for (auto const& slot : slots) {
+            if (left <= 0) break;
+            auto shown = slot->display(player);
+            bool same  = !shown.isNull() && game::ItemConv::toData(shown).sameItem(item);
+            if (pass == 0 ? !same : !shown.isNull()) continue;
+            left -= slot->accept(player, game::ItemConv::toStack(item, std::min(left, 255)));
+        }
+    }
+    return item.count - left;
+}
+
 nlohmann::json stackJson(ItemStack const& stack) {
     if (stack.isNull() || stack.mCount <= 0) return nullptr;
     return game::ItemConv::toData(stack).toJson();
