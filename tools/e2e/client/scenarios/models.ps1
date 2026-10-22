@@ -39,7 +39,7 @@ try {
     Invoke-Chat '/gamemode creative'
     $mark = Get-LogMark
     Press-Key '1'
-    Press-Key 'B'
+    Invoke-Chat '/backpack open'   # (the B key also opens the vanilla emote wheel on remote servers)
     if (Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $mark) {
         Start-Sleep -Seconds 2
         Save-Screenshot 'icons-native' | Out-Null
