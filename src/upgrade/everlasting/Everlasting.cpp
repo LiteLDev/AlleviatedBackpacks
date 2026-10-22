@@ -230,15 +230,17 @@ private:
             level.spawnParticleEffect("minecraft:villager_happy", at, &item.getDimension());
         }
         auto& delta = const_cast<Vec3&>(item.getPosDelta());
-        if (!item.getStatusFlag(ActorFlags::HasGravity)) {
-            // Hovering for good (SB: no gravity, zero motion). Bedrock's item physics still pulls
-            // items down without the gravity flag: keep it where it stopped.
-            if (state.hover) {
-                delta = Vec3::ZERO();
-                if (pos.distanceTo(*state.hover) > 0.001f) item._setPos(*state.hover);
+        if (state.hover) {
+            // Hovering for good (SB: no gravity, zero motion). Bedrock's item physics turns gravity
+            // back on and pulls items down: keep it where it stopped.
+            if (item.getStatusFlag(ActorFlags::HasGravity)) {
+                SynchedActorDataAccess::setActorFlag(item.getEntityContext(), ActorFlags::HasGravity, false);
             }
+            delta = Vec3::ZERO();
+            if (pos.distanceTo(*state.hover) > 0.001f) item._setPos(*state.hover);
             return;
         }
+        if (!item.getStatusFlag(ActorFlags::HasGravity)) return; // SB: only while it has gravity
         auto& region  = item.getDimensionBlockSource();
         bool  inWater = item.isInWater() || pos.y < static_cast<float>(region.getMinHeight()) + 1.0f;
         bool  inLava  = !inWater && region.containsMaterial(item.getAABB(), SharedTypes::v1_26_20::MaterialType::Lava);
