@@ -35,7 +35,7 @@ function Gui-Click([double]$gx, [double]$gy, [switch]$Right) { Click (($L.Left +
 function Storage-Pos([int]$i) { $cols = if ($L.Width -ge 230) { 12 } else { 9 }; @((8 + ($i % $cols) * 18 + 8), (18 + [math]::Floor($i / $cols) * 18 + 8)) }
 # Tab i: top-left (Width, 4 + 25 i); its icon at +1,+4.
 function Tab-Y([int]$i) { 4 + 25 * $i }
-function Tab-Toggle([int]$i) { Gui-Click ($L.Width + 1 + 8) ((Tab-Y $i) + 4 + 8); Start-Sleep -Milliseconds 300 }
+function Tab-Toggle([int]$i) { Start-Sleep -Milliseconds 600; Gui-Move ($L.Width + 1 + 8) ((Tab-Y $i) + 4 + 8); Start-Sleep -Milliseconds 300; Gui-Click ($L.Width + 1 + 8) ((Tab-Y $i) + 4 + 8); Start-Sleep -Milliseconds 300 }
 # A widget at (dx, dy) of tab i (SB positions are relative to the tab's top-left), centre of an 18x18 button.
 function Tab-Button([int]$i, [double]$dx, [double]$dy) { @(($L.Width + $dx + 9), ((Tab-Y $i) + $dy + 9)) }
 
