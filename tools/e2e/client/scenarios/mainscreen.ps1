@@ -153,8 +153,8 @@ Gui-Click $p12[0] $p12[1]
 # 250 ms) every other cobblestone stack of the storage (vanilla lastQuickMoved). The headless input
 # pipe adds latency, so the pair is retried on another cobblestone slot when it came too slowly.
 $quickOk = $false
-foreach ($slot in 24, 0, 12, 6, 13) {
-    $ps = Storage-Pos $slot
+foreach ($qmSlot in 24, 0, 12, 6, 13) {
+    $ps = Storage-Pos $qmSlot
     $mark = Get-LogMark
     With-Key 0x10 {
         Gui-Move $ps[0] $ps[1]
@@ -168,7 +168,7 @@ foreach ($slot in 24, 0, 12, 6, 13) {
         $quickOk = $true
         break
     } catch {
-        Write-Step "shift + double-click on slot $slot came too slowly, retrying"
+        Write-Step "shift + double-click on slot $qmSlot came too slowly, retrying"
     }
 }
 if (-not $quickOk) { throw 'shift + double-click never reached quickMoveAll' }
