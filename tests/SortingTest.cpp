@@ -175,6 +175,39 @@ TEST(BackpackInventory, SlotPreferenceSimulateCountsOnce) {
     EXPECT_EQ(real.remainder.count, 64);
 }
 
+// GX-3: SC MemorySettingsCategory with "Match NBT": a memory slot takes only the remembered stack.
+TEST(Sorting, MatchNbtMemorySlotsTakeOnlyTheExactItem) {
+    auto plain     = item("minecraft:iron_sword", 1, 1);
+    auto enchanted = plain;
+    enchanted.setNbt("enchanted");
+    BackpackInventory inv(3);
+    inv.set(0, plain);
+    inv.set(2, enchanted);
+    SortLayout layout;
+    layout.memory = {{}, enchanted.withCount(1), {}};
+    layout.memoryMatchNbt = true;
+    ASSERT_TRUE(sortInventory(inv, comparatorFor(SortBy::Name), layout));
+    EXPECT_TRUE(inv.at(1).sameItem(enchanted)) << "the enchanted sword goes to its memory slot";
+    EXPECT_TRUE(inv.at(0).sameItem(plain)) << "the plain sword stays out of it";
+    EXPECT_TRUE(inv.at(2).empty());
+
+    // Only the plain sword: the Match-NBT slot stays empty (ignoring NBT it would take it).
+    BackpackInventory only(3);
+    only.set(2, plain);
+    ASSERT_TRUE(sortInventory(only, comparatorFor(SortBy::Name), layout));
+    EXPECT_TRUE(only.at(1).empty());
+    EXPECT_TRUE(only.at(0).sameItem(plain));
+    layout.memoryMatchNbt = false;
+    BackpackInventory ignoring(3);
+    ignoring.set(2, plain);
+    ASSERT_TRUE(sortInventory(ignoring, comparatorFor(SortBy::Name), layout));
+    EXPECT_TRUE(ignoring.at(1).sameItem(plain)) << "ignore NBT: any sword fits";
+
+    EXPECT_TRUE(memorySlotAccepts(SortLayout{{}, {}, true}, enchanted, enchanted));
+    EXPECT_FALSE(memorySlotAccepts(SortLayout{{}, {}, true}, enchanted, plain));
+    EXPECT_TRUE(memorySlotAccepts(SortLayout{}, enchanted, plain));
+}
+
 TEST(Sorting, MemoryMatchIgnoresNbt) {
     auto a = item("minecraft:iron_sword", 1, 1);
     auto b = a;

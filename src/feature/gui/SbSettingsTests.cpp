@@ -218,5 +218,35 @@ ABP_REGISTER_SELFTEST("sbsettings.templates", [](Context& ctx) {
     templates::reloadTemplatePacks();
 });
 
+// GX-3: SB BackpackWrapper.sort -> InventorySorter.sortHandler(.., memorySettings::matchesFilter):
+// with Match NBT a memory slot is only sorted into by the exact remembered stack.
+ABP_REGISTER_SELFTEST("sbsettings.memory_match_nbt_sort", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Leather);
+    auto& inv = bp->inventory();
+    auto named = game::ItemConv::make("minecraft:diamond_sword", 1);
+    game::ItemConv::setDisplay(named, "Excalibur");
+    auto namedData = game::ItemConv::toData(named);
+    auto plain     = item("minecraft:diamond_sword", 1);
+    inv.set(5, namedData);
+    ctx.check(handleSettingsScreenAction(p, *bp, act("memoryIgnoreNbt", {{"value", false}})), "Match NBT");
+    ctx.check(handleSettingsScreenAction(p, *bp, act("memory", {{"op", "select"}, {"index", 5}})), "remember the named sword in slot 5");
+    // The named sword moves away, a plain one comes in elsewhere; sorting must not put the plain
+    // sword into the Match-NBT memory slot.
+    inv.set(5, {});
+    inv.set(9, plain);
+    inv.set(12, namedData);
+    ctx.check(sortBackpack(*bp, core::SortBy::Name), "sorted");
+    ctx.check(inv.at(5).sameItem(namedData), "the named sword is back in its memory slot: " + inv.at(5).id);
+    ctx.check(inv.at(0).sameItem(plain), "the plain sword is sorted into the free slots: " + inv.at(0).id);
+    inv.set(5, {});
+    ctx.check(sortBackpack(*bp, core::SortBy::Name), "sorted again");
+    ctx.check(inv.at(5).empty(), "without the named sword the memory slot stays empty");
+    // Ignore NBT (the default): any diamond sword fits that slot.
+    ctx.check(handleSettingsScreenAction(p, *bp, act("memoryIgnoreNbt", {{"value", true}})), "Ignore NBT");
+    ctx.check(sortBackpack(*bp, core::SortBy::Name), "sorted (ignore NBT)");
+    ctx.check(inv.at(5).sameItem(plain), "ignore NBT: the plain sword goes to the memory slot");
+});
+
 } // namespace
 } // namespace abp::feature::gui

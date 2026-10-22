@@ -310,8 +310,9 @@ void setMemoryIgnoreNbt(game::Backpack& backpack, bool ignore) {
 }
 
 bool memoryAccepts(bool ignoreNbt, core::ItemStackData const& remembered, core::ItemStackData const& item) {
-    if (remembered.empty() || item.empty()) return false;
-    return ignoreNbt ? core::memoryMatches(remembered, item) : remembered.sameItem(item);
+    core::SortLayout mode;
+    mode.memoryMatchNbt = !ignoreNbt;
+    return core::memorySlotAccepts(mode, remembered, item);
 }
 
 namespace detail {

@@ -188,8 +188,8 @@ bool refreshItem(Player const& /*player*/, ItemStack& stack, std::shared_ptr<gam
     auto tier = game::backpackTierOf(stack);
     if (!tier) return false;
     bool changed = false;
-    // The Diamond backpack has durability only so Bedrock accepts it as a smithing-table base
-    // (netherite upgrade). Backpacks never wear out.
+    // Backpacks never wear out (Diamond backpacks made before GX-3 had durability as the
+    // smithing-table base workaround; SmithingBase.cpp replaced it).
     if (stack.isDamageableItem() && stack.getDamageValue() > 0) {
         stack.setDamageValue(0);
         changed = true;

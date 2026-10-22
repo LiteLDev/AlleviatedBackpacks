@@ -73,6 +73,18 @@ double now() {
 
 float easeInOutCubic(float t) { return t < 0.5f ? 4 * t * t * t : 1 - std::pow(-2 * t + 2, 3.f) / 2; }
 
+/// SC ClientEventHandler.handleGuiKeyPress / handleGuiMouseKeyPress: a sort or transfer key that
+/// did its job plays GuiSoundHelper.playButtonClickSound (when `playButtonSound` is on).
+void keySound(char const* what) {
+    playButtonClick();
+    log().info("key sound: {} ({})", what, clientGuiConfig().playButtonSound ? "played" : "off");
+}
+
+void sortKey() {
+    net::sendScreenAction({{"action", "sort"}});
+    keySound("sort");
+}
+
 struct SlotRef {
     enum class Area { None, Storage, Inventory, Upgrade, Menu } area = Area::None;
     int  index = -1;
@@ -328,6 +340,9 @@ private:
 
     // controls (rebuilt every frame from the model)
     WidgetGroup mControls;
+    /// mControls[mLateControls..]: the sort buttons and upgrade switches, which SC StorageScreenBase.render
+    /// draws after renderSuper (so above the carried item), like the error overlay.
+    std::size_t mLateControls = 0;
 
     std::uint32_t mLoggedLayout = 0;
 
@@ -629,6 +644,7 @@ void BackpackScreenLayer::buildControls(cs::BackpackScreenModel const& m) {
     };
     addTransfer(mLayout.transferToStorage, true);
     addTransfer(mLayout.transferToInventory, false);
+    mLateControls = mControls.widgets.size(); // the rest is drawn over the carried item
 
     if (mLayout.sortButton.w > 0) {
         auto sort          = std::make_unique<Button>();
@@ -1038,6 +1054,7 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
             auto& t = mTabs[i];
             if (t.slot != mPendingTab || !t.native) continue;
             mOpenTab = static_cast<int>(i);
+            log().info("companion: reopened the kept upgrade tab {} (server-side open tab id)", t.slot);
             t.widgets.widgets.clear();
             TabContext ctx{*m, t.slot, m->upgrades[static_cast<std::size_t>(t.slot)], &mUpgradeStacks[static_cast<std::size_t>(t.slot)], {}, {}};
             ctx.sendTabAction    = [slot = t.slot](nlohmann::json d) { net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(d)}}); };
@@ -1067,7 +1084,9 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
     sb::storageBackground(p, {mLeft, mTop, static_cast<float>(mLayout.imageWidth), static_cast<float>(mLayout.imageHeight)});
     drawSlots(p, *m, mx, my);
     p.flush();
-    mControls.render(p, mx, my, t);
+    // SC renderSuper: the renderables (transfer buttons, ...) below the carried item; the sort
+    // buttons, upgrade switches and the error overlay are drawn after it (StorageScreenBase.render).
+    mControls.render(p, mx, my, t, 0, mLateControls);
     drawSearch(p, t);
     p.flush();
     // Counts (SC z+200): above the items and the controls.
@@ -1076,7 +1095,6 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
     for (auto const& sg : mPendingSigns) input::stash::drawSign(p, sg.result, *sg.item, sg.x, sg.y);
     mPendingSigns.clear();
     p.flush();
-    drawErrorOverlay(p, *m);
 
     // The item on the cursor (follows the mouse, centred). While dragging over several slots it
     // shows what stays on the cursor (SC quickCraftingRemainder; nothing when 0).
@@ -1101,6 +1119,9 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
             }
         }
     }
+    mControls.render(p, mx, my, t, mLateControls, mControls.widgets.size());
+    p.flush();
+    drawErrorOverlay(p, *m);
     drawTooltips(p, *m, mx, my);
 }
 
@@ -1345,7 +1366,7 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
     // Middle mouse: Sort (anywhere but the player inventory, SC tryCallSort).
     auto slot = slotAt(*m, x, y);
     if (button == MouseButton::Middle && input::mouseMatches(input::KeyAction::Sort, button)) {
-        if (slot.area != SlotRef::Area::Inventory) send({{"action", "sort"}});
+        if (slot.area != SlotRef::Area::Inventory) sortKey(); // SC handleGuiMouseKeyPress: click sound
         return true;
     }
     if (slot.area == SlotRef::Area::None) {
@@ -1528,15 +1549,17 @@ bool BackpackScreenLayer::onKey(int vk, bool down) {
         return true;
     }
     if (input::keyMatches(KeyAction::Sort, vk)) {
-        if (mHover.area != SlotRef::Area::Inventory) send({{"action", "sort"}});
+        if (mHover.area != SlotRef::Area::Inventory) sortKey(); // SC handleGuiKeyPress: click sound
         return true;
     }
     if (input::keyMatches(KeyAction::TransferToStorage, vk)) {
         send({{"action", "transfer"}, {"to", "storage"}, {"matching", !shift}});
+        keySound("transfer_to_storage");
         return true;
     }
     if (input::keyMatches(KeyAction::TransferToInventory, vk)) {
         send({{"action", "transfer"}, {"to", "inventory"}, {"matching", !shift}});
+        keySound("transfer_to_inventory");
         return true;
     }
     if (mHover.area == SlotRef::Area::Storage || mHover.area == SlotRef::Area::Inventory) {

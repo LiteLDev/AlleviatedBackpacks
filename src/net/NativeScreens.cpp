@@ -135,6 +135,7 @@ void pushUpdate(Player& player, ui::Menu& menu, NativeSession& s, bool force = f
 
 void onBeforeShow(Player& player, ui::Menu& menu, int containerId) {
     if (!MenuManager::get().isVirtual(player)) return;
+    if (auto* bm = backpackMenuOf(menu); bm && bm->backpack()) removeOpenTabIfKeepOff(player, *bm->backpack());
     NativeSession s;
     s.id               = gNextSession++;
     s.menu             = &menu;
@@ -167,6 +168,7 @@ void onClosed(Player* player, ui::Menu& menu) {
         if (player) {
             send(*player, ScreenClosePacket{nlohmann::json{{"session", it->second.id}}});
             forgetTabMenus(*player);
+            if (auto* bm = backpackMenuOf(menu); bm && bm->backpack()) removeOpenTabIfKeepOff(*player, *bm->backpack());
         }
         gSessions.erase(it);
         return;
@@ -523,6 +525,20 @@ void setOpenTab(game::Backpack& bp, int slot) {
     bp.markDirty();
 }
 
+} // namespace
+
+// SC StorageContainerMenuBase.removeOpenTabIfKeepOff (menu constructor and `removed`): with "keep
+// tab open" off the storage forgets its open tab (SB BackpackWrapper.removeOpenTabId).
+void removeOpenTabIfKeepOff(Player& p, game::Backpack& bp) {
+    if (feature::gui::settingValue(p, bp, feature::gui::MainSetting::KeepTabOpen)) return;
+    auto it = bp.data().settings.find("mainscreen");
+    if (it == bp.data().settings.end() || !it->is_object() || !it->contains(kOpenTabKey)) return;
+    it->erase(kOpenTabKey);
+    bp.markDirty();
+}
+
+namespace {
+
 // ---- upgrade tabs bridged from the upgrades' settings menus ------------------------------------------
 // Until an upgrade has its own native tab, its settings menu (`IUpgrade::createSettingsMenu`, e.g.
 // a filter editor) is shown inside its SB tab: the menu object lives here (never opened as a chest),
@@ -868,6 +884,7 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
             int slot = body.value("slot", -1);
             if (slot < -1 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
             setOpenTab(*bp, slot);
+            log().info("native screen: open tab {} kept on backpack {}", slot, bp->uuid());
             s->dirty = true;
             ok       = true;
         } else if (action == "toggleUpgrade") {

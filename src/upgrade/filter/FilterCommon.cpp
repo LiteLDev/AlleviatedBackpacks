@@ -130,10 +130,11 @@ std::vector<core::ItemStackData> const& cachedStoredItems(game::Backpack& backpa
 bool matchesContents(core::Filter const& filter, game::Backpack& backpack, core::ItemStackData const& item) {
     if (!filter.filterByStorage) return filter.matchesContents(item, {}, &matcher());
     auto const& stored = cachedStoredItems(backpack);
-    auto const& memory = feature::gui::memory(backpack);
+    auto const& memory    = feature::gui::memory(backpack);
+    bool        ignoreNbt = feature::gui::memoryIgnoresNbt(backpack);
     return filter.matchesContents(item, stored, &matcher(), [&](core::ItemStackData const& i) {
         return std::any_of(memory.begin(), memory.end(), [&](core::ItemStackData const& m) {
-            return !m.empty() && core::memoryMatches(m, i);
+            return feature::gui::memoryAccepts(ignoreNbt, m, i); // SC MemorySettingsCategory.matchesFilter
         });
     });
 }

@@ -1,6 +1,7 @@
 // Settings templates, backpack templates, template packs and dynamic templates. See Templates.h.
 
 #include "feature/templates/Templates.h"
+#include "feature/templates/Snbt.h"
 
 #include <algorithm>
 #include <cctype>
@@ -104,6 +105,26 @@ std::optional<json> readJsonFile(fs::path const& path) {
     return j;
 }
 
+/// A template file: SB's `.snbt` (TagParser), or the `.json` files of earlier exports.
+std::optional<json> readTemplateFile(fs::path const& path) {
+    if (path.extension() == ".json") return readJsonFile(path);
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return std::nullopt;
+    std::stringstream ss;
+    ss << in.rdbuf();
+    auto j = snbtToJson(ss.str());
+    if (!j || !j->is_object()) return std::nullopt;
+    return j;
+}
+
+bool isTemplateFile(fs::path const& path) { return path.extension() == ".snbt" || path.extension() == ".json"; }
+
+/// A template as it comes back from its `.snbt` file (null members dropped, one type per list).
+json asReadBack(json const& j) {
+    auto tag = jsonToTag(j);
+    return tag ? tagToJson(*tag) : j;
+}
+
 bool writeJsonFile(fs::path const& path, json const& j) {
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
@@ -118,6 +139,35 @@ bool writeJsonFile(fs::path const& path, json const& j) {
     }
     out << j.dump(4) << '\n';
     return static_cast<bool>(out);
+}
+
+/// SB `NbtUtils.structureToSnbt` + `Files.writeString`: the template as SNBT. An older `.json`
+/// export of the same template is removed, so the new file is the only one.
+bool writeSnbtFile(fs::path const& path, json const& j) {
+    auto snbt = jsonToSnbt(j);
+    if (!snbt) {
+        log().error("templates: {} is not a compound", path.string());
+        return false;
+    }
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    if (ec) {
+        log().error("templates: cannot create {}: {}", path.parent_path().string(), ec.message());
+        return false;
+    }
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            log().error("templates: cannot write {}", path.string());
+            return false;
+        }
+        out << *snbt << '\n';
+        if (!out) return false;
+    }
+    auto legacy = path;
+    legacy.replace_extension(".json");
+    fs::remove(legacy, ec);
+    return true;
 }
 
 /// SB writes pack.mcmeta into a new data pack; the equivalent marks the folder as a template pack.
@@ -150,8 +200,8 @@ void loadPacks() {
                 auto base = ns.path() / dir;
                 if (!fs::is_directory(base, ec)) continue;
                 for (auto const& f : fs::recursive_directory_iterator(base, ec)) {
-                    if (!f.is_regular_file() || f.path().extension() != ".json") continue;
-                    auto j = readJsonFile(f.path());
+                    if (!f.is_regular_file() || !isTemplateFile(f.path())) continue;
+                    auto j = readTemplateFile(f.path());
                     if (!j) {
                         log().error("templates: couldn't parse template file {}", f.path().string());
                         continue;
@@ -333,10 +383,10 @@ std::optional<std::string> exportSettingsTemplate(Player& player, std::string co
     });
     folder += "_soph_templates";
     auto packRoot = templatePacksRoot() / folder;
-    auto file     = packRoot / "data" / folder / kSettingsDir / (fileName + ".json");
+    auto file     = packRoot / "data" / folder / kSettingsDir / (fileName + ".snbt");
     writePackMeta(packRoot, "Sophisticated Settings Templates data pack");
-    if (!writeJsonFile(file, settings)) return std::nullopt;
-    putPackSettingsTemplate(folder, fileName, settings);
+    if (!writeSnbtFile(file, settings)) return std::nullopt;
+    putPackSettingsTemplate(folder, fileName, asReadBack(settings)); // what a reload will see
     return packRelative(file);
 }
 
@@ -416,10 +466,10 @@ std::optional<std::string> exportBackpackTemplate(std::string const& raw, nlohma
     auto ns    = name.substr(0, colon);
     auto path  = name.substr(colon + 1);
     auto root  = templatePacksRoot() / (ns + "_backpack_templates");
-    auto file  = root / "data" / ns / kBackpacksDir / (path + ".json");
+    auto file  = root / "data" / ns / kBackpacksDir / (path + ".snbt");
     writePackMeta(root, "Sophisticated Backpacks Templates data pack");
-    if (!writeJsonFile(file, data)) return std::nullopt;
-    gPackBackpacks[name] = data;
+    if (!writeSnbtFile(file, data)) return std::nullopt;
+    gPackBackpacks[name] = asReadBack(data); // what a reload will see
     return packRelative(file);
 }
 

@@ -1,6 +1,8 @@
 #include "feature/stash/Stash.h"
 
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "mc/deps/shared_types/legacy/ContainerType.h"
 #include "mc/world/PlayerUIContainer.h"
@@ -10,6 +12,16 @@
 #include "mc/world/containers/managers/models/ContainerManagerModel.h"
 #include "mc/world/containers/models/ContainerModel.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/network/packet/InventorySlotPacket.h"
+#include "mc/network/packet/InventorySlotPacketPayload.h"
+#include "mc/world/ContainerID.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
+#include "mc/world/containers/managers/models/FurnaceContainerManagerModel.h"
+#include "mc/world/actor/item/ExperienceOrb.h"
+#include "mc/world/level/BlockSource.h"
+#include "mc/world/level/block/actor/BlockActor.h"
+#include "mc/world/level/block/actor/BlockActorType.h"
+#include "mc/world/level/block/actor/FurnaceBlockActor.h"
 
 #include "feature/gui/Gui.h"
 #include "game/Backpack.h"
@@ -76,6 +88,156 @@ std::shared_ptr<ContainerModel> openContainer(Player& player) {
     return nullptr;
 }
 
+// ---- other vanilla screen slots (GX-3) -------------------------------------------------------------
+
+using T = SharedTypes::Legacy::ContainerType;
+
+/// PlayerUIContainer slot of a station input (these live in the player's UI container).
+std::optional<int> uiSlotFor(ContainerEnumName name, int index, bool workbench) {
+    auto one = [&](PlayerUISlot s) -> std::optional<int> {
+        if (index != 0) return std::nullopt;
+        return static_cast<int>(s);
+    };
+    switch (name) {
+    case ContainerEnumName::CraftingInputContainer:
+        if (workbench) return index >= 0 && index < 9 ? std::optional<int>(static_cast<int>(PlayerUISlot::Crafting3x3Input1) + index) : std::nullopt;
+        return index >= 0 && index < 4 ? std::optional<int>(static_cast<int>(PlayerUISlot::Crafting2x2Input1) + index) : std::nullopt;
+    case ContainerEnumName::AnvilInputContainer:
+        return one(PlayerUISlot::AnvilInput);
+    case ContainerEnumName::AnvilMaterialContainer:
+        return one(PlayerUISlot::AnvilMaterial);
+    case ContainerEnumName::SmithingTableInputContainer:
+        return one(PlayerUISlot::SmithingTableInput);
+    case ContainerEnumName::SmithingTableMaterialContainer:
+        return one(PlayerUISlot::SmithingTableMaterial);
+    case ContainerEnumName::SmithingTableTemplateContainer:
+        return one(PlayerUISlot::SmithingTableTemplate);
+    case ContainerEnumName::EnchantingInputContainer:
+        return one(PlayerUISlot::EnchantingInput);
+    case ContainerEnumName::EnchantingMaterialContainer:
+        return one(PlayerUISlot::EnchantingMaterial);
+    case ContainerEnumName::GrindstoneInputContainer:
+        return one(PlayerUISlot::GrindstoneInput);
+    case ContainerEnumName::GrindstoneAdditionalContainer:
+        return one(PlayerUISlot::GrindstoneAdditional);
+    case ContainerEnumName::StonecutterInputContainer:
+        return one(PlayerUISlot::StoneCutterInput);
+    case ContainerEnumName::CartographyInputContainer:
+        return one(PlayerUISlot::CartographyInput);
+    case ContainerEnumName::CartographyAdditionalContainer:
+        return one(PlayerUISlot::CartographyAdditional);
+    case ContainerEnumName::LoomInputContainer:
+        return one(PlayerUISlot::LoomInput);
+    case ContainerEnumName::LoomDyeContainer:
+        return one(PlayerUISlot::LoomDye);
+    case ContainerEnumName::LoomMaterialContainer:
+        return one(PlayerUISlot::LoomMaterial);
+    case ContainerEnumName::BeaconPaymentContainer:
+        return one(PlayerUISlot::BeaconPayment);
+    case ContainerEnumName::TradeIngredient1Container:
+        return one(PlayerUISlot::TradeIngredient1);
+    case ContainerEnumName::TradeIngredient2Container:
+        return one(PlayerUISlot::TradeIngredient2);
+    case ContainerEnumName::Trade2Ingredient1Container:
+        return one(PlayerUISlot::Trade2Ingredient1);
+    case ContainerEnumName::Trade2Ingredient2Container:
+        return one(PlayerUISlot::Trade2Ingredient2);
+    default:
+        return std::nullopt;
+    }
+}
+
+/// Collections whose slots live in the open block / entity (furnace, brewing stand, ...).
+bool isModelCollection(ContainerEnumName name) {
+    switch (name) {
+    case ContainerEnumName::FurnaceIngredientContainer:
+    case ContainerEnumName::FurnaceFuelContainer:
+    case ContainerEnumName::FurnaceResultContainer:
+    case ContainerEnumName::BlastFurnaceIngredientContainer:
+    case ContainerEnumName::SmokerIngredientContainer:
+    case ContainerEnumName::BrewingStandInputContainer:
+    case ContainerEnumName::BrewingStandResultContainer:
+    case ContainerEnumName::BrewingStandFuelContainer:
+    case ContainerEnumName::CrafterLevelEntityContainer:
+    case ContainerEnumName::HorseEquipContainer:
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::optional<ContainerEnumName> enumOf(int container) {
+    if (container < 0 || container > 255 || !stashableContainer(container)) return std::nullopt;
+    return static_cast<ContainerEnumName>(container);
+}
+
+/// Where a vanilla slot's item lives: a PlayerUIContainer slot or a container model slot.
+struct VanillaSlot {
+    int                             uiSlot = -1;
+    std::shared_ptr<ContainerModel> model;
+    int                             modelSlot = -1;
+    ContainerEnumName               name{};
+};
+
+std::optional<VanillaSlot> vanillaSlot(Player& player, Location const& loc) {
+    if (loc.area != Area::Vanilla || ui::MenuManager::get().current(player)) return std::nullopt;
+    auto name = enumOf(loc.container);
+    if (!name) return std::nullopt;
+    auto const& mgr = player.mContainerManager.get();
+    // The crafting table's 3x3 grid or the inventory's 2x2 grid (a crafting table may have no
+    // server-side container manager): the 3x3 grid when it is open or holds the slot's item.
+    bool workbench = mgr && mgr->getContainerType() == T::Workbench;
+    if (!workbench && *name == ContainerEnumName::CraftingInputContainer) {
+        int s3 = static_cast<int>(PlayerUISlot::Crafting3x3Input1) + loc.slot;
+        workbench = loc.slot >= 4 || (loc.slot >= 0 && loc.slot < 9 && !player.mPlayerUIContainer->getItem(s3).isNull());
+    }
+    static std::unordered_set<int> seenTypes; // server thread; the e2e reads it
+    if (int ty = mgr ? static_cast<int>(mgr->getContainerType()) : -99; seenTypes.size() < 64 && seenTypes.insert(ty).second) {
+        log().info("stash: station slots with container type {}", ty);
+    }
+    // Station inputs are the player's own UI container slots (not every station has a
+    // server-side container manager).
+    if (auto ui = uiSlotFor(*name, loc.slot, workbench)) return VanillaSlot{*ui, nullptr, -1, *name};
+    if (!isModelCollection(*name) || !mgr) return std::nullopt;
+    auto model = mgr->_getContainer(*name);
+    if (!model || loc.slot < 0 || loc.slot >= model->getContainerSize()) return std::nullopt;
+    return VanillaSlot{-1, std::move(model), loc.slot, *name};
+}
+
+ItemStack vanillaItem(Player& player, VanillaSlot const& s) {
+    if (s.uiSlot >= 0) return player.mPlayerUIContainer->getItem(s.uiSlot);
+    return s.model ? s.model->getItemStack(s.modelSlot) : ItemStack{};
+}
+
+void setVanillaItem(Player& player, VanillaSlot const& s, ItemStack const& item) {
+    if (s.uiSlot >= 0) {
+        player.mPlayerUIContainer->setItem(s.uiSlot, item);
+        // Server-side UI container changes are not sent by themselves (like the cursor).
+        InventorySlotPacket pkt{InventorySlotPacketPayload{ContainerID::PlayerOnlyUi, s.uiSlot, item}};
+        pkt.sendTo(player);
+    } else if (s.model) {
+        s.model->setItem(s.modelSlot, item);
+    }
+}
+
+/// SB FurnaceResultSlot.onTake (awardUsedRecipesAndPopExperience): taking smelted items pops the
+/// furnace's stored experience at the player.
+void onTakenFromVanilla(Player& player, VanillaSlot const& s, int count) {
+    if (s.name != ContainerEnumName::FurnaceResultContainer || count <= 0) return;
+    auto const& mgr = player.mContainerManager.get();
+    if (!mgr) return;
+    auto type = mgr->getContainerType();
+    if (type != T::Furnace && type != T::BlastFurnace && type != T::Smoker) return;
+    auto const& pos    = *static_cast<FurnaceContainerManagerModel&>(*mgr).mBlockPos;
+    auto&       region = player.getDimensionBlockSource();
+    auto*       be     = region.getBlockEntity(pos);
+    if (!be) return;
+    auto bt = be->getType();
+    if (bt != BlockActorType::Furnace && bt != BlockActorType::BlastFurnace && bt != BlockActorType::Smoker) return;
+    int xp = static_cast<FurnaceBlockActor*>(be)->withdrawStoredXPReward();
+    if (xp > 0) ExperienceOrb::spawnOrbs(region, player.getPosition(), xp, ExperienceOrb::DropType::FromPlayer, &player);
+}
+
 /// The player inventory slot that holds the open backpack (SB: its slot can't be picked up).
 bool lockedSlot(Player& player, Location const& loc) {
     if (loc.area != Area::Inventory) return false;
@@ -110,6 +272,16 @@ int take(Player& player, Location const& loc, int amount) {
         model->setItem(loc.slot, item);
         return n;
     }
+    if (auto vs = vanillaSlot(player, loc)) {
+        ItemStack item = vanillaItem(player, *vs);
+        if (item.isNull()) return 0;
+        int       n      = std::min<int>(amount, item.mCount);
+        if (n >= item.mCount) item = ItemStack{};
+        else item.set(item.mCount - n);
+        setVanillaItem(player, *vs, item);
+        onTakenFromVanilla(player, *vs, n);
+        return n;
+    }
     if (loc.area == Area::Storage) {
         auto* menu = openBackpackMenu(player);
         if (!menu) return 0;
@@ -126,6 +298,8 @@ int take(Player& player, Location const& loc, int amount) {
 void putBack(Player& player, Location const& loc, ItemStack const& item) {
     if (auto pl = playerLocation(loc)) {
         game::setItemAt(player, *pl, item);
+    } else if (auto vs = vanillaSlot(player, loc)) {
+        setVanillaItem(player, *vs, item);
     } else if (loc.area == Area::Container) {
         if (auto model = openContainer(player)) model->setItem(loc.slot, item);
     } else if (loc.area == Area::Storage) {
@@ -190,6 +364,7 @@ int stashCursorIntoSlot(Player& player, Location const& loc) {
     if (cursor.isNull() || lockedSlot(player, loc)) return 0;
     ItemStack target;
     if (auto pl = playerLocation(loc)) target = game::itemAt(player, *pl);
+    else if (auto vs = vanillaSlot(player, loc)) target = vanillaItem(player, *vs);
     else if (loc.area == Area::Container) {
         auto model = openContainer(player);
         if (!model || loc.slot < 0 || loc.slot >= model->getContainerSize()) return 0;
@@ -226,8 +401,26 @@ std::optional<Location> parseLocation(nlohmann::json const& j) {
     else if (area == "offhand") loc.area = Area::Offhand;
     else if (area == "container") loc.area = Area::Container;
     else if (area == "storage") loc.area = Area::Storage;
-    else return std::nullopt;
+    else if (area.starts_with("vanilla.")) {
+        int container = -1;
+        try {
+            std::size_t used = 0;
+            container        = std::stoi(area.substr(8), &used);
+            if (used != area.size() - 8) return std::nullopt;
+        } catch (...) {
+            return std::nullopt;
+        }
+        if (!stashableContainer(container)) return std::nullopt;
+        loc.area      = Area::Vanilla;
+        loc.container = container;
+    } else return std::nullopt;
     return loc;
+}
+
+bool stashableContainer(int container) {
+    if (container < 0 || container > 255) return false;
+    auto name = static_cast<ContainerEnumName>(container);
+    return uiSlotFor(name, 0, true).has_value() || isModelCollection(name);
 }
 
 std::string areaName(Location::Area area) {
@@ -242,15 +435,24 @@ std::string areaName(Location::Area area) {
         return "container";
     case Area::Storage:
         return "storage";
+    case Area::Vanilla:
+        return "vanilla";
     }
     return "";
 }
 
-std::string key(Location const& loc) { return areaName(loc.area) + ":" + std::to_string(loc.slot); }
+std::string key(Location const& loc) {
+    if (loc.area == Area::Vanilla) return "vanilla." + std::to_string(loc.container) + ":" + std::to_string(loc.slot);
+    return areaName(loc.area) + ":" + std::to_string(loc.slot);
+}
 
 core::ItemStackData itemAt(Player& player, Location const& loc) {
     if (auto pl = playerLocation(loc)) {
         auto const& s = game::itemAt(player, *pl);
+        return s.isNull() ? core::ItemStackData{} : game::ItemConv::toData(s);
+    }
+    if (auto vs = vanillaSlot(player, loc)) {
+        auto s = vanillaItem(player, *vs);
         return s.isNull() ? core::ItemStackData{} : game::ItemConv::toData(s);
     }
     if (loc.area == Area::Container) {
@@ -271,6 +473,12 @@ core::ItemStackData itemAt(Player& player, Location const& loc) {
 
 bool inOpenContainer(Player& player, std::string const& uuid) {
     if (uuid.empty()) return false;
+    // The player's own station slots (crafting grid, smithing table, ...: the UI container); GX-3:
+    // the crafting result preview shows the source backpack's contents.
+    for (int i = 1; i < static_cast<int>(PlayerUISlot::Count); ++i) {
+        auto const& s = player.mPlayerUIContainer->getItem(i);
+        if (!s.isNull() && game::isBackpack(s) && game::backpackUuid(s) == uuid) return true;
+    }
     auto model = openContainer(player);
     if (!model) return false;
     int size = std::min(model->getContainerSize(), 256);
@@ -288,8 +496,10 @@ Result stashable(Player* player, game::Backpack& backpack, core::ItemStackData c
     for (int i = 0; i < inv.size(); ++i) {
         if (sameType(inv.at(i), item)) return Result::MatchAndSpace;
     }
+    // SC MemorySettingsCategory.matchesFilter: by item, or the exact stack with Match NBT.
+    bool ignoreNbt = feature::gui::memoryIgnoresNbt(backpack);
     for (auto const& m : feature::gui::memory(backpack)) {
-        if (sameType(m, item)) return Result::MatchAndSpace;
+        if (feature::gui::memoryAccepts(ignoreNbt, m, item)) return Result::MatchAndSpace;
     }
     return Result::Space;
 }

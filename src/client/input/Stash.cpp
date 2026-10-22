@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "ll/api/event/EventBus.h"
@@ -25,6 +26,8 @@
 #include "mc/client/gui/controls/UIControl.h"
 #include "mc/client/gui/controls/renderers/InventoryItemRenderOwnerData.h"
 #include "mc/client/gui/controls/renderers/InventoryItemRenderer.h"
+#include "mc/deps/core/utility/PropertyBag.h"
+#include "mc/deps/json/Value.h"
 #include "mc/client/gui/screens/ScreenController.h"
 #include "mc/client/gui/screens/ScreenView.h"
 #include "mc/client/gui/screens/controllers/ContainerScreenController.h"
@@ -32,6 +35,9 @@
 #include "mc/client/gui/screens/controllers/FurnaceScreenController.h"
 #include "mc/client/player/LocalPlayer.h"
 #include "mc/client/renderer/screen/MinecraftUIRenderContext.h"
+#include "mc/world/containers/ContainerEnumName.h"
+#include "mc/world/containers/ContainerFactory.h"
+#include "mc/world/containers/FullContainerName.h"
 #include "mc/network/NetEventCallback.h"
 #include "mc/network/ServerNetworkHandler.h"
 #include "mc/world/PlayerUIContainer.h"
@@ -46,6 +52,7 @@
 #include "client/ui/UiRoot.h"
 #include "client/ui/gfx/Painter.h"
 #include "client/ui/screen/BackpackScreen.h"
+#include "feature/stash/Stash.h"
 #include "game/BackpackItem.h"
 #include "mod/Log.h"
 #include "net/Packets.h"
@@ -140,19 +147,20 @@ void onAnswer(nlohmann::json const& body) {
     auto const& results = body.contains("results") && body["results"].is_object() ? body["results"] : nlohmann::json::object();
     gState.results.clear();
     std::size_t found = 0;
+    std::string foundKeys;
     for (auto const& [key, fp] : gState.sent) {
         Result r = Result::None;
         if (auto it = results.find(key); it != results.end() && it->is_number_integer()) {
             int v = it->get<int>();
             r     = v == 2 ? Result::Match : v == 1 ? Result::Space : Result::None;
         }
-        if (r != Result::None) ++found;
+        if (r != Result::None) ++found, foundKeys += " " + key;
         gState.results[key] = Entry{fp, r};
     }
     gState.resultsCursor = gState.sentCursor;
     if (found != gState.loggedCount) {
         gState.loggedCount = found;
-        log().info("stash: {} of {} slots stashable for the cursor {}", found, gState.sent.size(), gState.sentCursor);
+        log().info("stash: {} of {} slots stashable for the cursor {}:{}", found, gState.sent.size(), gState.sentCursor, foundKeys);
     }
 }
 
@@ -164,14 +172,34 @@ bool creativeInventory() {
 }
 
 /// A vanilla collection slot -> the server location.
-std::optional<std::pair<std::string_view, int>> locationOf(std::string const& c, int i) {
+std::optional<std::pair<std::string, int>> locationOf(std::string const& c, int i) {
     if (i < 0) return std::nullopt;
-    if ((c == "hotbar_items" || c == "inventory_items" || c == "combined_hotbar_and_inventory_items") && i < 36) {
-        return std::pair<std::string_view, int>{"inventory", i};
+    if ((c == "hotbar_items" && i < 9) || (c == "combined_hotbar_and_inventory_items" && i < 36)) {
+        return std::pair<std::string, int>{"inventory", i};
     }
-    if (c == "armor_items" && i < 4) return std::pair<std::string_view, int>{"armor", i};
-    if (c == "offhand_items") return std::pair<std::string_view, int>{"offhand", 0};
-    if (c == "container_items") return std::pair<std::string_view, int>{"container", i};
+    // The main inventory grid counts from 0 (= player inventory slot 9).
+    if (c == "inventory_items" && i < 27) return std::pair<std::string, int>{"inventory", i + 9};
+    if (c == "armor_items" && i < 4) return std::pair<std::string, int>{"armor", i};
+    if (c == "offhand_items") return std::pair<std::string, int>{"offhand", 0};
+    if (c == "container_items") return std::pair<std::string, int>{"container", i};
+    // GX-3: SB stashes in any slot of any container menu (crafting grid, furnace, stations, ...);
+    // the server gets the collection's ContainerEnumName.
+    static std::unordered_map<std::string, int> known; // client thread: collection -> enum or -1
+    auto it = known.find(c);
+    if (it == known.end()) {
+        int container = -1;
+        try {
+            auto full = ContainerFactory::getContainerEnumName(c);
+            container = static_cast<int>(static_cast<ContainerEnumName>(full.mName));
+        } catch (...) {
+        }
+        log().info("stash: vanilla collection {} -> container {}{}", c, container, feature::stash::stashableContainer(container) ? "" : " (not stashable)");
+        // An unknown name comes back as the first enum value (AnvilInputContainer).
+        if (container == static_cast<int>(ContainerEnumName::AnvilInputContainer) && c.find("anvil") == std::string::npos) container = -1;
+        if (!feature::stash::stashableContainer(container)) container = -1;
+        it = known.emplace(c, container).first;
+    }
+    if (it->second >= 0) return std::pair<std::string, int>{"vanilla." + std::to_string(it->second), i};
     return std::nullopt;
 }
 
@@ -331,6 +359,20 @@ LL_TYPE_INSTANCE_HOOK(
     return origin(collectionName, collectionIndex, allItems);
 }
 
+// GX-3: a right click on a slot nothing can be placed into (furnace result, ...) takes half.
+LL_TYPE_INSTANCE_HOOK(
+    AbpStashTakeHalfHook,
+    ll::memory::HookPriority::Normal,
+    ContainerScreenController,
+    &ContainerScreenController::$_handleTakeHalf,
+    void,
+    std::string const& collectionName,
+    int                index
+) {
+    if (takeRightClick(*this, collectionName, index)) return;
+    origin(collectionName, index);
+}
+
 namespace {
 /// The icon InventoryItemRenderer::render is drawing right now: `_render` gets its real screen
 /// position (UIControl positions don't include scroll panel offsets).
@@ -338,6 +380,7 @@ struct PendingIcon {
     bool  active = false;
     bool  got    = false;
     float x = 0, y = 0;
+    PropertyBag const* bag = nullptr;
 };
 PendingIcon gPendingIcon; // client (render) thread
 /// The container screen controller of the view being rendered (BeforeUIRenderEvent).
@@ -358,6 +401,7 @@ LL_TYPE_INSTANCE_HOOK(
         gPendingIcon.x   = owner.mScreenAlignedX;
         gPendingIcon.y   = owner.mScreenAlignedY;
         gPendingIcon.got = true;
+        gPendingIcon.bag = &static_cast<PropertyBag const&>(owner.mPropertyBag);
     }
     origin(renderContext, owner, pass);
 }
@@ -390,10 +434,24 @@ LL_TYPE_INSTANCE_HOOK(
         // The slot this icon belongs to (the callback's index is not the slot index; the
         // collection index is looked up by name).
         std::optional<std::pair<std::string, int>> slot;
-        owner.findAllCollectionIndices([&](std::string const& name, int) {
-            int index = owner.findCollectionIndex(name);
+        std::optional<std::pair<std::string, int>> output; // result / output previews (e2e positions)
+        bool                                       anyName = false;
+        auto consider = [&](std::string const& name, int index) {
+            anyName = true;
             if (!slot && locationOf(name, index)) slot = std::pair<std::string, int>{name, index};
-        });
+            if (!output && (name.find("output") != std::string::npos || name.find("result") != std::string::npos)) output = std::pair<std::string, int>{name, index};
+        };
+        owner.findAllCollectionIndices([&](std::string const& name, int) { consider(name, owner.findCollectionIndex(name)); });
+        if (!anyName && drawn.bag) {
+            // Single slots outside a grid (furnace, stations): the icon's own collection binding.
+            auto const& json = *drawn.bag->mJsonValue;
+            auto        name = json["#collection_name"].asString(std::string{});
+            if (!name.empty()) consider(name, json["#collection_index"].asInt(0));
+        }
+        if (!slot && output && output->second >= 0) {
+            auto const& size = owner.mSize.get();
+            noteSlotRect(controller, "out." + output->first + ":" + std::to_string(output->second), drawn.x, drawn.y, size.x > 0 ? size.x / 16.f : 1.f);
+        }
         if (!slot) return;
         auto  loc  = locationOf(slot->first, slot->second);
         auto  key  = keyOf(loc->first, loc->second);
@@ -423,6 +481,20 @@ public:
     [[nodiscard]] int         zOrder() const override { return 500; }
     [[nodiscard]] bool        visible(ui::FrameInfo const& f) const override {
         return f.isContainerScreen && !ui::nativeScreenActive() && active();
+    }
+    // GX-3: station and result slots (furnace output, ...) where the screen has no right-click
+    // handler of its own: the right click is taken here when it stashes.
+    bool onMouseButton(ui::MouseButton button, bool down, float, float) override {
+        if (button != ui::MouseButton::Right || !down) return false;
+        auto hovered = hoveredVanillaSlot();
+        if (!hovered) return false;
+        auto loc = locationOf(hovered->collection, hovered->index);
+        if (!loc || !loc->first.starts_with("vanilla.")) return false;
+        auto const& item = hoveredVanillaItem();
+        if (item.isNull() || !rightClick(loc->first, loc->second, item)) return false;
+        gHandledPress = detail::snapshot().rightPressMs.load();
+        log().info("stash: right click on {} #{} ({} {})", hovered->collection, hovered->index, loc->first, loc->second);
+        return true;
     }
     void render(ui::Painter& p, ui::FrameInfo const& f) override {
         double t = now();
@@ -527,6 +599,7 @@ void installStash() {
     AbpStashCraftingPlaceOneHook::hook();
     AbpStashFurnacePlaceOneHook::hook();
     AbpStashTakePlaceHook::hook();
+    AbpStashTakeHalfHook::hook();
     AbpStashItemRenderHook::hook();
     AbpStashItemRenderInnerHook::hook();
     auto& bus = ll::event::EventBus::getInstance();
@@ -549,6 +622,7 @@ void uninstallStash() {
     gListeners.clear();
     AbpStashItemRenderInnerHook::unhook();
     AbpStashItemRenderHook::unhook();
+    AbpStashTakeHalfHook::unhook();
     AbpStashTakePlaceHook::unhook();
     AbpStashFurnacePlaceOneHook::unhook();
     AbpStashCraftingPlaceOneHook::unhook();

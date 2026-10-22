@@ -9,6 +9,8 @@
 #include "mc/world/actor/player/Inventory.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
+#include "mc/world/containers/ContainerEnumName.h"
 
 #include "feature/gui/Gui.h"
 #include "feature/stash/Stash.h"
@@ -194,6 +196,50 @@ ABP_REGISTER_SELFTEST("input.stash_key_actions", [](Context& ctx) {
     ctx.check(countOf(*bp, "minecraft:sand") == 7, "sand stashed");
     ctx.check(!net::handleKeyAction(p, nlohmann::json{{"action", "stash"}, {"area", "inventory"}, {"slot", 12}}), "nothing left");
     ctx.check(!net::handleKeyAction(p, nlohmann::json{{"action", "stash"}, {"area", "bogus"}, {"slot", 1}}), "bad location");
+});
+
+// GX-3: SB stashes in any container slot: the crafting grid (UI container slots) here; the client
+// e2e covers the crafting table and furnace screens.
+ABP_REGISTER_SELFTEST("stash.vanilla_station_slots", [](Context& ctx) {
+    auto& p = ctx.player();
+    CleanCursor clean{p};
+    auto num     = [](ContainerEnumName e) { return std::to_string(static_cast<int>(e)); };
+    auto grid    = num(ContainerEnumName::CraftingInputContainer);
+    auto preview = num(ContainerEnumName::CraftingOutputPreviewContainer);
+    ctx.check(stashableContainer(static_cast<int>(ContainerEnumName::CraftingInputContainer)), "crafting grid slots stash");
+    ctx.check(stashableContainer(static_cast<int>(ContainerEnumName::FurnaceResultContainer)), "furnace result slots stash");
+    ctx.check(stashableContainer(static_cast<int>(ContainerEnumName::SmithingTableInputContainer)), "smithing input slots stash");
+    ctx.check(!stashableContainer(static_cast<int>(ContainerEnumName::CraftingOutputPreviewContainer)), "the crafting output preview does not (not a real slot)");
+    ctx.check(!stashableContainer(static_cast<int>(ContainerEnumName::CursorContainer)), "the cursor does not");
+    ctx.check(!stashableContainer(-1) && !stashableContainer(9999), "out of range");
+    ctx.check(!parseLocation(nlohmann::json{{"area", "vanilla.13x"}, {"slot", 0}}).has_value(), "malformed area refused");
+
+    auto bp       = ctx.createBackpack(Tier::Leather);
+    int  gridSlot = static_cast<int>(PlayerUISlot::Crafting2x2Input1) + 1;
+    p.mPlayerUIContainer->setItem(gridSlot, game::ItemConv::make("minecraft:oak_planks", 3));
+    setCursor(p, ctx.backpackItem(*bp));
+    nlohmann::json at{{"area", "vanilla." + grid}, {"slot", 1}};
+    auto           loc = parseLocation(at);
+    ctx.require(loc && loc->area == Area::Vanilla && std::to_string(loc->container) == grid, "parsed");
+    ctx.check(key(*loc) == "vanilla." + grid + ":1", "key: " + key(*loc));
+    ctx.check(itemAt(p, *loc).id == "minecraft:oak_planks", "the 2x2 grid slot (inventory screen)");
+    ctx.check(overlay(p, *loc) == Result::Space, "'-' sign: the backpack on the cursor has space");
+    auto q = query(p, nlohmann::json{{"slots", nlohmann::json::array({at})}});
+    ctx.check(q["results"].value("vanilla." + grid + ":1", 0) == 1, "query answers for the grid slot: " + q.dump());
+    at["action"] = "stash";
+    ctx.check(net::handleKeyAction(p, at), "right click stashes from the crafting grid");
+    ctx.check(countOf(*bp, "minecraft:oak_planks") == 3, "planks in the backpack");
+    ctx.check(p.mPlayerUIContainer->getItem(gridSlot).isNull(), "grid slot emptied");
+
+    // A backpack in the grid takes the cursor (overrideOtherStackedOnMe).
+    auto other = ctx.createBackpack(Tier::Leather);
+    p.mPlayerUIContainer->setItem(gridSlot, ctx.backpackItem(*other));
+    setCursor(p, game::ItemConv::make("minecraft:stick", 5));
+    ctx.check(net::handleKeyAction(p, nlohmann::json{{"action", "stash"}, {"area", "vanilla." + grid}, {"slot", 1}}), "cursor into the grid backpack");
+    ctx.check(countOf(*other, "minecraft:stick") == 5 && cursor(p).isNull(), "sticks stashed");
+    ctx.check(inOpenContainer(p, other->uuid()), "a backpack in the grid may show its contents");
+    p.mPlayerUIContainer->setItem(gridSlot, ItemStack{});
+    ctx.check(!net::handleKeyAction(p, nlohmann::json{{"action", "stash"}, {"area", "vanilla." + preview}, {"slot", 0}}), "previews are refused");
 });
 
 } // namespace
