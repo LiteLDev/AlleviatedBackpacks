@@ -209,7 +209,7 @@ ABP_REGISTER_SELFTEST("everlasting.world_hazards", [](Context& ctx) -> ll::coro:
 // SB EverlastingBackpackItemEntity.ignoreExplosion: explosions don't push it either.
 ABP_REGISTER_SELFTEST("everlasting.explosion_knockback", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
-    co_await ctx.ticks(10);
+    co_await placed::test::toGround(ctx, player); // the client's test player spawns above the world
     auto  p = makePair(ctx);
     Drops drops(player);
     auto const& pp   = player.getPosition();

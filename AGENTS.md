@@ -220,7 +220,8 @@ of sending container packets yourself.
 - `config/menu.json` `"debugPackets": true` logs every fake-chest packet sent and received
   (`[menu-dbg]`). On the client build it also logs what the game client receives and its top
   screen. With it on, `/backpack menudebug closeopen` opens the carried backpack, closes it from the
-  server and reopens it 4 ticks later. The client e2e scenario `menus` uses both.
+  server and reopens it 4 ticks later. (Companion players never see fake chests; the server selftests
+  `menu.*` drive them with simulated players.)
 
 ## Conventions
 

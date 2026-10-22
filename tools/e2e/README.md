@@ -83,10 +83,23 @@ BDS uses `default-player-permission-level=operator`, so chat commands work in re
 Calibrated click positions (fractions of the client area) live at the end of `Enter-RemoteServer`
 in `client/lib.ps1`.
 
-Since the client mod is required and draws every backpack screen natively, the older client
-scenarios that click the phase-1 fake chest (`menus`, `gui`, ...) no longer see a chest: they are
-superseded by `companion` (the server-side behaviour they covered stays in their selftests, run by
-the server harness).
+Since the client mod is required and draws every backpack screen natively, the phase-1 client
+scenarios that clicked the fake chest (`compacting`, `deposit`, `feeding`, `gui`, `magnet`,
+`menus`, `pickup`, `placed`, `restock`, `stack`, `void`, `wearable`) were retired. What they covered
+is still covered:
+
+| Retired | Now covered by |
+|---|---|
+| `compacting`, `deposit`, `restock`, `feeding`, `magnet`, `pickup`, `void`, `stack` | their selftests (`compacting.*`, `deposit.*`, `restock.*`, `feeding.*`, `magnet.*`, `pickup.*`, `filter.*`, `void.*`, `stack.*`; server `full` and the per-unit server scenarios) and the native screens: `mfvc` (Magnet, Feeding, Void, Compacting tabs), `filters` (Pickup, Filter, Restock, Deposit tabs, C key and sneak + use on a container), `mainscreen` (big stack counts) |
+| `gui` | `gui.*` selftests; the native control row (sort, transfer, settings) in `mainscreen` and `settings` |
+| `menus` | `menu.*` selftests (fake chests are only for simulated players now) |
+| `placed` | `placed.*` / `hopper.*` selftests; real sneak + right-click placing, opening (native screen) and picking up in `parity`; models in `models` |
+| `wearable` | `wearable.*` selftests; worn / held models in `models` |
+
+Client scenario `parity` (GX-5, `-Mode local` and `-Mode remote-mod`) covers SB's upgrade limits
+in the native screen (two Crafting upgrades, the refused second Jukebox with its error overlay),
+piglins and the Gold Backpack, dispensers placing backpacks, placing / opening / picking up by hand
+and an Everlasting backpack in an explosion (`/backpack parity ...` sets the scenes up).
 
 ## Prerequisites
 
