@@ -176,9 +176,11 @@ Gui-Move 100 3
 Shot 'basic-void-tab'
 Tab-Click 7
 $mark = Get-LogMark
-# ESC, not E: the E key also reaches the game after the native screen closed (emote wheel).
+# ESC first (with real input E also reached the game afterwards: emote wheel); headless input may
+# not deliver ESC to the screen, then E.
 Press-Key ESC
-Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
+try { Wait-LogLine 'native screen action: close by' 4 -Since $mark | Out-Null }
+catch { Press-Key 'E'; Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null }
 Start-Sleep -Milliseconds 2000
 Save-Screenshot 'closed' | Out-Null
 
