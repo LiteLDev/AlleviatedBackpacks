@@ -128,14 +128,11 @@ void give(CommandOrigin const& origin, CommandOutput& output, CommandSelector<Pl
     if (record->backpackName != backpackDisplayName(*tier)) {
         backpack.setCustomName(Bedrock::Safety::RedactableString{record->backpackName});
     }
-    // SB writes the logged colours and columns into the backpack it gives.
+    // SB writes the logged colours into the backpack it gives (the columns taken follow the
+    // storage's installed upgrades here).
     if (auto bp = game::Storage::get().find(uuid)) {
         bp->data().mainColor   = record->clothColor;
         bp->data().accentColor = record->trimColor;
-        if (record->columnsTaken > 0) {
-            if (!bp->data().settings.is_object()) bp->data().settings = nlohmann::json::object();
-            bp->data().settings["columnsTaken"] = record->columnsTaken;
-        }
         bp->markDirty();
     }
     std::vector<Player*> players;

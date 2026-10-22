@@ -90,12 +90,7 @@ void AccessLog::logPlayerAccess(Player& player, std::string const& itemId, game:
     r.clothColor               = backpack.data().mainColor;
     r.trimColor                = backpack.data().accentColor;
     r.accessTime               = epochMillis();
-    auto const& settings       = backpack.data().settings;
-    if (settings.is_object()) {
-        if (auto it = settings.find("columnsTaken"); it != settings.end() && it->is_number_integer()) {
-            r.columnsTaken = it->get<int>();
-        }
-    }
+    r.columnsTaken             = backpack.data().columnsTaken;
     put(std::move(r));
 }
 

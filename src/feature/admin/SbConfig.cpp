@@ -23,6 +23,7 @@
 #include "mc/world/SimpleSparseContainer.h"
 #include "mc/world/containers/FullContainerName.h"
 
+#include "core/Capacity.h"
 #include "core/Tier.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
@@ -142,12 +143,14 @@ void fillEnabledItems() {
 
 // ---- tier slot counts -------------------------------------------------------------------------
 
-/// `<tier>Backpack.inventorySlotCount / upgradeSlotCount`: storage grows to the configured size;
-/// it shrinks only when nothing would be lost (the slots to cut are empty), like SB keeps stacks
-/// beyond a lowered slot count instead of deleting them.
+/// `<tier>Backpack.inventorySlotCount / upgradeSlotCount`: storage grows to the configured size
+/// (minus the columns upgrade inventory parts take); it shrinks only when nothing would be lost
+/// (the slots to cut are empty), like SB keeps stacks beyond a lowered slot count instead of
+/// deleting them.
 void applySlotCounts(game::Backpack& bp) {
-    auto& d       = bp.data();
-    int   slots   = inventorySlotCount(bp.tier());
+    auto& d = bp.data();
+    // Upgrade inventory parts (tank, battery) take columns of the configured layout.
+    int slots    = core::capacity::slotsAfterColumns(inventorySlotCount(bp.tier()), d.columnsTaken);
     int   upgrades = upgradeSlotCount(bp.tier());
     auto& inv     = d.inventory;
     if (inv.size() != slots) {
