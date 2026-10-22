@@ -80,21 +80,18 @@ TEST(MainScreen, WrapsAtSpacesLikeFontSplit) {
 // ---- layout ----------------------------------------------------------------------------------------------
 
 TEST(MainScreen, ColumnsTakenKeepRowsAndAddPartArea) {
-    // Iron (54 slots, 6 rows) with one column taken: 48 slots shown in 8 columns.
-    EXPECT_EQ(storageRows(48, 1), 6);
+    // Iron (54 slots, 6 rows) with a tank (2 columns): 42 slots shown in 7 columns, one 36 wide part.
     LayoutInput in;
-    in.storageSlots = 48;
-    in.columnsTaken = 1;
+    in.storageSlots = 54 - 2 * 6;
+    in.columnsTaken = 2;
     in.screenHeight = 400;
     auto l          = computeLayout(in);
     EXPECT_EQ(l.rows, 6);
     EXPECT_EQ(l.slotsOnLine, 9);
-    EXPECT_EQ(l.storageColumns, 8);
+    EXPECT_EQ(l.storageColumns, 7);
     EXPECT_EQ(l.imageWidth, 176);
-    EXPECT_EQ(l.inventoryParts, (Rect{7 + 8 * 18, 17, 18, 6 * 18}));
-    // Gold (81) with two columns taken stays on the 9 column background; netherite with a scroll bar
-    // puts the parts right of the bar.
-    EXPECT_EQ(storageRows(63, 2), 9);
+    EXPECT_EQ(l.inventoryParts, (Rect{7 + 7 * 18, 17, 36, 6 * 18}));
+    // Netherite with a scroll bar puts the parts right of the bar.
     LayoutInput n;
     n.storageSlots = 120 - 2 * 10;
     n.columnsTaken = 2;
@@ -135,15 +132,9 @@ TEST(MainScreen, ModelCarriesMainScreenFields) {
     m.slotLimits          = {0, 0};
     m.baseSlotLimit       = 1024;
     m.inaccessible        = {false, true};
-    m.errorInventoryParts = {3};
-    UpgradeView u;
-    u.columnsTaken = 2;
-    m.upgrades.push_back(u);
     auto back = BackpackScreenModel::fromJson(m.toJson());
     EXPECT_EQ(back.baseSlotLimit, 1024);
     EXPECT_EQ(back.inaccessible, (std::vector<bool>{false, true}));
-    EXPECT_EQ(back.errorInventoryParts, std::vector<int>{3});
-    EXPECT_EQ(back.upgrades[0].columnsTaken, 2);
     auto changed          = back;
     changed.baseSlotLimit = 64;
     changed.inaccessible  = {};

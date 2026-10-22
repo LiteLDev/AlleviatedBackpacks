@@ -57,9 +57,9 @@ inline constexpr int kTextColor                 = 0x404040;
 struct LayoutInput {
     int storageSlots = 27;
     int upgradeSlots = 1;
-    /// Storage columns taken by upgrade inventory parts (SC `getColumnsTaken`: tank and battery
-    /// upgrades show their bars there). `storageSlots` is then the remaining slot count; the rows
-    /// still come from the full slot count (`storageSlots + columnsTaken * rows`).
+    /// Storage columns taken by upgrade inventory parts (SB `getInventoryColumnsTaken`: 2 per Tank /
+    /// Battery upgrade). `storageSlots` is then the remaining slot count; rows and the 9/12 column
+    /// background come from the base layout (`capacity::baseSlotsFor`).
     int columnsTaken = 0;
     /// Height of the screen in GUI units (decides how many rows fit before the scroll bar).
     int screenHeight = 240;
@@ -99,8 +99,9 @@ struct StorageLayout {
     Point tabsOrigin;    ///< top-left of the first tab (the backpack settings tab)
     Rect  scrollPanel;   ///< slot area incl. the scroll bar (valid when `scroll`)
     Rect  storageArea;   ///< where storage slot backgrounds go (rows that fit)
-    /// The taken columns right of the storage slots (and the scroll bar), where upgrades' inventory
-    /// parts are drawn (SC `initUpgradeInventoryControls`); w = 0 when no column is taken.
+    /// Upgrade inventory parts (SC `initUpgradeInventoryControls`, when columns are taken): the
+    /// first part's top-left, right of the slots (and the scroll bar); each part is 36 wide and
+    /// `inventoryParts.h` (= visible rows x 18) high. w = 36 x columnsTaken / 2.
     Rect  inventoryParts;
 
     /// Height of the upgrade column without its bottom border (`getUpgradeHeightWithoutBottom`).
@@ -116,9 +117,6 @@ struct StorageLayout {
 
 /// Storage slot rows of a backpack (`ceil(slots/9)` up to 81 slots, else `ceil(slots/12)`).
 [[nodiscard]] int storageRows(int storageSlots);
-/// Rows of a backpack showing `storageSlots` slots with `columnsTaken` columns taken by upgrade
-/// inventory parts (the rows of the full slot count `storageSlots + columnsTaken * rows`).
-[[nodiscard]] int storageRows(int storageSlots, int columnsTaken);
 
 // ---- scroll panel (NeoForge ScrollPanel as used by InventoryScrollPanel) -------------------------
 

@@ -57,16 +57,13 @@ std::vector<UpgradeView> upgradesFrom(json const& j) {
 }
 
 json errorJson(BackpackScreenModel const& m) {
-    json j{{"msg", m.errorMessage}, {"up", m.errorUpgradeSlots}, {"inv", m.errorStorageSlots}};
-    if (!m.errorInventoryParts.empty()) j["parts"] = m.errorInventoryParts;
-    return j;
+    return json{{"msg", m.errorMessage}, {"up", m.errorUpgradeSlots}, {"inv", m.errorStorageSlots}};
 }
 
 void errorFrom(BackpackScreenModel& m, json const& j) {
-    m.errorMessage        = value<std::string>(j, "msg", {});
-    m.errorUpgradeSlots   = value<std::vector<int>>(j, "up", {});
-    m.errorStorageSlots   = value<std::vector<int>>(j, "inv", {});
-    m.errorInventoryParts = value<std::vector<int>>(j, "parts", {});
+    m.errorMessage      = value<std::string>(j, "msg", {});
+    m.errorUpgradeSlots = value<std::vector<int>>(j, "up", {});
+    m.errorStorageSlots = value<std::vector<int>>(j, "inv", {});
 }
 
 bool sameItems(ItemStackData const& a, ItemStackData const& b) {
@@ -89,7 +86,6 @@ json UpgradeView::toJson() const {
     };
     if (!lore.empty()) j["lore"] = lore;
     if (!tab.empty()) j["tab"] = tab;
-    if (columnsTaken != 0) j["cols"] = columnsTaken;
     return j;
 }
 
@@ -104,7 +100,6 @@ UpgradeView UpgradeView::fromJson(json const& j) {
     u.toggleable  = value<bool>(j, "tog", false);
     u.runnable    = value<bool>(j, "run", true);
     u.hasSettings = value<bool>(j, "set", false);
-    u.columnsTaken = std::max(0, value<int>(j, "cols", 0));
     if (auto it = j.find("tab"); it != j.end() && it->is_object()) u.tab = *it;
     return u;
 }
@@ -223,8 +218,7 @@ json makePatch(BackpackScreenModel const& a, BackpackScreenModel const& b) {
     if (a.stackMultiplier != b.stackMultiplier) p["mult"] = b.stackMultiplier;
     if (a.mainColor != b.mainColor) p["main"] = b.mainColor;
     if (a.accentColor != b.accentColor) p["accent"] = b.accentColor;
-    if (a.errorMessage != b.errorMessage || a.errorUpgradeSlots != b.errorUpgradeSlots || a.errorStorageSlots != b.errorStorageSlots
-        || a.errorInventoryParts != b.errorInventoryParts) {
+    if (a.errorMessage != b.errorMessage || a.errorUpgradeSlots != b.errorUpgradeSlots || a.errorStorageSlots != b.errorStorageSlots) {
         p["error"] = errorJson(b);
     }
     if (a.extra != b.extra) p["extra"] = b.extra;

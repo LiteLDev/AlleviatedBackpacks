@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/Capacity.h"
+
 namespace abp::core::screen {
 
 using namespace geometry;
@@ -11,15 +13,6 @@ int storageRows(int storageSlots) {
     if (storageSlots <= 0) return 0;
     int columns = storageSlots <= 81 ? 9 : 12;
     return (storageSlots + columns - 1) / columns;
-}
-
-int storageRows(int storageSlots, int columnsTaken) {
-    if (columnsTaken <= 0) return storageRows(storageSlots);
-    // rows = rows(storageSlots + columnsTaken * rows): the smallest fixed point.
-    for (int rows = 1; rows <= 1024; ++rows) {
-        if (storageRows(storageSlots + columnsTaken * rows) == rows) return rows;
-    }
-    return storageRows(storageSlots);
 }
 
 int StorageLayout::upgradeHeightWithoutBottom() const {
@@ -37,14 +30,15 @@ Rect StorageLayout::scrollBar() const {
 
 StorageLayout computeLayout(LayoutInput const& in) {
     StorageLayout l;
-    l.rows = storageRows(in.storageSlots, in.columnsTaken);
+    int baseSlots = capacity::baseSlotsFor(in.storageSlots, in.columnsTaken);
+    l.rows        = storageRows(baseSlots);
 
     // updateDimensionsAndSlotPositions(height)
     int displayable = std::min((in.screenHeight - kHeightWithoutStorageSlots) / kSlotSize, l.rows);
     displayable     = std::max(displayable, std::min(1, l.rows));
     l.visibleRows   = displayable;
     l.imageHeight   = kHeightWithoutStorageSlots + displayable * kSlotSize;
-    bool regular9   = in.storageSlots + in.columnsTaken * l.rows <= 81;
+    bool regular9   = baseSlots <= 81;
     l.slotsOnLine   = regular9 ? 9 : 12;
     l.playerInventoryXOffset = regular9 ? 0 : 27;
     l.imageWidth    = l.slotsOnLine * kSlotSize + 14;
@@ -115,7 +109,7 @@ StorageLayout computeLayout(LayoutInput const& in) {
     l.scrollPanel = {kSlotsXOffset, kSlotsYOffset, l.storageColumns * kSlotSize + kScrollBarWidth, l.visibleRows * kSlotSize};
     if (in.columnsTaken > 0) {
         int x            = kSlotsXOffset + l.storageColumns * kSlotSize + (l.scroll ? kScrollBarWidth : 0);
-        l.inventoryParts = {x, kSlotsYOffset, in.columnsTaken * kSlotSize, l.visibleRows * kSlotSize};
+        l.inventoryParts = {x, kSlotsYOffset, 36 * (in.columnsTaken / 2), l.visibleRows * kSlotSize};
     }
     return l;
 }

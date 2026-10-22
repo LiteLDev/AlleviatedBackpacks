@@ -28,6 +28,7 @@
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/inception/Inception.h"
 #include "upgrade/stack/StackUpgrade.h"
+#include "upgrade/tank/Columns.h"
 
 namespace abp::net {
 
@@ -53,7 +54,6 @@ struct NativeSession {
     std::string         errorMessage;
     std::vector<int>    errorUpgradeSlots;
     std::vector<int>    errorStorageSlots;
-    std::vector<int>    errorInventoryParts;
     int                 errorTicks = 0;
     bool                dirty      = false; ///< push an update on the next tick
     /// Vanilla `lastQuickMoved`: what the last shift-click moved (Shift + double-click moves the
@@ -73,25 +73,17 @@ bool matchesUpgrade(std::string const& wanted, upgrade::IUpgrade const& type) {
 }
 
 void applyError(BackpackScreenModel& m, NativeSession const& s) {
-    m.errorMessage        = s.errorMessage;
-    m.errorUpgradeSlots   = s.errorUpgradeSlots;
-    m.errorStorageSlots   = s.errorStorageSlots;
-    m.errorInventoryParts = s.errorInventoryParts;
+    m.errorMessage      = s.errorMessage;
+    m.errorUpgradeSlots = s.errorUpgradeSlots;
+    m.errorStorageSlots = s.errorStorageSlots;
 }
 
-void setError(
-    NativeSession&   s,
-    std::string      message,
-    std::vector<int> upgradeSlots,
-    std::vector<int> storageSlots   = {},
-    std::vector<int> inventoryParts = {}
-) {
-    s.errorMessage        = std::move(message);
-    s.errorUpgradeSlots   = std::move(upgradeSlots);
-    s.errorStorageSlots   = std::move(storageSlots);
-    s.errorInventoryParts = std::move(inventoryParts);
-    s.errorTicks          = s.errorMessage.empty() ? 0 : kErrorTicks;
-    s.dirty               = true;
+void setError(NativeSession& s, std::string message, std::vector<int> upgradeSlots, std::vector<int> storageSlots = {}) {
+    s.errorMessage      = std::move(message);
+    s.errorUpgradeSlots = std::move(upgradeSlots);
+    s.errorStorageSlots = std::move(storageSlots);
+    s.errorTicks        = s.errorMessage.empty() ? 0 : kErrorTicks;
+    s.dirty             = true;
 }
 
 void forgetTabMenus(Player const& p);
@@ -425,7 +417,7 @@ bool pickupAll(Player& p, ui::BackpackMenu& menu, Area area, int index) {
             auto const st = bp->data().upgrades[static_cast<std::size_t>(i)];
             if (st.empty() || !sameItem(cursorOf(p), st.item)) continue;
             auto* type = upgrade::upgradeFor(st.item);
-            if (type && type->info().inventoryColumnsTaken > 0) continue; // canTakeItemForPickAll
+            if (upgrade::columns::columnsOf(st.item) > 0) continue; // canTakeItemForPickAll
             if (pass == 0 && st.item.count == st.item.maxStack) continue;
             std::string reason;
             if (type && !type->canRemove(upgrade::UpgradeContext(bp, i, &p), reason)) continue;
@@ -847,7 +839,6 @@ BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu) {
             v.toggleable  = type->info().toggleable;
             v.runnable    = upgrade::typeAllowed(*type);
             v.hasSettings = type->info().hasSettings;
-            v.columnsTaken = std::max(0, type->info().inventoryColumnsTaken);
             v.lore        = type->describe(player, ctx);
             if (type->info().hasSettings) {
                 if (auto tabMenu = tabMenuFor(player, *type, ctx)) v.tab["menu"] = tabMenuJson(player, *tabMenu);

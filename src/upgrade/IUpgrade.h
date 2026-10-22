@@ -40,10 +40,6 @@ struct UpgradeInfo {
     std::vector<std::string> conflicts;
     bool                     hasSettings = false; ///< show a settings button on the upgrades page
     bool                     toggleable  = true;  ///< show an on/off toggle
-    /// Storage columns the upgrade's inventory part takes in the native backpack screen (SC
-    /// `IUpgradeItem.getInventoryColumnsTaken`, e.g. tank and battery bars). The client draws the
-    /// part registered with `ABP_REGISTER_INVENTORY_PART` there.
-    int                      inventoryColumnsTaken = 0;
 
     [[nodiscard]] std::string const& groupOrId() const { return group.empty() ? id : group; }
 };
@@ -125,6 +121,12 @@ public:
     // ---- lifecycle --------------------------------------------------------------------------
     /// Extra install checks (slot limits and conflicts are already checked by the manager).
     virtual bool canInstall(UpgradeContext const& /*ctx*/, std::string& /*reason*/) const { return true; }
+    /// Like `canInstall`, with the item being installed (count 1; settings it carries from a
+    /// previous removal are still embedded: read them with `upgrade::settingsOf(item)`). E.g. a
+    /// Tank upgrade refuses a backpack too small for its contents. Default: `canInstall`.
+    virtual bool canInstallItem(UpgradeContext const& ctx, core::ItemStackData const& /*item*/, std::string& reason) const {
+        return canInstall(ctx, reason);
+    }
     virtual void onInstall(UpgradeContext const& /*ctx*/) {}
     /// E.g. a Stack upgrade refuses removal while slots hold more than the base limit.
     virtual bool canRemove(UpgradeContext const& /*ctx*/, std::string& /*reason*/) const { return true; }

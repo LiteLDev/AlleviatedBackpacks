@@ -134,8 +134,15 @@ void requestClose(); // host: close the screen now (and tell the server)
 
 /// SC upgrade tab label (`translUpgrade(id)`, e.g. "Magnet") and closed tab tooltip
 /// (`translUpgradeTooltip(id)`, e.g. "Magnet Settings"); the upgrade name when SC has none.
-std::string tabLabel(cs::UpgradeView const& u) { return u.id.empty() ? u.name : ctr("abp.mainscreen.tab." + u.id, u.name); }
-std::string tabTooltip(cs::UpgradeView const& u) { return u.id.empty() ? u.name : ctr("abp.mainscreen.tab." + u.id + ".tooltip", tabLabel(u)); }
+/// An upgrade's tab data may name them (`tabLabel` / `tabTooltip`).
+std::string tabLabel(cs::UpgradeView const& u) {
+    if (u.tab.is_object() && u.tab.contains("tabLabel") && u.tab["tabLabel"].is_string()) return u.tab["tabLabel"].get<std::string>();
+    return u.id.empty() ? u.name : ctr("abp.mainscreen.tab." + u.id, u.name);
+}
+std::string tabTooltip(cs::UpgradeView const& u) {
+    if (u.tab.is_object() && u.tab.contains("tabTooltip") && u.tab["tabTooltip"].is_string()) return u.tab["tabTooltip"].get<std::string>();
+    return u.id.empty() ? u.name : ctr("abp.mainscreen.tab." + u.id + ".tooltip", tabLabel(u));
+}
 
 bool isFillerItem(core::ItemStackData const& d) { return d.id == cs::kFillerId; }
 
@@ -307,17 +314,11 @@ private:
     [[nodiscard]] std::optional<cs::DragPreview> dragPreviewFor(cs::BackpackScreenModel const& m, SlotRef const& s) const;
     [[nodiscard]] int dragSlotMax(cs::BackpackScreenModel const& m, SlotRef const& s, ItemStack const& carried) const;
 
-    // upgrade inventory parts (columns taken)
-    struct PartState {
-        int                            slot = -1;
-        std::unique_ptr<InventoryPart> part;
-        Rect                           area;
-    };
-    std::vector<PartState> mParts;
-    std::string            mPartsSig;
-    void                   layoutParts(cs::BackpackScreenModel const& m);
-    [[nodiscard]] int      columnsTaken(cs::BackpackScreenModel const& m) const;
-    [[nodiscard]] InventoryPartContext partContext(cs::BackpackScreenModel const& m, PartState const& ps) const;
+    /// Absolute area of the upgrade inventory parts (Tank / Battery bars, InventoryParts.h).
+    [[nodiscard]] Rect inventoryPartsRect() const {
+        auto const& r = mLayout.inventoryParts;
+        return {mLeft + static_cast<float>(r.x), mTop + static_cast<float>(r.y), static_cast<float>(r.w), static_cast<float>(r.h)};
+    }
 
     // shift + double click (vanilla quick move all)
     SlotRef mLastShiftClick;
@@ -362,8 +363,6 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         if (settings.value("effectiveKeepSearchPhrase", true)) mSearch.setText(mSentPhrase);
         mPendingTab = settings.value("effectiveKeepTabOpen", true) ? settings.value("openTab", -1) : -1;
         mSessionTabsHeight = -1;
-        mParts.clear();
-        mPartsSig.clear();
     }
     auto rev = net::screenRevision();
     if (rev == mRevision) return;
@@ -451,51 +450,12 @@ bool BackpackScreenLayer::openTabWantsText() const {
 
 // ---- layout -----------------------------------------------------------------------------------------
 
-int BackpackScreenLayer::columnsTaken(cs::BackpackScreenModel const& m) const {
-    int n = 0;
-    for (auto const& u : m.upgrades) n += u.item.empty() ? 0 : u.columnsTaken;
-    return n;
-}
-
-InventoryPartContext BackpackScreenLayer::partContext(cs::BackpackScreenModel const& m, PartState const& ps) const {
-    return InventoryPartContext{m, ps.slot, m.upgrades[static_cast<std::size_t>(ps.slot)], [slot = ps.slot](nlohmann::json d) {
-                                    net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(d)}});
-                                }};
-}
-
-void BackpackScreenLayer::layoutParts(cs::BackpackScreenModel const& m) {
-    // SC initUpgradeInventoryControls: one control per upgrade with columns, left to right.
-    std::string sig;
-    for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
-        auto const& u = m.upgrades[i];
-        if (!u.item.empty() && u.columnsTaken > 0) sig += std::to_string(i) + ":" + u.id + ":" + std::to_string(u.columnsTaken) + ";";
-    }
-    if (sig != mPartsSig) {
-        mPartsSig = sig;
-        mParts.clear();
-        for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
-            auto const& u = m.upgrades[i];
-            if (u.item.empty() || u.columnsTaken <= 0) continue;
-            PartState ps;
-            ps.slot = static_cast<int>(i);
-            ps.part = createInventoryPart(u.id); // may be null: the columns stay empty
-            mParts.push_back(std::move(ps));
-        }
-    }
-    float x = mLeft + static_cast<float>(mLayout.inventoryParts.x);
-    for (auto& ps : mParts) {
-        float w = static_cast<float>(m.upgrades[static_cast<std::size_t>(ps.slot)].columnsTaken * cs::geometry::kSlotSize);
-        ps.area = {x, mTop + static_cast<float>(mLayout.inventoryParts.y), w, static_cast<float>(mLayout.inventoryParts.h)};
-        x += w;
-    }
-}
-
 void BackpackScreenLayer::layout(cs::BackpackScreenModel const& m, FrameInfo const& f) {
     cs::LayoutInput in;
     in.storageSlots = m.storageSlots;
     in.upgradeSlots = static_cast<int>(m.upgrades.size());
     in.screenHeight = static_cast<int>(f.screen.h);
-    in.columnsTaken = columnsTaken(m);
+    in.columnsTaken = inventoryColumnsTaken(m); // Tank / Battery inventory parts
     in.sortButtons  = sortButtonsPosition();
     // SettingsTabControl.getHeight() when the sort buttons were added (screen init, after the kept
     // tab reopened); closed tabs are 24 high, 25 apart.
@@ -509,7 +469,6 @@ void BackpackScreenLayer::layout(cs::BackpackScreenModel const& m, FrameInfo con
     // Keep the scroll position valid after resizes / model changes.
     cs::scrollBy(mScroll, mLayout, m.storageSlots, 0);
     mPlaced = cs::placeStorageSlots(mLayout, m.storageSlots, mMatches, mScroll, &mVisibleCount);
-    layoutParts(m);
     if (m.session != mLoggedLayout) {
         mLoggedLayout = m.session;
         float inv     = 1;
@@ -705,10 +664,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     ItemStack   carried = player ? player->mPlayerUIContainer->getItem(0) : ItemStack{};
 
     // Inventory parts of upgrades taking storage columns (SC renderUpgradeInventoryControls).
-    for (auto& ps : mParts) {
-        if (!ps.part) continue;
-        ps.part->render(p, partContext(m, ps), ps.area, mx, my);
-    }
+    renderInventoryParts(p, m, inventoryPartsRect(), mx, my);
 
     // Upgrade slots.
     for (std::size_t i = 0; i < mLayout.upgradeSlots.size(); ++i) {
@@ -824,13 +780,7 @@ void BackpackScreenLayer::drawErrorOverlay(Painter& p, cs::BackpackScreenModel c
             if (ps.index == i) p.fillRect({mLeft + ps.pos.x, mTop + ps.pos.y, 16, 16}, sb::color::ERROR_SLOT, Painter::Layer::Foreground);
         }
     }
-    for (int slot : m.errorInventoryParts) {
-        for (auto& ps : mParts) {
-            if (ps.slot != slot) continue;
-            if (ps.part) ps.part->renderErrorOverlay(p, ps.area);
-            else p.fillRect(ps.area, sb::color::ERROR_SLOT, Painter::Layer::Foreground);
-        }
-    }
+    inventoryPartsErrorOverlay(p, m, inventoryPartsRect());
     p.flush();
     // SC renderErrorMessage: centred at (width / 2, topPos + inventoryLabelY + 4), wrapped at 260,
     // tooltip background 0xF0100010 with red borders, red shadowed text (2 extra units after line 1).
@@ -872,9 +822,7 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         return;
     }
     // Upgrade inventory parts.
-    for (auto& ps : mParts) {
-        if (ps.part && ps.area.contains(mx, my)) ps.part->tooltip(partContext(m, ps), ps.area, mx, my, lines);
-    }
+    inventoryPartsTooltip(m, inventoryPartsRect(), mx, my, lines);
     if (!lines.empty()) {
         drawTooltip(p, lines, mx, my);
         return;
@@ -1149,6 +1097,11 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
     if (!down) {
         mDraggingBar = false;
         if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.mouseUp(button, x, y);
+        // SC: upgrade inventory parts react on release (Tank bar: fill / drain the cursor item).
+        if (mDistButton < 0 && button != MouseButton::Middle
+            && clickInventoryParts(*m, inventoryPartsRect(), button == MouseButton::Right ? 1 : 0, x, y)) {
+            return true;
+        }
         if (mDistButton >= 0 && (button == MouseButton::Right ? 1 : 0) == mDistButton) finishDistribution();
         return true;
     }
@@ -1203,10 +1156,8 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         }
         return true;
     }
-    // Upgrade inventory parts (SC: inventory controls get clicks first).
-    for (auto& ps : mParts) {
-        if (ps.part && ps.area.contains(x, y) && ps.part->mouseClicked(partContext(*m, ps), ps.area, button, x, y)) return true;
-    }
+    // Upgrade inventory parts react on release (SC handleMouseReleased); swallow the press.
+    if (button != MouseButton::Middle && inventoryPartsRect().w > 0 && inventoryPartsRect().contains(x, y)) return true;
     // Buttons and switches.
     if (mControls.mouseDown(button, x, y)) return true;
     // Scroll bar.
@@ -1716,6 +1667,7 @@ void BackpackScreenLayer::settingsSlotClick(int index, int button) {
 void BackpackScreenLayer::renderSettings(Painter& p, cs::BackpackScreenModel const& m, FrameInfo const& f) {
     cs::LayoutInput in;
     in.storageSlots = m.storageSlots;
+    in.columnsTaken = inventoryColumnsTaken(m); // SC SettingsScreen: slots on line - columns taken
     in.upgradeSlots = 0;
     in.screenHeight = static_cast<int>(f.screen.h);
     in.sortButtons  = cs::SortButtonsPosition::Hidden;

@@ -1,62 +1,63 @@
 #pragma once
 
-// Upgrade inventory parts of the native backpack screen (SC `UpgradeInventoryPartBase` /
-// `UpgradeGuiManager.getInventoryControl`): an upgrade whose `UpgradeInfo::inventoryColumnsTaken`
-// is > 0 (tank, battery) gets that many storage columns right of the slots (and the scroll bar),
-// `visibleRows * 18` high, and draws its part there. Parts are placed in upgrade slot order, each
-// `columnsTaken * 18` wide (SC moves the next control 36 to the right).
+// Upgrade inventory parts of the native backpack screen (Sophisticated Core
+// `UpgradeInventoryPartBase` / `initUpgradeInventoryControls`).
 //
-// Register a part for an upgrade id in a client .cpp:
+// Upgrades that take storage columns (Tank, Battery: `upgrade/tank/Columns.h` on the server) get a
+// control drawn right of the storage slots (and right of the scroll bar), 36 units per upgrade, in
+// upgrade slot order, as high as the visible storage rows. The server sends the columns in each
+// such upgrade's tab data (`"inventoryColumns"`, and the backpack's `"columnsTaken"`); units add
+// the control with `ABP_REGISTER_INVENTORY_PART("tank", [] { return std::make_unique<TankBar>(); })`.
 //
-//     class TankPart : public abp::client::ui::InventoryPart { ... };
-//     ABP_REGISTER_INVENTORY_PART("tank", TankPart);
+// The screen host calls the functions at the end of this header (additive contract with the
+// backpack screen: layout input, drawing, click on release, tooltip, error overlay).
 
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "nlohmann/json.hpp"
-
 #include "client/ui/Geometry.h"
-#include "client/ui/UiLayer.h"
+#include "client/ui/gfx/Painter.h"
 #include "client/ui/widgets/Tooltip.h"
 #include "core/screen/ScreenModel.h"
+#include "mod/Registry.h"
 
 namespace abp::client::ui {
-
-class Painter;
 
 struct InventoryPartContext {
     core::screen::BackpackScreenModel const& model;
     int                                      slot; ///< upgrade slot index
     core::screen::UpgradeView const&         upgrade;
-    /// Sends `{"action":"tab","slot":slot,"data":data}` (handled by `ABP_REGISTER_TAB_ACTION`).
-    std::function<void(nlohmann::json data)> sendTabAction;
+    Rect                                     area; ///< absolute: the part's 36 x (visible rows x 18) area
 };
 
 class InventoryPart {
 public:
     virtual ~InventoryPart() = default;
-    /// Draws the part into `area` (absolute GUI units).
-    virtual void render(Painter& p, InventoryPartContext const& ctx, Rect const& area, float mouseX, float mouseY) = 0;
-    /// A click inside `area`; return true when handled.
-    virtual bool mouseClicked(InventoryPartContext const& /*ctx*/, Rect const& /*area*/, MouseButton /*button*/, float /*x*/, float /*y*/) {
+    virtual void render(Painter& p, InventoryPartContext const& ctx, float mx, float my) = 0;
+    /// SC `handleMouseReleased`. Return true when handled.
+    virtual bool click(InventoryPartContext const& /*ctx*/, int /*button*/, float /*mx*/, float /*my*/) { return false; }
+    /// Adds tooltip lines when hovered; return true to show them.
+    virtual bool tooltip(InventoryPartContext const& /*ctx*/, float /*mx*/, float /*my*/, std::vector<TooltipLine>& /*out*/) const {
         return false;
     }
-    /// Tooltip lines when hovered.
-    virtual void tooltip(InventoryPartContext const& /*ctx*/, Rect const& /*area*/, float /*x*/, float /*y*/, std::vector<TooltipLine>& /*out*/) {}
-    /// SC `renderErrorOverlay`: the part is listed in the model's `errorInventoryParts`. Default: the
-    /// red error colour over the whole area.
-    virtual void renderErrorOverlay(Painter& p, Rect const& area);
+    /// SC `renderErrorOverlay` (the upgrade's slot is part of an error).
+    virtual void errorOverlay(Painter& /*p*/, InventoryPartContext const& /*ctx*/) {}
 };
 
 using InventoryPartFactory = std::function<std::unique_ptr<InventoryPart>()>;
-
-/// Registers the part drawn for upgrade `upgradeId` (first registration wins).
 void registerInventoryPart(std::string upgradeId, InventoryPartFactory factory);
-[[nodiscard]] bool                           hasInventoryPart(std::string const& upgradeId);
-[[nodiscard]] std::unique_ptr<InventoryPart> createInventoryPart(std::string const& upgradeId);
+
+/// Storage columns taken by upgrade inventory parts in `model` (0 without).
+[[nodiscard]] int inventoryColumnsTaken(core::screen::BackpackScreenModel const& model);
+
+// ---- host side (BackpackScreen) --------------------------------------------------------------------
+/// `parts`: absolute rect of the first part (layout `inventoryParts` + screen origin); w = all parts.
+void renderInventoryParts(Painter& p, core::screen::BackpackScreenModel const& model, Rect parts, float mx, float my);
+bool clickInventoryParts(core::screen::BackpackScreenModel const& model, Rect parts, int button, float mx, float my);
+bool inventoryPartsTooltip(core::screen::BackpackScreenModel const& model, Rect parts, float mx, float my, std::vector<TooltipLine>& out);
+void inventoryPartsErrorOverlay(Painter& p, core::screen::BackpackScreenModel const& model, Rect parts);
 
 namespace detail {
 struct InventoryPartRegistrar {
@@ -66,11 +67,5 @@ struct InventoryPartRegistrar {
 
 } // namespace abp::client::ui
 
-#define ABP_INVENTORY_PART_CAT2(a, b) a##b
-#define ABP_INVENTORY_PART_CAT(a, b)  ABP_INVENTORY_PART_CAT2(a, b)
-/// Registers inventory part type `T` (default-constructible) for upgrade id `id`.
-#define ABP_REGISTER_INVENTORY_PART(id, T)                                                                             \
-    static ::abp::client::ui::detail::InventoryPartRegistrar ABP_INVENTORY_PART_CAT(abp_inventory_part_, __COUNTER__)( \
-        id,                                                                                                            \
-        [] { return std::unique_ptr<::abp::client::ui::InventoryPart>(new T()); }                                      \
-    )
+#define ABP_REGISTER_INVENTORY_PART(id, factory)                                                                       \
+    static ::abp::client::ui::detail::InventoryPartRegistrar ABP_UNIQUE(abp_inventory_part_)(id, factory)

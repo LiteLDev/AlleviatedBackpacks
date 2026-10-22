@@ -269,7 +269,6 @@ ABP_REGISTER_SELFTEST("mainscreen.model_fields", [](Context& ctx) {
     (void)open(ctx, p, bp);
     auto const* m = net::sentModel(p);
     ctx.check(m->baseSlotLimit > 64, "stack upgrade: " + std::to_string(m->baseSlotLimit));
-    ctx.check(m->upgrades[0].columnsTaken == 0, "no upgrade takes columns yet");
 });
 
 ABP_REGISTER_SELFTEST("mainscreen.locked_slot", [](Context& ctx) {
