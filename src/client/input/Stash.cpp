@@ -236,7 +236,7 @@ void noteSlotRect(ContainerScreenController const* controller, std::string const
     for (auto& [k, r] : gRects.rects) {
         if (k != key) continue;
         known = true;
-        if (std::abs(r[0] - x) > 0.5f || std::abs(r[1] - y) > 0.5f) r = {x, y, s}, gRects.dirty = true;
+        (void)r; // first position wins (some passes draw the icon elsewhere, e.g. raised on hover)
     }
     if (!known) gRects.rects.emplace_back(key, std::array<float, 3>{x, y, s}), gRects.dirty = true;
     if (!gRects.dirty || t - gRects.since < 0.8 || gRects.logs >= 6) return;

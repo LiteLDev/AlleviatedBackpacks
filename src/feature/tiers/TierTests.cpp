@@ -304,11 +304,11 @@ ABP_REGISTER_SELFTEST("tiers.lore_and_tint", [](Context& ctx) {
     refreshItem(player, dyed, bp2);
     ctx.check((bp2->data().mainColor & 0xFFFFFFu) == 0xFF0000u, "first-seen cauldron tint adopted");
 
-    // A never-opened backpack shows its tier capacity.
+    // A never-opened backpack stays as it is (no lore, no uuid).
     auto fresh = game::makeBackpackItem(Tier::Gold);
-    ctx.check(refreshItem(player, fresh, nullptr), "fresh item gets lore");
-    ctx.check(loreText(fresh).find("0/81") != std::string::npos, "gold capacity: " + loreText(fresh));
-    ctx.check(!game::backpackUuid(fresh), "lore doesn't bind a uuid");
+    ctx.check(!refreshItem(player, fresh, nullptr), "fresh item untouched");
+    ctx.check(loreText(fresh).empty(), "no lore: " + loreText(fresh));
+    ctx.check(!game::backpackUuid(fresh), "refresh doesn't bind a uuid");
 
     // Diamond backpacks are damageable (smithing-table base) but never wear out.
     auto diamond = game::makeBackpackItem(Tier::Diamond);
