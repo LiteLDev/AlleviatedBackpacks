@@ -132,12 +132,14 @@ $mark = Get-LogMark
 Press-Key 'E'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 1500
-$after = Get-TiersInfo
-if ($after.Upgrades -notmatch 'stack_tier_1_upgrade' -or $after.Items -ne 20) { throw "conversion: $($after | Out-String)" }
-
-# Lore / tint of the result in the vanilla inventory.
+# Lore / tint of the result in the vanilla inventory (this also gives the game back its normal
+# key handling before chat is opened again).
 Open-Inventory
 Start-Sleep -Milliseconds 500
 Save-Screenshot 'inventory' | Out-Null
 Close-Screen
+Start-Sleep -Seconds 1
+$after = Get-TiersInfo
+if ($after.Upgrades -notmatch 'stack_tier_1_upgrade' -or $after.Items -ne 20) { throw "conversion: $($after | Out-String)" }
+
 Assert-NoErrors
