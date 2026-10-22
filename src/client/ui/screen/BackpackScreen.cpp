@@ -334,11 +334,20 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
     }
 }
 
+namespace {
+/// An upgrade shows a settings tab when it has settings or a native tab, unless its tab data hides
+/// it (`"hidden": true`, e.g. SB hides the Inception tab by config).
+bool hasTab(cs::UpgradeView const& u) {
+    if (auto h = u.tab.find("hidden"); h != u.tab.end() && h->is_boolean() && h->get<bool>()) return false;
+    return u.hasSettings || (!u.id.empty() && hasNativeTab(u.id));
+}
+} // namespace
+
 void BackpackScreenLayer::rebuildTabs(cs::BackpackScreenModel const& m) {
     std::string sig;
     for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
         auto const& u = m.upgrades[i];
-        if (u.hasSettings || (!u.id.empty() && hasNativeTab(u.id))) sig += std::to_string(i) + ":" + u.id + ";";
+        if (hasTab(u)) sig += std::to_string(i) + ":" + u.id + ";";
     }
     if (sig == mTabsSig && !mTabs.empty()) return;
     mTabsSig = sig;
@@ -347,7 +356,7 @@ void BackpackScreenLayer::rebuildTabs(cs::BackpackScreenModel const& m) {
     mTabs.push_back(TabState{}); // backpack settings
     for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
         auto const& u = m.upgrades[i];
-        if (!(u.hasSettings || (!u.id.empty() && hasNativeTab(u.id)))) continue;
+        if (!hasTab(u)) continue;
         TabState t;
         t.slot   = static_cast<int>(i);
         t.native = createNativeTab(u.id);
@@ -541,7 +550,9 @@ void BackpackScreenLayer::drawTabs(Painter& p, cs::BackpackScreenModel const& m,
         if (!isOpen || tab.slot < 0) return;
         auto const& u     = m.upgrades[static_cast<std::size_t>(tab.slot)];
         float       maxW  = std::max(0.f, tab.rect.w - 20 - 6);
-        p.text(truncated(p, u.name, maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
+        // SC tab label: the upgrade's own tab title (tab data "title") when it has one.
+        auto title = u.tab.contains("title") && u.tab["title"].is_string() ? u.tab["title"].get<std::string>() : u.name;
+        p.text(truncated(p, title, maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
         tab.widgets.render(p, mx, my, t);
         if (tab.native) {
             TabContext ctx{m, tab.slot, u, &mUpgradeStacks[static_cast<std::size_t>(tab.slot)], {}, {}};
@@ -704,7 +715,11 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         auto const& t = mTabs[i];
         if (static_cast<int>(i) == mOpenTab || !t.rect.contains(mx, my)) continue;
         if (t.slot < 0) lines.push_back({ctr("abp.companion.tab.settings", "Backpack Settings"), 0xFFFFFF});
-        else lines.push_back({m.upgrades[static_cast<std::size_t>(t.slot)].name, 0xFFFFFF});
+        else {
+            // SC closed tab tooltip: the upgrade's tab tooltip (tab data "tooltip") when it has one.
+            auto const& u = m.upgrades[static_cast<std::size_t>(t.slot)];
+            lines.push_back({u.tab.contains("tooltip") && u.tab["tooltip"].is_string() ? u.tab["tooltip"].get<std::string>() : u.name, 0xFFFFFF});
+        }
         drawTooltip(p, lines, mx, my);
         return;
     }

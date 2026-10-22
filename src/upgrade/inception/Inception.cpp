@@ -1,7 +1,9 @@
-// Inception upgrade: backpacks can be stored inside this backpack, the upgrades of those nested
-// backpacks work as if they were carried (configurable: all / non-storage only / none), and a
-// nested backpack can be opened from the GUI (Q on its slot, or the "Nested backpacks" button)
-// with a Back button to the containing backpack.
+// Inception upgrade (SB InceptionUpgradeWrapper): backpacks can be stored inside a top-level
+// backpack with this upgrade (only backpacks without Inception themselves), the upgrades work with
+// the inventories of the backpacks inside (InventoryOrder: main first / incepted first), the
+// upgrades of the backpacks inside stay functional and their tanks / batteries join the outer
+// backpack's. A nested backpack can be opened from the GUI (native screen: right click / B; chest
+// UI: Q on its slot or the "Nested backpacks" button) with a Back button to the containing one.
 
 #include "upgrade/inception/Inception.h"
 
@@ -9,12 +11,14 @@
 #include <functional>
 #include <unordered_set>
 
+#include <climits>
+
 #include "ll/api/form/SimpleForm.h"
 
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
-#include "feature/admin/Admin.h"
+#include "api/BackpackCapabilities.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/Storage.h"
@@ -23,6 +27,7 @@
 #include "mod/I18n.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
+#include "net/NativeScreens.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/IUpgrade.h"
 #include "upgrade/UpgradeManager.h"
@@ -32,7 +37,7 @@ ABP_REGISTER_CONFIG("inception", abp::upgrade::inception::InceptionConfig);
 namespace abp::upgrade::inception {
 
 namespace {
-constexpr std::string_view kSettingKey = "nestedUpgrades";
+constexpr std::string_view kSettingKey = "inventoryOrder";
 constexpr std::string_view kFiller     = "minecraft:gray_stained_glass_pane";
 
 std::string tierName(Player& player, core::Tier tier) {
@@ -66,17 +71,10 @@ int slotOf(game::Backpack& parent, std::string const& uuid) {
     return -1;
 }
 
-std::string modeName(Player* player, NestedUpgrades mode) {
-    auto t = [&](std::string_view key, std::string_view fb) { return player ? trFor(*player, key, fb) : tr(key, fb); };
-    switch (mode) {
-    case NestedUpgrades::All:
-        return t("abp.inception.mode.all", "All upgrades");
-    case NestedUpgrades::NonStorage:
-        return t("abp.inception.mode.non_storage", "Only non-storage upgrades");
-    case NestedUpgrades::None:
-        return t("abp.inception.mode.none", "No upgrades");
-    }
-    return {};
+std::string orderName(Player& player, InventoryOrder order) {
+    return order == InventoryOrder::MainFirst
+             ? trFor(player, "abp.inception.inventory_order_main_first", "Upgrades work with inventory\nof main backpack first")
+             : trFor(player, "abp.inception.inventory_order_incepted_first", "Upgrades work with inventories\nof backpacks in backpack first");
 }
 
 /// The chain from the carried backpack down to `parent` as seen from the menu showing `parent`.
@@ -162,39 +160,55 @@ bool openVia(Player& player, Chain chain, std::shared_ptr<game::Backpack> const&
 
 // ---- settings / helpers -----------------------------------------------------------------------
 
-std::string_view toString(NestedUpgrades mode) {
-    switch (mode) {
-    case NestedUpgrades::All:
-        return "all";
-    case NestedUpgrades::NonStorage:
-        return "non_storage";
-    case NestedUpgrades::None:
-        return "none";
-    }
-    return "all";
+std::string_view toString(InventoryOrder order) { return order == InventoryOrder::InceptedFirst ? "incepted_first" : "main_first"; }
+
+InventoryOrder inventoryOrderFromString(std::string_view s) {
+    return s == "incepted_first" ? InventoryOrder::InceptedFirst : InventoryOrder::MainFirst; // SB fromName: MAIN_FIRST
 }
 
-NestedUpgrades nestedUpgradesFromString(std::string_view s) {
-    if (s == "non_storage") return NestedUpgrades::NonStorage;
-    if (s == "none") return NestedUpgrades::None;
-    return NestedUpgrades::All;
-}
-
-std::optional<NestedUpgrades> nestedUpgradesOf(game::Backpack const& backpack) {
+std::optional<InventoryOrder> inventoryOrderOf(game::Backpack const& backpack) {
     for (auto const& s : backpack.data().upgrades) {
-        if (s.empty() || !s.enabled) continue;
+        if (s.empty()) continue;
         auto* u = upgradeFor(s.item);
         if (!u || u->info().id != kId || !typeAllowed(*u)) continue;
         auto it = s.settings.find(kSettingKey);
-        if (it == s.settings.end() || !it->is_string()) return NestedUpgrades::All;
-        return nestedUpgradesFromString(it->get<std::string>());
+        if (it == s.settings.end() || !it->is_string()) return InventoryOrder::MainFirst;
+        return inventoryOrderFromString(it->get<std::string>());
     }
     return std::nullopt;
 }
 
-bool isStorageRelated(std::string_view upgradeId, std::string_view group) {
-    auto const& list = config::get<InceptionConfig>().storageUpgrades;
-    return std::any_of(list.begin(), list.end(), [&](std::string const& s) { return s == upgradeId || s == group; });
+bool hasInception(game::Backpack const& backpack) {
+    for (auto const& s : backpack.data().upgrades) {
+        if (s.empty()) continue;
+        if (auto* u = upgradeFor(s.item); u && u->info().id == kId) return true;
+    }
+    return false;
+}
+
+std::vector<std::shared_ptr<game::Backpack>> subBackpacks(std::shared_ptr<game::Backpack> const& backpack) {
+    std::vector<std::shared_ptr<game::Backpack>> out;
+    if (!backpack) return out;
+    for (int i : backpackSlots(*backpack)) {
+        auto bp = resolveNested(backpack, i);
+        if (bp && bp != backpack && std::find(out.begin(), out.end(), bp) == out.end()) out.push_back(std::move(bp));
+    }
+    return out;
+}
+
+std::vector<std::shared_ptr<game::Backpack>> upgradeInventories(std::shared_ptr<game::Backpack> const& backpack) {
+    std::vector<std::shared_ptr<game::Backpack>> out;
+    if (!backpack) return out;
+    auto order = config::get<InceptionConfig>().upgradesUseInventoriesOfBackpacksInBackpack ? inventoryOrderOf(*backpack) : std::nullopt;
+    if (!order) {
+        out.push_back(backpack);
+        return out;
+    }
+    if (*order == InventoryOrder::MainFirst) out.push_back(backpack);
+    auto subs = subBackpacks(backpack);
+    out.insert(out.end(), subs.begin(), subs.end());
+    if (*order == InventoryOrder::InceptedFirst) out.push_back(backpack);
+    return out;
 }
 
 std::vector<int> backpackSlots(game::Backpack& backpack) {
@@ -233,63 +247,27 @@ std::shared_ptr<game::Backpack> resolveNested(std::shared_ptr<game::Backpack> co
 
 // ---- nested upgrades (PlayerScan provider) ----------------------------------------------------
 
-namespace {
-/// Scan depth for nested upgrades: `inception.maxDepth`, never deeper than the server's nesting
-/// limit (`admin.maxNestingDepth`, 0 = unlimited), since deeper backpacks can't exist anyway.
-int effectiveMaxDepth() {
-    int depth = config::get<InceptionConfig>().maxDepth;
-    int limit = config::get<admin::AdminConfig>().maxNestingDepth;
-    return limit > 0 ? std::min(depth, limit) : depth;
-}
-
-void walk(
-    game::CarriedBackpack const&                                                    parent,
-    std::shared_ptr<game::Backpack> const&                                          parentBp,
-    int                                                                             depth,
-    std::unordered_set<std::string>&                                                seen,
-    std::vector<std::pair<game::CarriedBackpack, std::shared_ptr<game::Backpack>>>& list
-) {
-    if (depth > effectiveMaxDepth()) return;
-    if (!parent.upgradeActive(kId, kId)) return;
-    auto mode = nestedUpgradesOf(*parentBp);
-    if (!mode || *mode == NestedUpgrades::None) return;
-    auto gate = parent.upgradeGate;
-    if (*mode == NestedUpgrades::NonStorage) {
-        gate = [outer = std::move(gate)](std::string_view id, std::string_view group) {
-            return !isStorageRelated(id, group) && (!outer || outer(id, group));
-        };
-    }
-    auto& storage = game::Storage::get();
-    auto  slots   = backpackSlots(*parentBp);
-    for (int i : slots) {
-        auto uuid = game::backpackUuid(parentBp->inventory().at(i));
-        if (!uuid || seen.contains(*uuid)) continue;
-        auto bp = storage.find(*uuid);
-        if (!bp) continue;
-        seen.insert(*uuid);
-        game::CarriedBackpack c{parent.where, bp->tier(), *uuid};
-        c.depth       = depth;
-        c.parent      = parentBp->uuid();
-        c.upgradeGate = gate;
-        list.emplace_back(c, bp);
-        walk(c, bp, depth + 1, seen, list);
-    }
-}
-} // namespace
-
 void appendNested(Player&, std::vector<std::pair<game::CarriedBackpack, std::shared_ptr<game::Backpack>>>& list) {
-    auto const& cfg = config::get<InceptionConfig>();
-    if (!cfg.nestedUpgradesWork || effectiveMaxDepth() <= 0) return;
+    // SB InceptionWrapperAccessor: the upgrades of the backpacks inside a carried backpack with an
+    // Inception upgrade work too (one level: a backpack with Inception can't be stored in another).
+    if (!config::get<InceptionConfig>().upgradesInContainedBackpacksAreFunctional) return;
     std::unordered_set<std::string> seen;
     for (auto const& [c, bp] : list) seen.insert(bp->uuid());
-    // walk() appends to `list`: iterate the directly carried entries by index (copies, since the
-    // vector may reallocate).
     auto const top = list.size();
     for (std::size_t i = 0; i < top; ++i) {
         if (list[i].first.depth != 0) continue;
-        auto carried = list[i].first;
-        auto bp      = list[i].second;
-        walk(carried, bp, 1, seen, list);
+        auto parent   = list[i].first;
+        auto parentBp = list[i].second;
+        if (!parent.upgradeActive(kId, kId) || !inventoryOrderOf(*parentBp)) continue;
+        for (auto const& bp : subBackpacks(parentBp)) {
+            if (seen.contains(bp->uuid())) continue;
+            seen.insert(bp->uuid());
+            game::CarriedBackpack c{parent.where, bp->tier(), bp->uuid()};
+            c.depth       = 1;
+            c.parent      = parentBp->uuid();
+            c.upgradeGate = parent.upgradeGate;
+            list.emplace_back(c, bp);
+        }
     }
 }
 
@@ -374,9 +352,21 @@ bool openNested(Player& player, ui::Menu const* menu, std::shared_ptr<game::Back
     return openVia(player, chainFor(menu, *parent), parent, index);
 }
 
-// ---- settings menu ----------------------------------------------------------------------------
+// ---- settings ---------------------------------------------------------------------------------
 
 namespace {
+void setOrder(UpgradeContext const& ctx, InventoryOrder order) {
+    ctx.settings()[std::string(kSettingKey)] = std::string(toString(order));
+    ctx.saveSettings(false);
+}
+
+InventoryOrder orderOf(UpgradeContext const& ctx) {
+    auto it = ctx.settings().find(kSettingKey);
+    return it != ctx.settings().end() && it->is_string() ? inventoryOrderFromString(it->get<std::string>()) : InventoryOrder::MainFirst;
+}
+
+/// Chest UI of the setting (simulated players in selftests; players get the native tab): one
+/// toggle button, like SB's tab.
 class InceptionSettingsMenu : public ui::Menu {
 public:
     /// `from`: how the backpack was shown when the settings were opened (nested chain), if known.
@@ -387,64 +377,23 @@ public:
 
     void build(Player& player) override {
         for (int i = 0; i < size(); ++i) setSlot(i, std::make_shared<ui::StaticSlot>(ui::icon(kFiller, " ")));
-        auto current = nestedUpgradesOf(mCtx.backpack()).value_or(NestedUpgrades::All);
+        auto order = orderOf(mCtx);
+        auto text  = orderName(player, order);
+        auto nl    = text.find('\n');
         setSlot(
-            4,
-            std::make_shared<ui::StaticSlot>(ui::icon(
-                "minecraft:book",
-                trFor(player, "abp.inception.settings.title", "Upgrades of nested backpacks"),
-                {trFor(player, "abp.inception.settings.help1", "§7Backpacks stored in this backpack run their"),
-                 trFor(player, "abp.inception.settings.help2", "§7upgrades as if you carried them.")}
-            ))
+            13,
+            std::make_shared<ui::ButtonSlot>(
+                ui::icon(
+                    order == InventoryOrder::MainFirst ? "minecraft:chest" : "minecraft:ender_chest",
+                    text.substr(0, nl),
+                    nl == std::string::npos ? std::vector<std::string>{} : std::vector<std::string>{"§f" + text.substr(nl + 1)}
+                ),
+                [this](ui::ClickContext const&) {
+                    setOrder(mCtx, orderOf(mCtx) == InventoryOrder::MainFirst ? InventoryOrder::InceptedFirst : InventoryOrder::MainFirst);
+                    invalidate();
+                }
+            )
         );
-        struct Option {
-            int              slot;
-            NestedUpgrades   mode;
-            std::string_view itemId;
-            std::string_view loreKey;
-            std::string_view loreFallback;
-        };
-        static constexpr Option options[] = {
-            {11,
-             NestedUpgrades::All,
-             "minecraft:nether_star", "abp.inception.mode.all_lore",
-             "§7Every upgrade of nested backpacks works."                                     },
-            {13,
-             NestedUpgrades::NonStorage,
-             "minecraft:hopper",      "abp.inception.mode.non_storage_lore",
-             "§7Upgrades that move items (pickup, magnet,\n§7void, compacting, ...) stay off."},
-            {15,
-             NestedUpgrades::None,
-             "minecraft:barrier",     "abp.inception.mode.none_lore",
-             "§7Nested backpacks are just storage."                                           },
-        };
-        for (auto const& o : options) {
-            bool                     selected = o.mode == current;
-            std::vector<std::string> lore;
-            auto                     text = trFor(player, o.loreKey, o.loreFallback);
-            for (std::size_t start = 0;;) {
-                auto nl = text.find('\n', start);
-                lore.push_back(text.substr(start, nl == std::string::npos ? std::string::npos : nl - start));
-                if (nl == std::string::npos) break;
-                start = nl + 1;
-            }
-            lore.push_back(
-                selected ? trFor(player, "abp.inception.selected", "§aSelected")
-                         : trFor(player, "abp.inception.click_select", "§eClick to select")
-            );
-            auto name = (selected ? "§a> " : "§f") + modeName(&player, o.mode);
-            setSlot(
-                o.slot,
-                std::make_shared<ui::ButtonSlot>(
-                    ui::icon(o.itemId, name, lore),
-                    [this, mode = o.mode](ui::ClickContext const&) {
-                        mCtx.settings()[std::string(kSettingKey)] = std::string(toString(mode));
-                        mCtx.saveSettings(false);
-                        invalidate();
-                    }
-                )
-            );
-        }
         setSlot(
             22,
             std::make_shared<ui::ButtonSlot>(
@@ -468,6 +417,20 @@ private:
 std::string generic(Player* player, std::string_view key, std::string_view fallback) {
     return player ? trFor(*player, key, fallback) : tr(key, fallback);
 }
+
+/// True if `backpack` is stored inside another backpack as far as `player` can tell (SB: the
+/// storage is not "first level": opened from inside another backpack).
+bool storedInAnother(Player* player, game::Backpack const& backpack) {
+    if (!player) return false;
+    auto current = ui::MenuManager::get().current(*player);
+    if (auto const* nested = dynamic_cast<NestedBackpackMenu const*>(current.get()); nested && nested->backpack()->uuid() == backpack.uuid()) {
+        return true;
+    }
+    for (auto const& [c, bp] : game::carriedBackpacks(*player, false, true)) {
+        if (c.depth > 0 && bp->uuid() == backpack.uuid()) return true;
+    }
+    return false;
+}
 } // namespace
 
 // ---- the upgrade --------------------------------------------------------------------------------
@@ -486,19 +449,36 @@ public:
         return info;
     }
 
-    void attach(UpgradeContext const& ctx, core::BackpackInventory&) override {
+    void attach(UpgradeContext const& ctx, core::BackpackInventory& inv) override {
         ctx.backpack().addCapability("allow_nesting");
+        // SB BackpackInventoryHandler.isAllowed: a backpack with an Inception upgrade can't go in.
+        inv.addInsertFilter(ctx.hookOwner(), 900, [](core::InsertQuery const& q) {
+            if (!game::isBackpack(q.stack)) return core::InsertVerdict::Allow;
+            auto uuid = game::backpackUuid(q.stack);
+            if (!uuid || !game::Storage::get().available()) return core::InsertVerdict::Allow;
+            auto inner = game::Storage::get().find(*uuid);
+            return inner && hasInception(*inner) ? core::InsertVerdict::Deny : core::InsertVerdict::Allow;
+        });
+    }
+
+    bool canInstall(UpgradeContext const& ctx, std::string& reason) const override {
+        if (storedInAnother(ctx.player(), ctx.backpack())) {
+            reason = generic(ctx.player(), "abp.inception.error.sub_backpack", "Inception upgrade can only be placed in top level backpack");
+            return false;
+        }
+        return true;
     }
 
     bool canRemove(UpgradeContext const& ctx, std::string& reason) const override {
         if (config::get<GeneralConfig>().allowNesting) return true;
         if (backpackSlots(ctx.backpack()).empty()) return true;
-        reason = generic(
-            ctx.player(),
-            "abp.inception.error.not_empty",
-            "Take the backpacks out of this backpack before removing the Inception Upgrade."
-        );
+        reason = generic(ctx.player(), "abp.inception.error.remove_sub_backpack", "There's one or more backpacks in the backpack");
         return false;
+    }
+
+    bool canReplaceWith(UpgradeContext const& ctx, core::ItemStackData const& replacement, std::string& reason) const override {
+        if (replacement.id == info().itemId) return true; // SB: swapping for another Inception is fine
+        return canRemove(ctx, reason);
     }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
@@ -509,28 +489,107 @@ public:
             nested && nested->backpack() == ctx.backpackPtr()) {
             from = chainFor(nested, ctx.backpack());
         }
-        return std::make_shared<InceptionSettingsMenu>(
-            ctx,
-            trFor(player, "abp.inception.name", "Inception Upgrade"),
-            std::move(from)
-        );
+        return std::make_shared<InceptionSettingsMenu>(ctx, trFor(player, "abp.inception.tab", "Inception"), std::move(from));
     }
 
-    [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
-        auto mode = nestedUpgradesOf(ctx.backpack()).value_or(NestedUpgrades::All);
-        return {
-            trFor(player, "abp.inception.describe.mode", "§7Nested upgrades: §f{}", modeName(&player, mode)),
-            trFor(
-                player,
-                "abp.inception.describe.count",
-                "§7Backpacks inside: §f{}",
-                backpackSlots(ctx.backpack()).size()
-            ),
-        };
+    [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const&) const override {
+        return {trFor(player, "abp.inception.tooltip", "§7Makes it possible to put backpacks into the backpack")};
     }
 };
 
+// Native tab (client/ui/tabs/inception): SB InceptionUpgradeTab, hidden when
+// upgradesUseInventoriesOfBackpacksInBackpack is off.
+nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
+    return nlohmann::json{
+        {"inception", {{"order", std::string(toString(orderOf(ctx)))}}},
+        {"title", trFor(player, "abp.inception.tab", "Inception")},
+        {"tooltip", trFor(player, "abp.inception.tab.tooltip", "Inception Settings")},
+        {"hidden", !config::get<InceptionConfig>().upgradesUseInventoriesOfBackpacksInBackpack},
+    };
+}
+
+bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+    if (data.value("inception", std::string{}) != "toggle") return false;
+    auto next = orderOf(ctx) == InventoryOrder::MainFirst ? InventoryOrder::InceptedFirst : InventoryOrder::MainFirst;
+    setOrder(ctx, next);
+    log().info("inception: {} set the inventory order to {}", player.getRealName(), toString(next));
+    return true;
+}
+
+// ---- tanks and batteries of the backpacks inside (SB InceptionFluidHandler / InceptionEnergyStorage)
+
+namespace {
+class CombinedEnergy final : public api::IEnergyStorage {
+public:
+    explicit CombinedEnergy(std::vector<std::shared_ptr<api::IEnergyStorage>> parts) : mParts(std::move(parts)) {}
+    int receive(int maxReceive, bool simulate) override {
+        int total = 0;
+        for (auto const& p : mParts) {
+            total += p->receive(maxReceive - total, simulate);
+            if (total == maxReceive) break;
+        }
+        return total;
+    }
+    int extract(int maxExtract, bool simulate) override {
+        int total = 0;
+        for (auto const& p : mParts) {
+            total += p->extract(maxExtract - total, simulate);
+            if (total == maxExtract) break;
+        }
+        return total;
+    }
+    [[nodiscard]] int stored() const override {
+        long long total = 0;
+        for (auto const& p : mParts) total += p->stored();
+        return static_cast<int>(std::min<long long>(total, INT_MAX));
+    }
+    [[nodiscard]] int capacity() const override {
+        long long total = 0;
+        for (auto const& p : mParts) total += p->capacity();
+        return static_cast<int>(std::min<long long>(total, INT_MAX));
+    }
+    [[nodiscard]] bool canReceive() const override { return !mParts.empty(); }
+    [[nodiscard]] bool canExtract() const override { return !mParts.empty(); }
+
+private:
+    std::vector<std::shared_ptr<api::IEnergyStorage>> mParts;
+};
+
+/// Main + sub-backpack handlers in inventory order (nullopt: no Inception / off).
+template <class T, class Get>
+std::optional<std::vector<std::shared_ptr<T>>> ordered(std::shared_ptr<game::Backpack> const& bp, std::shared_ptr<T> inner, Get get) {
+    if (!bp || !config::get<InceptionConfig>().upgradesInContainedBackpacksAreFunctional) return std::nullopt;
+    auto order = inventoryOrderOf(*bp);
+    if (!order) return std::nullopt;
+    std::vector<std::shared_ptr<T>> parts;
+    if (inner && *order == InventoryOrder::MainFirst) parts.push_back(inner);
+    for (auto const& sub : subBackpacks(bp))
+        if (auto h = get(sub)) parts.push_back(std::move(h));
+    if (inner && *order == InventoryOrder::InceptedFirst) parts.push_back(inner);
+    return parts;
+}
+
+struct WrapperRegistrar {
+    WrapperRegistrar() {
+        api::backpack::addFluidWrapper([](std::shared_ptr<game::Backpack> const& bp, std::shared_ptr<api::IFluidHandler> inner) -> std::shared_ptr<api::IFluidHandler> {
+            auto parts = ordered<api::IFluidHandler>(bp, inner, [](auto const& sub) { return api::backpack::fluidHandler(sub); });
+            if (!parts) return inner;
+            if (parts->empty()) return nullptr;
+            return std::make_shared<api::CombinedFluidHandler>(std::move(*parts));
+        });
+        api::backpack::addEnergyWrapper([](std::shared_ptr<game::Backpack> const& bp, std::shared_ptr<api::IEnergyStorage> inner) -> std::shared_ptr<api::IEnergyStorage> {
+            auto parts = ordered<api::IEnergyStorage>(bp, inner, [](auto const& sub) { return api::backpack::energyStorage(sub); });
+            if (!parts) return inner;
+            if (parts->empty()) return nullptr;
+            return std::make_shared<CombinedEnergy>(std::move(*parts));
+        });
+    }
+} const gWrappers;
+} // namespace
+
 ABP_REGISTER_UPGRADE(InceptionUpgrade);
+ABP_REGISTER_TAB_DATA(net::TabDataProvider{std::string(kId), &tabData});
+ABP_REGISTER_TAB_ACTION(net::TabActionHandler{std::string(kId), &tabAction});
 
 // ---- GUI entry points ---------------------------------------------------------------------------
 
