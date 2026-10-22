@@ -9,6 +9,7 @@
 #include "mc/world/item/ItemInstance.h"
 #include "mc/world/item/crafting/CraftingContext.h"
 #include "mc/world/item/crafting/Recipe.h"
+#include "mc/world/item/crafting/RecipeIngredient.h"
 #include "mc/world/item/crafting/Recipes.h"
 #include "mc/world/item/crafting/SmithingTransformRecipe.h"
 #include "mc/world/level/ILevel.h"
@@ -51,6 +52,31 @@ SmithingOutcome compute(ItemStack const& templ, ItemStack const& base, ItemStack
 
 bool isTemplate(ItemStack const& stack) {
     return !stack.isNull() && stack.getTypeName().ends_with("_smithing_template");
+}
+
+bool isIngredient(ItemStack const& stack, Ingredient which) {
+    if (stack.isNull()) return false;
+    auto level = ll::service::getLevel();
+    if (!level) return false;
+    auto index = static_cast<std::size_t>(which);
+    bool found = false;
+    bool any   = false;
+    level->getRecipes().forEachRecipeFor(HashedString("smithing_table"), [&](Recipe const& recipe) {
+        auto const& ingredients = recipe.mMyIngredients.get();
+        if (found || ingredients.size() != 3) return;
+        any   = true;
+        found = recipe.itemValidForRecipe(ingredients[index], stack);
+    });
+    if (any) return found;
+    // No recipe data (should not happen): templates by name, gear as the base, the rest as addition.
+    switch (which) {
+    case Ingredient::Template:
+        return isTemplate(stack);
+    case Ingredient::Base:
+        return !isTemplate(stack) && stack.isDamageableItem();
+    default:
+        return !isTemplate(stack) && !stack.isDamageableItem();
+    }
 }
 
 } // namespace abp::upgrade::smithing

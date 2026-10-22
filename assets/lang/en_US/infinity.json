@@ -1,0 +1,9 @@
+{
+  "abp.upgrade.infinity.name": "Infinity Upgrade (Admin)",
+  "abp.upgrade.survival_infinity.name": "Survival Infinity Upgrade",
+  "abp.infinity.error.any_upgrade_exists": "All upgrade slots need to be empty",
+  "abp.infinity.error.no_upgrade_can_be_added": "No upgrade can be added",
+  "abp.infinity.error.only_admin_remove": "Only admins can remove Infinity Upgrade",
+  "abp.infinity.status.only_admin_break": "§cOnly Admins can break backpack with Infinity Upgrade",
+  "abp.infinity.status.only_admin_pickup": "§cOnly Admins can pickup backpack with Infinity Upgrade"
+}
