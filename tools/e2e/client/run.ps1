@@ -240,7 +240,9 @@ try {
         Remove-HeadlessInputLeftover
         Restore-OtherMods
         $restore = Join-Path $PSScriptRoot "scenarios/$Scenario.restore.ps1"
-        if (Test-Path $restore) { & pwsh -NoProfile -File $restore }
+        # Dot-sourced (like the prelaunch script) so it sees this run's slot ($script:VersionName,
+        # Get-GameDataDir, ...); a failing restore must not keep the lock.
+        if (Test-Path $restore) { try { . $restore } catch { Write-Host "[e2e] restore script failed: $_" -ForegroundColor Red } }
         Exit-E2ELock
     }
 } catch {
