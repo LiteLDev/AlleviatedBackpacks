@@ -68,6 +68,7 @@ void installById(std::shared_ptr<game::Backpack> const& bp, std::string const& i
 }
 
 ItemStack itemOf(std::shared_ptr<game::Backpack> const& bp) {
+    if (!bp) return ItemStack::EMPTY_ITEM();
     game::Storage::get().save(*bp, true);
     return game::makeBackpackItem(bp->tier(), bp->uuid());
 }
@@ -162,6 +163,7 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
                 if (scene == "stands") {
                     auto worn = model::makeBackpack(static_cast<core::Tier>(i), i % 2 == 1);
                     auto held = model::makeBackpack(static_cast<core::Tier>(i), i % 2 == 1);
+                    if (!worn || !held) continue;
                     // Row 1 shows the back (faces away), row 2 the front holding one.
                     if (auto* s = model::stand(region, Vec3{x, static_cast<float>(base.y), static_cast<float>(base.z) + 4.5f}, 0.0f)) {
                         s->setArmor(SharedTypes::Legacy::ArmorSlot::Torso, model::itemOf(worn));
@@ -194,6 +196,7 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
                 BlockPos pos{base.x - 5 + i * 2, base.y, z};
                 model::setBlock(region, pos, "minecraft:air");
                 auto bp   = model::makeBackpack(static_cast<core::Tier>(i), i % 2 == 1);
+                if (!bp) continue;
                 auto item = model::itemOf(bp);
                 if (placed.place(region, pos, item, 2 /* faces north, towards the player */) == placed::PlacedBackpacks::PlaceResult::Ok) ++n;
             }
@@ -208,6 +211,7 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
                 BlockPos pos{base.x - 1 + v * 2, base.y, z + 3};
                 model::setBlock(region, pos, "minecraft:air");
                 auto bp   = model::partsBackpack(core::Tier::Netherite, v, &player);
+                if (!bp) continue;
                 auto item = model::itemOf(bp);
                 if (placed.place(region, pos, item, 2) == placed::PlacedBackpacks::PlaceResult::Ok) ++n;
             }

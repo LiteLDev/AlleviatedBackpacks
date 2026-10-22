@@ -329,6 +329,8 @@ int PlacedBackpacks::facingTowards(float yaw) {
 
 void PlacedBackpacks::load() {
     mEntries.clear();
+    mSignals.clear();
+    mRestore.clear();
     mByUuid.clear();
     mOrphans.clear();
     mPendingDrops.clear();
@@ -963,6 +965,8 @@ void PlacedBackpacks::install() {
     mListeners.push_back(bus.emplaceListener<ll::event::ServerStoppingEvent>([this](auto&) {
         save();
         mEntries.clear();
+        mSignals.clear();
+        mRestore.clear();
         mByUuid.clear();
         mOrphans.clear();
         mPendingDrops.clear();
@@ -1049,6 +1053,8 @@ void PlacedBackpacks::uninstall() {
     mListeners.clear();
     if (game::Storage::get().available()) save();
     mEntries.clear();
+    mSignals.clear();
+    mRestore.clear();
     mByUuid.clear();
     mOrphans.clear();
     mPendingDrops.clear();

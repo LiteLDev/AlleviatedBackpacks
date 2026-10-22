@@ -73,6 +73,7 @@ LL_TYPE_INSTANCE_HOOK(
 ) {
     auto const& stack = *this->mItemInstance;
     if (!stack.isNull() && game::backpackTierOf(stack.getTypeName())) {
+        if (pass != 0) return; // drawn once, in the first pass
         try {
             if (owner.mCachedPositionDirty) owner._setCachedPosition();
             auto const& pos  = *owner.mCachedPosition;

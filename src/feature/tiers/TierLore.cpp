@@ -82,8 +82,7 @@ bool syncTint(ItemStack& stack, game::Backpack& bp) {
     int expected = static_cast<int>(data.mainColor & 0xFFFFFFu);
     bool changed = false;
     if (expected != current) {
-        if (expected < 0) item->clearColor(stack);
-        else item->setColor(stack, mce::Color(static_cast<uint>(expected)));
+        item->setColor(stack, mce::Color(static_cast<uint>(expected)));
         changed = true;
     }
     if (!marker || *marker != expected) {

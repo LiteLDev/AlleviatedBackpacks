@@ -431,7 +431,7 @@ $rcs = [ordered]@{
 #   held:  SB "thirdperson_righthand" / "firstperson_righthand" display transforms.
 $anim = [ordered]@{
     'animation.alleviatedbackpacks.backpack.worn'    = [ordered]@{ loop = $true; bones = [ordered]@{ xf = [ordered]@{ rotation = @(0, 180, 0); position = @(0, 12, 4.8) } } }
-    'animation.alleviatedbackpacks.backpack.held_tp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = [ordered]@{ rotation = @(0, 90, 0); position = @(0, 12, 0); scale = 0.75 } } }
+    'animation.alleviatedbackpacks.backpack.held_tp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = [ordered]@{ rotation = @(0, -90, 0); position = @(2, 10.5, -0.9); scale = 0.75 } } }
     'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = [ordered]@{ rotation = @(0, 0, 0); position = @(0, 18, -4); scale = 0.5 } } }
 }
 [ordered]@{ format_version = '1.10.0'; animations = $anim } | ConvertTo-Json -Depth 20 -Compress |

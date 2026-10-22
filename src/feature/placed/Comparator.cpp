@@ -103,7 +103,8 @@ void patch() {
     if (gState.hasSlot < 0 || gState.getSlot < 0) {
         gState.hasSlot = vcallOffset(addressOf(&BlockType::hasComparatorSignal));
         gState.getSlot = vcallOffset(addressOf(&BlockType::getComparatorSignal));
-        if (gState.hasSlot < 0 || gState.getSlot < 0 || gState.hasSlot % 8 || gState.getSlot % 8) {
+        if (gState.hasSlot < 0 || gState.getSlot < 0 || gState.hasSlot % 8 || gState.getSlot % 8 || gState.hasSlot / 8 >= kVtableCopy
+            || gState.getSlot / 8 >= kVtableCopy) {
             auto dump = [](void const* p) {
                 std::string s;
                 auto const* b = static_cast<std::uint8_t const*>(p);
