@@ -63,6 +63,11 @@ TypeGate& typeGate() {
     return gate;
 }
 
+InstallGate& installGate() {
+    static InstallGate gate;
+    return gate;
+}
+
 std::vector<std::pair<std::string, RuleBuilder>>& ruleBuilders() {
     static std::vector<std::pair<std::string, RuleBuilder>> builders;
     return builders;
@@ -160,6 +165,8 @@ void IUpgrade::openSettings(Player& player, UpgradeContext const& ctx) {
 
 void setTypeGate(TypeGate gate) { typeGate() = std::move(gate); }
 
+void setInstallGate(InstallGate gate) { installGate() = std::move(gate); }
+
 bool typeAllowed(IUpgrade const& upgrade) {
     auto const& gate = typeGate();
     return !gate || gate(upgrade);
@@ -209,10 +216,12 @@ bool canInstall(
     }
     auto const& info  = type->info();
     int         count = 0;
-    for (auto const& s : slots) {
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        auto const& s = slots[i];
         if (s.empty()) continue;
         auto* other = upgradeFor(s.item);
         if (!other) continue;
+        if (!other->allowsInstallOf(UpgradeContext(backpack, static_cast<int>(i), player), *type, why)) return false;
         if (other->info().groupOrId() == info.groupOrId()) ++count;
         bool conflict = std::any_of(info.conflicts.begin(), info.conflicts.end(), [&](std::string const& c) {
             return sameGroupOrId(*other, c);
@@ -233,6 +242,7 @@ bool canInstall(
         why = message(player, "abp.upgrade.error.max", "This backpack already has the maximum of this upgrade.");
         return false;
     }
+    if (auto const& gate = installGate(); gate && !gate(backpack, *type, player, why)) return false;
     return type->canInstallItem(UpgradeContext(backpack, slot, player), item.withCount(1), why);
 }
 

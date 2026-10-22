@@ -18,8 +18,9 @@ struct GeneralConfig {
     bool        requireResourcePack = true;
     /// Allow putting backpacks inside backpacks without an Inception upgrade.
     bool        allowNesting = false;
-    /// Allow putting shulker boxes into backpacks.
-    bool        allowShulkerBoxes = false;
+    /// Allow putting shulker boxes into backpacks (Sophisticated Backpacks lets them in; SB's
+    /// `containerItemsDisallowed` in sophisticatedbackpacks-server.json refuses them too).
+    bool        allowShulkerBoxes = true;
 };
 
 } // namespace abp

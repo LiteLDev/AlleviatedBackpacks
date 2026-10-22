@@ -11,8 +11,20 @@
 
 namespace abp::upgrade::smithing {
 
-/// The smithing tab: template (slot 2), base (3), addition (4), result (6), plus the backpack
-/// storage below. Settings keys: "template", "base", "addition".
+// ---- the smithing station (shared by the native tab and the chest menu) ---------------------------
+// Settings keys: "template", "base", "addition".
+
+[[nodiscard]] SmithingOutcome stationOutcome(anvil::StationRef const& ref);
+/// Takes the result: consumes one of each input. nullopt when there is no result.
+[[nodiscard]] std::optional<anvil::OutputSlot::Crafted> craft(Player& player, anvil::StationRef const& ref);
+
+[[nodiscard]] std::shared_ptr<anvil::InputSlot>  templateSlot(anvil::StationRef const& ref);
+[[nodiscard]] std::shared_ptr<anvil::InputSlot>  baseSlot(anvil::StationRef const& ref);
+[[nodiscard]] std::shared_ptr<anvil::InputSlot>  additionSlot(anvil::StationRef const& ref);
+[[nodiscard]] std::shared_ptr<anvil::OutputSlot> resultSlot(anvil::StationRef const& ref, std::optional<anvil::PendingUndo>& pending);
+
+/// The smithing tab as a chest menu (simulated players / selftests; companions get the native
+/// tab): template (slot 2), base (3), addition (4), result (6), plus the backpack storage below.
 class SmithingMenu : public anvil::StationMenu {
 public:
     SmithingMenu(std::string title, anvil::StationRef ref);
@@ -32,8 +44,6 @@ protected:
     int  quickMoveStation(Player& player, ItemStack const& stack) override;
 
 private:
-    std::optional<anvil::OutputSlot::Crafted> craft(Player& player);
-
     std::optional<SmithingOutcome> mCache;
     std::uint64_t                  mCacheRevision = 0;
 };

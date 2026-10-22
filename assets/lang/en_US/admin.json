@@ -1,32 +1,42 @@
 {
   "abp.admin.upgrade_disabled": "This upgrade is disabled on this server.",
   "abp.admin.upgrade_disabled_lore": "§cDisabled on this server",
-  "abp.admin.err.one_target": "Select exactly one player (the copy shares the storage).",
   "abp.admin.test_upgrade": "Admin Test Upgrade",
 
   "abp.admin.err.permission": "You need operator permission.",
   "abp.admin.err.uuid_short": "Give at least 4 characters of the uuid.",
   "abp.admin.err.uuid_ambiguous": "More than one backpack matches {}.",
   "abp.admin.err.uuid_unknown": "No backpack with uuid {}.",
-  "abp.admin.err.no_target": "No player matched.",
 
-  "abp.admin.list.header": "{} stored backpacks:",
-  "abp.admin.list.header_holder": "{} backpacks of {}:",
+  "abp.admin.sbp.list.header": "Backpack Name, Colors, Last Open By, Last Open On",
+  "abp.admin.sbp.list.cloth_color": "Cloth",
+  "abp.admin.sbp.list.trim_color": "Trim",
+  "abp.admin.sbp.give.success": "Gave backpack to {}",
+  "abp.admin.sbp.remove_non_player.success": "Removed {} non player backpacks",
+
+  "abp.admin.only_x_upgrades_allowed": "Only {}x {} can be used in {}",
+  "abp.admin.upgrade_group.stack": "Stack Upgrades",
+  "abp.admin.upgrade_group.cooking": "Furnace Upgrades",
+  "abp.admin.upgrade_group.jukebox": "Jukebox Upgrades",
+  "abp.admin.backpack_name.leather": "Leather Backpack",
+  "abp.admin.backpack_name.copper": "Copper Backpack",
+  "abp.admin.backpack_name.iron": "Iron Backpack",
+  "abp.admin.backpack_name.gold": "Gold Backpack",
+  "abp.admin.backpack_name.diamond": "Diamond Backpack",
+  "abp.admin.backpack_name.netherite": "Netherite Backpack",
+
   "abp.admin.list.line": "{} §7{}§r {}/{} slots, {} items, {} upgrades, holder: {}, seen: {}",
   "abp.admin.list.first": " (first: {})",
   "abp.admin.list.legacy": "(before tracking)",
   "abp.admin.list.nobody": "(never carried by a player)",
-  "abp.admin.list.more": "... and {} more",
 
   "abp.admin.info.upgrades": "Upgrades: [{}]",
   "abp.admin.info.holders": "First holder: {} ({}), last holder: {} ({})",
 
-  "abp.admin.stats.line": "Backpacks: {} stored ({} loaded), {} items; empty: {}, never carried: {}, unreadable: {}, kept on death: {}",
+  "abp.admin.stats.line": "Backpacks: {} stored ({} loaded), {} items; empty: {}, never opened: {}, unreadable: {}, kept on death: {}",
   "abp.admin.stats.tiers": "Per tier: {}",
 
-  "abp.admin.give.ok": "Gave backpack {} to {}.",
   "abp.admin.remove.ok": "Removed backpack {}.",
-  "abp.admin.removenonplayer.ok": "Removed {} backpacks no player ever carried.",
   "abp.admin.cleanup.ok": "Removed {} empty, unused backpacks.",
 
   "abp.admin.openfor.title": "Backpack {}",

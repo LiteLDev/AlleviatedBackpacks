@@ -1,0 +1,23 @@
+{
+  "abp.linked.tooltip.blank": "Right-click a compatible storage or craft with one",
+  "abp.linked.tooltip.bound": "Right-click or craft with an unlinked compatible storage to add it",
+  "abp.linked.tooltip.linker_target": "Linked to: {}",
+  "abp.linked.tooltip.linker_pending": "Linked when crafted",
+  "abp.linked.tooltip.primary": "Main Linked",
+  "abp.linked.tooltip.secondary": "Linked",
+  "abp.linked.tooltip.primary_named": "{} ({})",
+  "abp.linked.tooltip.secondary_named": "{} ({})",
+  "abp.linked.tooltip.group": "Linked Storage Group: {}",
+  "abp.linked.tooltip.endpoint": "Linked Storage Endpoint: {}",
+
+  "abp.linked.status.already_linked": "Storage is already linked",
+  "abp.linked.status.unsupported_endpoint": "Storage cannot be linked",
+  "abp.linked.status.incompatible_endpoint": "Storage is incompatible with this linked storage group",
+  "abp.linked.status.endpoint_has_contents": "Storage has contents",
+
+  "abp.access.cannot_open": "This backpack cannot be open by another player",
+  "abp.access.setting.on": "Another player can open",
+  "abp.access.setting.on.tooltip": "When this backpack is worn and visible another player can open it when right clicking on this player's back",
+  "abp.access.setting.off": "Another player can NOT open",
+  "abp.access.setting.off.tooltip": "Backpack can not be open by another player when right clicking on this player's back even if the backpack is worn there"
+}
