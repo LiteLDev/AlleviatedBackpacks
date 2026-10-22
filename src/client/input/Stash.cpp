@@ -15,13 +15,17 @@
 
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/client/ClientExitLevelEvent.h"
+#include "ll/api/event/render/UIRenderEvent.h"
 #include "ll/api/event/world/ClientLevelTickEvent.h"
 #include "ll/api/memory/Hook.h"
 #include "ll/api/service/Bedrock.h"
 
 #include "mc/client/game/ClientInstance.h"
 #include "mc/client/gui/controls/UIControl.h"
+#include "mc/client/gui/controls/renderers/InventoryItemRenderOwnerData.h"
 #include "mc/client/gui/controls/renderers/InventoryItemRenderer.h"
+#include "mc/client/gui/screens/ScreenController.h"
+#include "mc/client/gui/screens/ScreenView.h"
 #include "mc/client/gui/screens/controllers/ContainerScreenController.h"
 #include "mc/client/gui/screens/controllers/CraftingScreenController.h"
 #include "mc/client/gui/screens/controllers/FurnaceScreenController.h"
@@ -212,6 +216,28 @@ struct SlotRects {
     std::vector<std::pair<std::string, std::array<float, 3>>>    rects;
 };
 SlotRects gRects;
+bool      gInnerMissed = false;
+
+/// One diagnostic line per container screen about the icons it draws (collections, positions).
+struct IconDiag {
+    ContainerScreenController const* controller = nullptr;
+    double                           since      = 0;
+    bool                             logged     = false;
+    int                              icons      = 0;
+    std::string                      seen;
+};
+IconDiag gIconDiag;
+
+void noteIcon(ContainerScreenController const* controller, std::string const& what) {
+    double t = now();
+    if (gIconDiag.controller != controller) gIconDiag = IconDiag{controller, t};
+    if (gIconDiag.logged) return;
+    ++gIconDiag.icons;
+    if (gIconDiag.seen.size() < 600 && gIconDiag.seen.find(what) == std::string::npos) gIconDiag.seen += " " + what;
+    if (t - gIconDiag.since < 1.0) return;
+    gIconDiag.logged = true;
+    log().info("stash: icons on this screen: {} draws;{}", gIconDiag.icons, gIconDiag.seen);
+}
 
 void noteSlotRect(ContainerScreenController const* controller, std::string const& key, float x, float y, float s) {
     double t = now();
@@ -231,9 +257,10 @@ void noteSlotRect(ContainerScreenController const* controller, std::string const
     for (auto const& [k, r] : gRects.rects) line += std::format(" {}={:.1f},{:.1f},{:.2f}", k, r[0], r[1], r[2]);
     auto* client = currentClient();
     log().info(
-        "stash: vanilla slots screen={} invGuiScale={:.4f}{}",
+        "stash: vanilla slots screen={} invGuiScale={:.4f} inner={}{}",
         client ? client->getScreenName() : std::string{},
         detail::snapshot().invGuiScale.load(),
+        gInnerMissed ? "no" : "yes",
         line
     );
 }
@@ -320,6 +347,37 @@ LL_TYPE_INSTANCE_HOOK(
     return origin(collectionName, collectionIndex, allItems);
 }
 
+namespace {
+/// The icon InventoryItemRenderer::render is drawing right now: `_render` gets its real screen
+/// position (UIControl positions don't include scroll panel offsets).
+struct PendingIcon {
+    bool  active = false;
+    bool  got    = false;
+    float x = 0, y = 0;
+};
+PendingIcon gPendingIcon; // client (render) thread
+/// The container screen controller of the view being rendered (BeforeUIRenderEvent).
+ContainerScreenController const* gFrameController = nullptr;
+} // namespace
+
+LL_TYPE_INSTANCE_HOOK(
+    AbpStashItemRenderInnerHook,
+    ll::memory::HookPriority::Normal,
+    InventoryItemRenderer,
+    &InventoryItemRenderer::_render,
+    void,
+    ::IInventoryItemRendererRenderContext& renderContext,
+    ::InventoryItemRenderOwnerData const&  owner,
+    int                                    pass
+) {
+    if (gPendingIcon.active && !gPendingIcon.got) {
+        gPendingIcon.x   = owner.mScreenAlignedX;
+        gPendingIcon.y   = owner.mScreenAlignedY;
+        gPendingIcon.got = true;
+    }
+    origin(renderContext, owner, pass);
+}
+
 // Slot signs: every item icon of the open container screen reports its slot and position.
 LL_TYPE_INSTANCE_HOOK(
     AbpStashItemRenderHook,
@@ -332,21 +390,38 @@ LL_TYPE_INSTANCE_HOOK(
     ::UIControl&                owner,
     int                         pass
 ) {
+    auto const* controller = gFrameController; // only icons of the container screen's own view
+    gPendingIcon           = PendingIcon{controller != nullptr && !ui::nativeScreenActive()};
     origin(ctx, client, owner, pass);
+    auto drawn   = gPendingIcon;
+    gPendingIcon = {};
     try {
-        auto const* controller = detail::activeContainerController();
-        if (!controller || ui::nativeScreenActive()) return;
+        if (!drawn.active) return;
+        if (!drawn.got) {
+            // `_render` not reached (inlined path): the control's cached position.
+            if (owner.mCachedPositionDirty) owner._setCachedPosition();
+            drawn.x = owner.mCachedPosition.get().x;
+            drawn.y = owner.mCachedPosition.get().y;
+            gInnerMissed = true;
+        }
+        // The slot this icon belongs to (the callback's index is not the slot index; the
+        // collection index is looked up by name).
         std::optional<std::pair<std::string, int>> slot;
-        owner.findAllCollectionIndices([&](std::string const& name, int index) {
+        std::string                                names;
+        owner.findAllCollectionIndices([&](std::string const& name, int) {
+            int index = owner.findCollectionIndex(name);
+            names += name + "#" + std::to_string(index) + ",";
             if (!slot && locationOf(name, index)) slot = std::pair<std::string, int>{name, index};
         });
+        noteIcon(controller, std::string(*owner.mName) + "[" + names + (drawn.got ? "inner" : "cached") + "]");
         if (!slot) return;
-        auto loc = locationOf(slot->first, slot->second);
-        auto key = keyOf(loc->first, loc->second);
-        if (owner.mCachedPositionDirty) owner._setCachedPosition();
-        auto const& pos  = owner.mCachedPosition.get();
+        auto  loc  = locationOf(slot->first, slot->second);
+        auto  key  = keyOf(loc->first, loc->second);
         auto const& size = owner.mSize.get();
-        float       s    = size.x > 0 ? size.x / 16.f : 1.f;
+        float s    = size.x > 0 ? size.x / 16.f : 1.f;
+        struct {
+            float x, y;
+        } pos{drawn.x, drawn.y}; // where the icon really is (scroll panels included)
         noteSlotRect(controller, key, pos.x, pos.y, s);
         if (!active()) return;
         auto item = copyOf(controller->_getVisualItemStack(slot->first, slot->second));
@@ -473,8 +548,14 @@ void installStash() {
     AbpStashFurnacePlaceOneHook::hook();
     AbpStashTakePlaceHook::hook();
     AbpStashItemRenderHook::hook();
+    AbpStashItemRenderInnerHook::hook();
     auto& bus = ll::event::EventBus::getInstance();
     gListeners.push_back(bus.emplaceListener<ll::event::ClientLevelTickEvent>([](auto&) { pump(); }));
+    gListeners.push_back(bus.emplaceListener<ll::event::BeforeUIRenderEvent>([](ll::event::BeforeUIRenderEvent& ev) {
+        auto const& c    = ev.screenView().mController;
+        gFrameController = c && c->_isContainerScreen() ? static_cast<ContainerScreenController const*>(c.get()) : nullptr;
+    }));
+    gListeners.push_back(bus.emplaceListener<ll::event::AfterUIRenderEvent>([](auto&) { gFrameController = nullptr; }, ll::event::EventPriority::High));
     gListeners.push_back(bus.emplaceListener<ll::event::ClientExitLevelEvent>([](auto&) {
         reset();
         gMarks.clear();
@@ -486,6 +567,7 @@ void uninstallStash() {
     auto& bus = ll::event::EventBus::getInstance();
     for (auto& l : gListeners) bus.removeListener(l);
     gListeners.clear();
+    AbpStashItemRenderInnerHook::unhook();
     AbpStashItemRenderHook::unhook();
     AbpStashTakePlaceHook::unhook();
     AbpStashFurnacePlaceOneHook::unhook();

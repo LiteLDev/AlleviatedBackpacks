@@ -4,7 +4,9 @@
 #include <chrono>
 #include <unordered_map>
 
+#include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/player/Player.h"
+#include "mc/world/item/ItemStack.h"
 
 #include "api/Service.h"
 #include "core/screen/CountFormat.h"
@@ -64,7 +66,11 @@ bool canSee(Player& player, std::string const& uuid) {
     for (auto const& [carried, bp] : game::carriedBackpacks(player, false, true)) {
         if (carried.uuid && *carried.uuid == uuid) return true;
     }
-    // Right-click stashing shows the contents of backpacks in the open vanilla container too.
+    // Right-click stashing shows the contents of the backpack on the cursor and of backpacks in the
+    // open vanilla container too.
+    if (auto const& cursor = player.mPlayerUIContainer->getItem(0); !cursor.isNull() && game::isBackpack(cursor) && game::backpackUuid(cursor) == uuid) {
+        return true;
+    }
     if (feature::stash::inOpenContainer(player, uuid)) return true;
     auto menu = ui::MenuManager::get().current(player);
     auto* bm  = menu ? dynamic_cast<ui::BackpackMenu*>(menu.get()) : nullptr;
@@ -120,11 +126,7 @@ core::screen::ContentsModel buildContents(Player& player, std::shared_ptr<game::
             );
         }
     }
-    if (auto energy = api::service().backpackEnergy(backpack->uuid())) {
-        m.lines.push_back(
-            "§c" + trFor(player, "abp.input.tooltip.energy", "{} FE", "§f" + core::screen::abbreviateCount(energy->stored()) + "§c")
-        );
-    }
+    // Energy ("§c§f<n>§c FE"): the Battery upgrade adds it through ABP_REGISTER_CONTENTS_LINES.
     for (auto const& provider : ContentsLineRegistry::entries()) {
         if (provider) provider(player, *backpack, m.lines);
     }

@@ -66,6 +66,8 @@ function V-Pos([string]$key) {
     @((($r[0] + 8 * $r[2]) / $V.Inv), (($r[1] + 8 * $r[2]) / $V.Inv))
 }
 function V-Move([string]$key) { $p = V-Pos $key; Move-Mouse $p[0] $p[1] }
+# A slot $dx columns / $dy rows away from a seen slot (18 GUI units per slot).
+function V-MoveFrom([string]$key, [int]$dx, [int]$dy) { $p = V-Pos $key; Move-Mouse ($p[0] + $dx * 18 / $V.Inv) ($p[1] + $dy * 18 / $V.Inv) }
 function V-Click([string]$key, [switch]$Right) { $p = V-Pos $key; Click $p[0] $p[1] -Right:$Right; Start-Sleep -Milliseconds 400 }
 
 # ---- setup ------------------------------------------------------------------------------------------------
@@ -134,13 +136,17 @@ $line = Wait-LogLine 'key action: .* ran inventory interaction \((\d+) stacks de
 if ($line -notmatch 'interaction \(([1-9]\d*) stacks deposited') { throw "C deposited nothing: $line" }
 
 # ---- Chest screen: stashing with the backpack on the cursor, B over a backpack ------------------------------
+Press-Key '9'                               # empty hand: the right click opens the chest
+Start-Sleep -Milliseconds 400
+for ($try = 1; ; $try++) {
+    $mark = Get-LogMark
+    Click 0.5 0.5 -Relative -Right
+    Start-Sleep -Milliseconds 1500
+    try { Read-VanillaSlots $mark; break } catch { if ($try -ge 3) { throw }; Write-Step "chest not open yet ($_); retrying" }
+}
 $mark = Get-LogMark
-Click 0.5 0.5 -Relative -Right
-Start-Sleep -Milliseconds 1500
-Read-VanillaSlots $mark
 V-Click 'inventory:0'                       # backpack A onto the cursor
-V-Move 'container:2'                        # an empty spot (not over a sign)
-$mark = Get-LogMark
+V-MoveFrom 'container:0' 6 1                # an empty chest slot (not over a sign)
 Wait-LogLine 'stash: [1-9]\d* of \d+ slots stashable' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'chest-minus-signs' | Out-Null
@@ -156,7 +162,7 @@ V-Click 'inventory:0'                       # A back into its slot
 Start-Sleep -Milliseconds 300
 # Cursor item onto the backpack in the chest (never opened: SB assumes space).
 V-Click 'inventory:4'                       # diamonds
-V-Move 'container:2'
+V-MoveFrom 'container:0' 6 1
 Start-Sleep -Milliseconds 900
 Save-Screenshot 'chest-plus-sign' | Out-Null
 $mark = Get-LogMark
@@ -200,9 +206,9 @@ V-Move 'inventory:6'
 Start-Sleep -Milliseconds 600
 Save-Screenshot 'inv-advanced-tool-swapper-tooltip' | Out-Null
 # Cobblestone on the cursor: "+" on the backpacks (green on B: it already holds cobblestone).
-V-Click 'inventory:2'
-V-Move 'inventory:20'
 $mark = Get-LogMark
+V-Click 'inventory:2'
+V-MoveFrom 'inventory:0' 8 -1               # an empty inventory slot
 Wait-LogLine 'stash: [1-9]\d* of \d+ slots stashable' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'inv-plus-signs' | Out-Null
@@ -216,7 +222,7 @@ Start-Sleep -Milliseconds 500
 Save-Screenshot 'inv-stashed-into-slot-backpack' | Out-Null
 # Backpack A on the cursor: "-" on the items, right click the dirt.
 V-Click 'inventory:0'
-V-Move 'inventory:20'
+V-MoveFrom 'inventory:0' 8 -1
 Start-Sleep -Milliseconds 900
 Save-Screenshot 'inv-minus-signs' | Out-Null
 $mark = Get-LogMark
