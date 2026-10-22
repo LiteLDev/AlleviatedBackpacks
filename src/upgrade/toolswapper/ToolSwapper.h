@@ -1,5 +1,18 @@
 #pragma once
 
+// Tool Swapper upgrades (SB ToolSwapperUpgradeWrapper). Basic: no settings tab, defaults only.
+// Advanced: "Swap Weapon" toggle, tool swap mode (Swap Tools / Only Swap For Other Tools / Do Not
+// Swap Tools), an 8 slot filter (4 per row) and the tool swap key (wrench-like tools for the
+// block / entity the player looks at).
+//
+// Triggers (server side):
+//   - starting to break a block while holding a tool or weapon: the backpack tool that breaks the
+//     block fastest (an instantly breaking one wins) replaces it;
+//   - attacking while holding a tool: the best sword, else the best axe;
+//   - the tool swap key (advanced): a tool that strips / scrapes / un-waxes / flattens / shears the
+//     looked-at block, or works on the looked-at entity (shears, bucket for cows, lead for animals).
+// Never in creative / spectator, never when holding a backpack. One Tool Swapper per backpack.
+
 #include <optional>
 #include <string>
 #include <string_view>
@@ -9,6 +22,7 @@
 
 class Actor;
 class Block;
+class BlockPos;
 class ItemStack;
 class Player;
 
@@ -18,63 +32,72 @@ namespace abp::upgrade::toolswapper {
 inline constexpr std::string_view kBasicId     = "tool_swapper";
 inline constexpr std::string_view kAdvancedId  = "advanced_tool_swapper";
 inline constexpr std::string_view kGroup       = "tool_swapper";
-inline constexpr int              kFilterSlots = 9;
+inline constexpr int              kFilterSlots = 8; ///< SB toolSwapperUpgrade.filterSlots
+inline constexpr int              kSlotsInRow  = 4; ///< SB toolSwapperUpgrade.slotsInRow
 
-/// When a tool may be swapped in for a block (SB "tool swap mode").
+/// SB ToolSwapMode (serialized "name" / "onlyTools" / "noSwap"); `next()` cycles in this order.
 enum class ToolMode : int {
-    Any       = 0, ///< whatever is held (blocks, food, empty hand) is swapped for the best tool
-    OnlyTools = 1, ///< only when the hand is empty or already holds a tool/weapon
-    Off       = 2, ///< never swap tools for blocks
+    Any       = 0, ///< "Swap Tools"
+    OnlyTools = 1, ///< "Only Swap For Other Tools": not when holding a weapon
+    Off       = 2, ///< "Do Not Swap Tools"
 };
+[[nodiscard]] std::string_view toString(ToolMode mode);
+[[nodiscard]] ToolMode         toolModeFromString(std::string_view s);
 
 /// `config/toolswapper.json`
 struct ToolSwapperConfig {
-    int version = 1;
+    int version = 2;
     /// Master switch for the Tool Swapper hooks.
     bool enabled = true;
-    /// "Skip nearly broken tools" treats a tool with this many uses left (or fewer) as nearly broken.
-    int lowDurabilityUses = 3;
-    /// Default of the "skip nearly broken tools" option (basic upgrades always use it).
-    bool skipLowDurabilityByDefault = true;
 };
 
-/// Effective settings of one installed Tool Swapper (basic: fixed defaults).
+/// Effective settings of one installed Tool Swapper (basic: defaults).
 struct Settings {
-    bool         weapons           = true;          ///< swap to the best weapon when attacking
-    ToolMode     mode              = ToolMode::Any; ///< block-breaking swaps
-    bool         skipLowDurability = true;          ///< ignore nearly broken tools
-    bool         interact          = true;          ///< shears for sheep, axe/hoe/shovel on sneak-use
-    bool         hasFilter         = false;         ///< advanced only
-    core::Filter filter{kFilterSlots};
+    bool         swapWeapon = true;          ///< SB default
+    ToolMode     mode       = ToolMode::Any; ///< SB default
+    core::Filter filter     = defaultFilter();
+
+    /// SC FilterLogic defaults for the tool swapper: deny list, match item, empty passes all.
+    [[nodiscard]] static core::Filter defaultFilter();
 };
 
 [[nodiscard]] bool     isAdvanced(UpgradeContext const& ctx);
 [[nodiscard]] Settings settingsOf(UpgradeContext const& ctx);
-/// Writes the editable fields (not the filter, which FilterMenu edits) to an advanced upgrade.
-void saveSettings(UpgradeContext const& ctx, Settings const& s);
+void                   setSwapWeapon(UpgradeContext const& ctx, bool on);
+void                   setToolMode(UpgradeContext const& ctx, ToolMode mode);
+void                   setFilter(UpgradeContext const& ctx, core::Filter const& filter);
 
-// ---- classification / scoring (game layer, server thread) ---------------------------------------
-[[nodiscard]] bool isTool(ItemStack const& stack);   ///< pickaxe/axe/shovel/hoe/sword/shears/...
-[[nodiscard]] bool isWeapon(ItemStack const& stack); ///< sword/axe/mace/trident
-/// Mining speed of `stack` on `block`, efficiency included (1 = bare hand).
-[[nodiscard]] float mineSpeed(ItemStack const& stack, Block const& block);
-/// Whether breaking `block` with `stack` yields drops (true when the block needs no tool).
-[[nodiscard]] bool canHarvest(ItemStack const& stack, Block const& block);
-/// Attack damage of `stack` including sharpness (0 for non-weapons' bare value).
+// ---- classification (game layer, server thread) -------------------------------------------------
+[[nodiscard]] bool isSword(ItemStack const& stack); ///< SB SwordRegistry / SWORD_SWEEP
+/// SB canPerformToolAction: axe, hoe, pickaxe, shovel or shears.
+[[nodiscard]] bool isTool(ItemStack const& stack);
+[[nodiscard]] bool isAxe(ItemStack const& stack);
+/// The item's own destroy speed on `block` (SB ItemStack.getDestroySpeed: no enchantments).
+[[nodiscard]] float destroySpeed(ItemStack const& stack, Block const& block);
+/// SB BlockState.getDestroyProgress for a player holding `stack` (efficiency included; >= 1 = instant).
+[[nodiscard]] float destroyProgress(ItemStack const& stack, Block const& block);
+/// SB isGoodAtBreakingBlock: harvests the block and is faster than 1.5 (or breaks it instantly).
+[[nodiscard]] bool goodAtBreaking(ItemStack const& stack, Block const& block);
 [[nodiscard]] float attackDamage(ItemStack const& stack);
-/// Tool tag needed to "use" `block` (strip/till/path/carve), e.g. "minecraft:is_axe"; empty if none.
-[[nodiscard]] std::string useToolFor(Block const& block);
-/// Whether right-clicking `actor` with shears does something (sheep, mooshroom, snow golem, bogged).
+/// SB itemWorksOnBlock: strip / scrape / wax off (axes), flatten (shovels), carve / harvest
+/// (shears) on `block` at `pos`.
+[[nodiscard]] bool worksOnBlock(ItemStack const& stack, Block const& block, Player& player, BlockPos const& pos);
+/// SB itemWorksOnEntity: shears on a shearable mob, ToolRegistry entity tools (bucket: cow, lead:
+/// animals).
+[[nodiscard]] bool worksOnEntity(ItemStack const& stack, Actor const& actor);
 [[nodiscard]] bool isShearable(Actor const& actor);
 
-// ---- swapping -----------------------------------------------------------------------------------
-/// The player starts breaking `block`: swap in the best tool from the carried backpacks.
-bool swapForBlock(Player& player, Block const& block);
-/// The player attacks: swap in the best weapon.
-bool swapForAttack(Player& player);
-/// The player right-clicks `actor` with an empty hand: swap in shears when useful.
-bool swapForEntityUse(Player& player, Actor const& actor);
-/// The player sneak-right-clicks `block` with an empty hand: swap in the tool that can use it.
-bool swapForBlockUse(Player& player, Block const& block);
+// ---- triggers -----------------------------------------------------------------------------------
+/// SB onBlockClick: the player starts breaking the block at `pos`. Returns true when a Tool
+/// Swapper handled it (swapped, or the held tool is already right).
+bool onBlockClick(Player& player, BlockPos const& pos);
+/// SB onAttackEntity.
+bool onAttack(Player& player);
+
+/// Result of the tool swap key.
+enum class KeyResult { Swapped, NoTarget, HoldingBackpack, NoUpgrade, NoToolForBlock, NoToolForEntity };
+/// The tool swap key (SB BlockToolSwapPayload / EntityToolSwapPayload): looks at the player's
+/// crosshair target and swaps in a tool that works on it; shows SB's status messages.
+KeyResult onSwapKey(Player& player);
 
 } // namespace abp::upgrade::toolswapper

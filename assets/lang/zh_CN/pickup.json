@@ -1,4 +1,8 @@
 {
   "abp.upgrade.pickup.name": "拾取升级",
-  "abp.upgrade.advanced_pickup.name": "高级拾取升级"
+  "abp.upgrade.advanced_pickup.name": "高级拾取升级",
+  "abp.pickup.tab": "拾取",
+  "abp.pickup.tab.tooltip": "拾取设置",
+  "abp.pickup.tab.advanced": "高级拾取",
+  "abp.pickup.tab.advanced.tooltip": "高级拾取设置"
 }

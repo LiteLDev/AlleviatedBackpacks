@@ -231,19 +231,24 @@ ABP_REGISTER_SELFTEST("pickup.advanced_match_options", [](Context& ctx) {
     auto  set  = [&](core::Filter f) { setFilter(bp, slot, UpgradeTier::Advanced, f); };
     ctx.check(static_cast<int>(filtering::load(UpgradeContext(bp, slot), UpgradeTier::Advanced).ghosts.size()) == 16, "16 slots");
 
-    // Tag of a ghost item.
+    // Tags (SC): only the selected tag list counts; filter items are ignored in TAGS mode.
     core::Filter tag(filtering::kAdvancedSlots);
     tag.matchBy = core::MatchBy::Tag;
     tag.setGhost(15, data("minecraft:oak_log", 1));
     set(tag);
-    ctx.check(pickup(p, "minecraft:birch_log", 2) == 2, "tag of ghost: birch log is a log");
-    ctx.check(pickup(p, "minecraft:stone", 2) == 0, "tag of ghost: stone is not");
-    // Explicit tags.
-    tag.ghosts.assign(16, {});
-    tag.tags = {"minecraft:logs"};
+    ctx.check(pickup(p, "minecraft:birch_log", 2) == 0, "allow + no tags selected: nothing");
+    tag.addTag("minecraft:logs");
     set(tag);
-    ctx.check(pickup(p, "minecraft:spruce_log", 1) == 1, "explicit tag");
-    ctx.check(pickup(p, "minecraft:dirt", 1) == 0, "explicit tag rejects dirt");
+    ctx.check(pickup(p, "minecraft:spruce_log", 1) == 1, "selected tag");
+    ctx.check(pickup(p, "minecraft:dirt", 1) == 0, "selected tag rejects dirt");
+    // Match all tags.
+    tag.addTag("minecraft:is_food");
+    tag.matchAnyTag = false;
+    set(tag);
+    ctx.check(pickup(p, "minecraft:spruce_log", 1) == 0, "match all: a log is not food");
+    tag.matchAnyTag = true;
+    set(tag);
+    ctx.check(pickup(p, "minecraft:spruce_log", 1) == 1, "match any: a log is a log");
 
     // Namespace.
     core::Filter ns(filtering::kAdvancedSlots);
@@ -389,6 +394,10 @@ ABP_REGISTER_SELFTEST("pickup.settings_menu", [](Context& ctx) -> ll::coro::Coro
     auto f = filtering::load(uctx, UpgradeTier::Advanced);
     ctx.check(!f.ghosts[15].empty() && f.ghosts[15].id == "minecraft:apple", "ghost stored in the upgrade settings");
     (void)mm.simulate(p, {Action::Place, {Where::Cursor, 0}, {Where::Inventory, 5}, 3});
+    // SB: a new filter is a block list; the type button (control slot 0) makes it an allow list.
+    ctx.check(f.mode == core::FilterMode::Deny, "new filter is a block list");
+    (void)mm.simulate(p, {Action::Take, {Where::Menu, 18}, {Where::Cursor, 0}, 1});
+    ctx.check(filtering::load(uctx, UpgradeTier::Advanced).mode == core::FilterMode::Allow, "allow list");
     // Match-by button (control slot 1) cycles item -> namespace.
     (void)mm.simulate(p, {Action::Take, {Where::Menu, 19}, {Where::Cursor, 0}, 1});
     ctx.check(filtering::load(uctx, UpgradeTier::Advanced).matchBy == core::MatchBy::Namespace, "match by namespace");
@@ -413,7 +422,7 @@ ABP_REGISTER_SELFTEST("pickup.settings_menu", [](Context& ctx) -> ll::coro::Coro
     (void)mm.simulate(p, {Action::Take, {Where::Menu, 19}, {Where::Cursor, 0}, 1});
     ctx.check(filtering::load(bctx, UpgradeTier::Basic).matchBy == core::MatchBy::Item, "basic stays item match");
     (void)mm.simulate(p, {Action::Take, {Where::Menu, 18}, {Where::Cursor, 0}, 1});
-    ctx.check(filtering::load(bctx, UpgradeTier::Basic).mode == core::FilterMode::Deny, "basic allow/deny toggle");
+    ctx.check(filtering::load(bctx, UpgradeTier::Basic).mode == core::FilterMode::Allow, "basic allow/block toggle");
     mm.close(p);
 });
 
