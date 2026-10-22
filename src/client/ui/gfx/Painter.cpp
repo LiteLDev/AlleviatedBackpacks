@@ -343,6 +343,14 @@ void Painter::flush() {
 
     quads(Layer::Foreground);
 
+    // Text drawn right after item icons (no quad flush in between) is hidden by the slot frames
+    // drawn earlier (seen in the backpack screen's counts); an off-screen quad flush first, as
+    // before the items, puts the text on top.
+    if (std::any_of(mCmds->begin(), mCmds->end(), [](Cmd const& c) { return std::holds_alternative<TextCmd>(c.v); })) {
+        mCtx.fillRectangle(RectangleArea{-10000.f, -9999.f, -10000.f, -9999.f}, white, 1.f);
+        mCtx.flushImages(white, 1.f, fillMaterial());
+    }
+
     bool  anyText = false;
     auto& font    = uiFont(mCtx);
     for (auto& cmd : *mCmds) {

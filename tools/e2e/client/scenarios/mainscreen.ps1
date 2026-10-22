@@ -63,14 +63,28 @@ function Close-Backpack {
     $mark = Get-LogMark
     Press-Key 'E'
     Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
-    Start-Sleep -Milliseconds 700
+    Start-Sleep -Milliseconds 1500
 }
+# A fresh backpack of `tier` (plus a spare magnet upgrade); retried when the chat did not open (the
+# game sometimes drops the T right after a screen closed).
 function Setup-Tier([string]$tier) {
-    Invoke-Chat '/clear @s'
-    $mark = Get-LogMark
-    Invoke-Chat "/backpack mainscreen setup $tier"
-    Wait-LogLine "mainscreen setup: gave $tier backpack" 15 -Since $mark | Out-Null
-    Start-Sleep -Milliseconds 500
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $mark = Get-LogMark
+        Invoke-Chat '/clear @s'
+        Start-Sleep -Milliseconds 500
+        Invoke-Chat "/backpack mainscreen setup $tier"
+        try {
+            Wait-LogLine "mainscreen setup: gave $tier backpack" 8 -Since $mark | Out-Null
+            Start-Sleep -Milliseconds 500
+            return
+        } catch {
+            Write-Step "setup $tier: no answer (attempt $attempt), retrying"
+            Save-Screenshot "setup-$tier-retry-$attempt" | Out-Null
+            Press-Key ESC # e.g. the emote wheel ('b' typed outside the chat)
+            Start-Sleep -Milliseconds 1500
+        }
+    }
+    throw "mainscreen setup $tier failed"
 }
 
 $slotsOf = @{ leather = 27; copper = 45; iron = 54; gold = 81; diamond = 108; netherite = 120 }

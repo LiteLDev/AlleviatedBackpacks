@@ -769,6 +769,8 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     }
     p.flush();
     for (auto const& c : counts) drawCountOverlay(p, c.overlay, c.x, c.y);
+    // A quad in the same flush keeps the counts above the slot frames (see Painter::flush).
+    p.fillRect({-10000, -10000, 1, 1}, Color::argb(0));
     p.flush();
 
     // Scroll bar (InventoryScrollPanel).
