@@ -29,6 +29,7 @@
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/inception/Inception.h"
 #include "upgrade/stack/StackUpgrade.h"
+#include "upgrade/tank/Columns.h"
 
 namespace abp::net {
 
@@ -56,6 +57,9 @@ struct NativeSession {
     std::vector<int>    errorStorageSlots;
     int                 errorTicks = 0;
     bool                dirty      = false; ///< push an update on the next tick
+    /// Vanilla `lastQuickMoved`: what the last shift-click moved (Shift + double-click moves the
+    /// rest of that item from the same inventory).
+    core::ItemStackData lastQuickMoved;
 };
 
 std::unordered_map<std::int64_t, NativeSession> gSessions; // server thread
@@ -213,6 +217,48 @@ MenuManager::SimAction act(ActionType type, MenuManager::SlotAddress src, MenuMa
     return a;
 }
 
+struct SlotError {
+    std::string      message;
+    std::vector<int> upgradeSlots;
+};
+
+/// Sophisticated Core's `canAddUpgradeTo` result for putting `item` into upgrade slot `slot` that
+/// `upgrade::canInstall` refused with `reason`: SC's message and the upgrade slots it highlights
+/// (the slots already holding the limiting / conflicting upgrades). Empty message = no overlay
+/// (SC: a non-upgrade item simply doesn't go in).
+SlotError installError(Player& p, ui::BackpackMenu& menu, int slot, core::ItemStackData const& item, std::string const& reason) {
+    auto* type = upgrade::upgradeFor(item);
+    if (!type) return {};
+    auto const& slots   = menu.backpack()->data().upgrades;
+    auto        storage = menu.title();
+    auto        name    = upgrade::displayName(*type, &p);
+    if (!upgrade::typeAllowed(*type)) {
+        return {trFor(p, "abp.mainscreen.error.add.upgrade_not_allowed", "{0} can't be used in {1}", name, storage), {}};
+    }
+    auto const&      info = type->info();
+    std::vector<int> same, conflicting;
+    for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
+        auto const& st = slots[static_cast<std::size_t>(i)];
+        auto*       other = st.empty() || i == slot ? nullptr : upgrade::upgradeFor(st.item);
+        if (!other) continue;
+        if (other->info().groupOrId() == info.groupOrId()) same.push_back(i);
+        auto hits = [](upgrade::IUpgrade const& a, upgrade::IUpgrade const& b) {
+            return std::any_of(a.info().conflicts.begin(), a.info().conflicts.end(), [&](std::string const& c) {
+                return c == b.info().id || c == b.info().groupOrId();
+            });
+        };
+        if (hits(*type, *other) || hits(*other, *type)) conflicting.push_back(i);
+    }
+    if (!conflicting.empty()) return {reason, conflicting};
+    if (static_cast<int>(same.size()) >= info.maxPerBackpack) {
+        return {
+            trFor(p, "abp.mainscreen.error.add.only_x_upgrades_allowed", "Only {0}x {1} can be used in {2}", info.maxPerBackpack, name, storage),
+            same
+        };
+    }
+    return {reason, {slot}};
+}
+
 /// One click on a storage or upgrade slot (through `simulateOn` with that slot).
 bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area area, int index, int button, bool shift, bool ctrl) {
     auto& mm     = MenuManager::get();
@@ -234,7 +280,8 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
         content = bp->data().upgrades[static_cast<std::size_t>(index)].item;
     }
 
-    // Upgrade slot changes show SB's red error overlay instead of a chat message.
+    // Upgrade slot changes show SC's red error overlay instead of a chat message; a successful
+    // upgrade slot change clears it (SC `updateSlotChangeError` with a successful result).
     if (area == Area::Upgrade) {
         std::string reason;
         bool        removing = !content.empty() && (cursor.isNull() || shift);
@@ -247,7 +294,8 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
         } else if (installing) {
             auto data = game::ItemConv::toData(cursor).withCount(1);
             if (!upgrade::canInstall(bp, index, data, &p, &reason)) {
-                setError(s, reason, {index});
+                auto e = installError(p, menu, index, data, reason);
+                if (!e.message.empty()) setError(s, std::move(e.message), std::move(e.upgradeSlots));
                 return false;
             }
         } else if (!content.empty() && !cursor.isNull()) {
@@ -263,13 +311,15 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
     }
 
     if (shift) {
+        // Vanilla `lastQuickMoved` (Shift + double-click moves the rest of this item).
+        if (!(ctrl && button == 0 && area == Area::Storage)) s.lastQuickMoved = content;
         if (content.empty()) return false;
         int target = quickMoveTarget(p, content, menu.lockedInventorySlot);
         if (target < 0) return false;
         int amount = area == Area::Storage ? std::min(content.count, maxTake) : 1;
         bool ok    = mm.simulateOn(p, act(ActionType::Take, here, {Where::Inventory, target}, amount), slot);
-        // Ctrl+Shift: SC's "transfer full slot" (all of an over-sized storage slot).
-        for (int guard = 0; ok && ctrl && area == Area::Storage && guard < 64; ++guard) {
+        // Ctrl+Shift+left click: SC's "transfer full slot" (all of an over-sized storage slot).
+        for (int guard = 0; ok && ctrl && button == 0 && area == Area::Storage && guard < 64; ++guard) {
             auto const& left = bp->inventory().at(index);
             if (left.empty()) break;
             target = quickMoveTarget(p, left, menu.lockedInventorySlot);
@@ -294,7 +344,7 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
     return mm.simulateOn(p, act(ActionType::Swap, here, cur, 0), slot);
 }
 
-bool clickInventory(Player& p, ui::Menu& base, int index, int button, bool shift) {
+bool clickInventory(Player& p, ui::Menu& base, NativeSession& s, int index, int button, bool shift) {
     (void)base;
     if (index < 0 || index >= kInventory) return false;
     auto&     mm     = MenuManager::get();
@@ -303,6 +353,7 @@ bool clickInventory(Player& p, ui::Menu& base, int index, int button, bool shift
     MenuManager::SlotAddress here{Where::Inventory, index};
     MenuManager::SlotAddress cur{Where::Cursor, 0};
     if (shift) {
+        s.lastQuickMoved = item.isNull() ? core::ItemStackData{} : game::ItemConv::toData(item);
         if (item.isNull()) return false;
         // Into the menu (quick move: backpack filters, memory slots, quick-move handlers).
         return mm.simulate(p, act(ActionType::Place, here, {Where::Menu, 0}, item.mCount));
@@ -321,27 +372,96 @@ bool clickInventory(Player& p, ui::Menu& base, int index, int button, bool shift
     return mm.simulate(p, act(ActionType::Swap, here, cur, 0));
 }
 
-/// Double click with an item on the cursor: gather the same item from storage and inventory.
-bool collectToCursor(Player& p, ui::BackpackMenu& menu) {
-    auto& mm = MenuManager::get();
-    bool  any = false;
+/// Player inventory slots in the order of SC's menu slots: the main inventory rows, then the hotbar.
+std::vector<int> menuOrderInventory() {
+    std::vector<int> out;
+    for (int i = 9; i < kInventory; ++i) out.push_back(i);
+    for (int i = 0; i < 9; ++i) out.push_back(i);
+    return out;
+}
+
+/// SC `doClick(PICKUP_ALL)` (double click with an item on the cursor) on the clicked slot: only when
+/// that slot is empty, the same item is gathered from the storage and inventory slots (first pass
+/// skips full stacks), then from the upgrade slots (not ones taking storage columns).
+bool pickupAll(Player& p, ui::BackpackMenu& menu, Area area, int index) {
+    auto&     mm  = MenuManager::get();
+    auto      bp  = menu.backpack();
+    auto&     inv = bp->inventory();
+    ItemStack cursor = cursorOf(p);
+    if (cursor.isNull()) return false;
+    bool clickedEmpty = true;
+    if (area == Area::Storage && index >= 0 && index < inv.size()) clickedEmpty = inv.at(index).empty();
+    if (area == Area::Inventory && index >= 0 && index < kInventory) clickedEmpty = p.getInventory().getItem(index).isNull();
+    if (area == Area::Upgrade && index >= 0 && index < static_cast<int>(bp->data().upgrades.size())) {
+        clickedEmpty = bp->data().upgrades[static_cast<std::size_t>(index)].empty();
+    }
+    if (!clickedEmpty) return false;
+    auto room = [&] {
+        auto c = cursorOf(p);
+        return c.isNull() ? 0 : std::max(0, static_cast<int>(c.getMaxStackSize()) - static_cast<int>(c.mCount));
+    };
+    auto const locked = menu.lockedInventorySlot;
+    bool       any    = false;
     for (int pass = 0; pass < 2; ++pass) {
-        int limit = pass == 0 ? menu.backpack()->inventory().size() : kInventory;
-        for (int i = 0; i < limit; ++i) {
-            ItemStack cursor = cursorOf(p);
-            if (cursor.isNull() || cursor.mCount >= cursor.getMaxStackSize()) return any;
-            int room = cursor.getMaxStackSize() - cursor.mCount;
-            if (pass == 0) {
-                auto const& d = menu.backpack()->inventory().at(i);
-                if (!sameItem(cursor, d)) continue;
-                any |= mm.simulateOn(p, act(ActionType::Take, {Where::Menu, i}, {Where::Cursor, 0}, std::min(room, d.count)), menu.storageSlot(i));
-            } else {
-                auto const& it = p.getInventory().getItem(i);
-                if (it.isNull() || !it.matchesItem(cursor)) continue;
-                any |= mm.simulate(p, act(ActionType::Take, {Where::Inventory, i}, {Where::Cursor, 0}, std::min<int>(room, it.mCount)));
-            }
+        for (int i = 0; i < inv.size() && room() > 0; ++i) {
+            auto const d = inv.at(i);
+            if (!sameItem(cursorOf(p), d)) continue;
+            if (pass == 0 && d.count == d.maxStack) continue;
+            any |= mm.simulateOn(p, act(ActionType::Take, {Where::Menu, i}, {Where::Cursor, 0}, std::min(room(), d.count)), menu.storageSlot(i));
+        }
+        for (int i : menuOrderInventory()) {
+            if (room() <= 0) break;
+            if (locked && *locked == i) continue;
+            auto const& it = p.getInventory().getItem(i);
+            if (it.isNull() || !it.matchesItem(cursorOf(p))) continue;
+            if (pass == 0 && it.mCount == it.getMaxStackSize()) continue;
+            any |= mm.simulate(p, act(ActionType::Take, {Where::Inventory, i}, {Where::Cursor, 0}, std::min<int>(room(), it.mCount)));
         }
     }
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int i = 0; i < static_cast<int>(bp->data().upgrades.size()) && room() > 0; ++i) {
+            auto const st = bp->data().upgrades[static_cast<std::size_t>(i)];
+            if (st.empty() || !sameItem(cursorOf(p), st.item)) continue;
+            auto* type = upgrade::upgradeFor(st.item);
+            if (upgrade::columns::columnsOf(st.item) > 0) continue; // canTakeItemForPickAll
+            if (pass == 0 && st.item.count == st.item.maxStack) continue;
+            std::string reason;
+            if (type && !type->canRemove(upgrade::UpgradeContext(bp, i, &p), reason)) continue;
+            any |= mm.simulateOn(p, act(ActionType::Take, {Where::Menu, i}, {Where::Cursor, 0}, 1), menu.upgradeSlot(i));
+        }
+    }
+    return any;
+}
+
+/// Vanilla Shift + double-click (`mouseReleased` with `lastQuickMoved`): quick-moves every other
+/// stack of the last shift-clicked item from the same inventory (the storage, the player inventory
+/// or the upgrade slots). Over-sized storage stacks move whole (SC `TransferFullSlotPayload`).
+bool quickMoveAll(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area area) {
+    auto last = s.lastQuickMoved;
+    if (last.empty()) return false;
+    auto bp  = menu.backpack();
+    bool any = false;
+    if (area == Area::Storage) {
+        for (int i = 0; i < bp->inventory().size(); ++i) {
+            auto const& d = bp->inventory().at(i);
+            if (d.empty() || !d.sameItem(last)) continue;
+            any |= clickMenuSlot(p, menu, s, Area::Storage, i, 0, true, d.count > d.maxStack);
+        }
+    } else if (area == Area::Inventory) {
+        for (int i : menuOrderInventory()) {
+            auto const& it = p.getInventory().getItem(i);
+            if (it.isNull() || !game::ItemConv::toData(it).sameItem(last)) continue;
+            if (menu.lockedInventorySlot && *menu.lockedInventorySlot == i) continue;
+            any |= clickInventory(p, menu, s, i, 0, true);
+        }
+    } else if (area == Area::Upgrade) {
+        for (int i = 0; i < static_cast<int>(bp->data().upgrades.size()); ++i) {
+            auto const& st = bp->data().upgrades[static_cast<std::size_t>(i)];
+            if (st.empty() || !st.item.sameItem(last)) continue;
+            any |= clickMenuSlot(p, menu, s, Area::Upgrade, i, 0, true, false);
+        }
+    }
+    s.lastQuickMoved = last;
     return any;
 }
 
@@ -383,6 +503,25 @@ bool clickGenericSlot(Player& p, ui::Menu& menu, int index, int button, bool shi
 std::string translatedUpgradeName(Player& p, upgrade::IUpgrade const& type) { return upgrade::displayName(type, &p); }
 
 // ---- native settings screen: feature/gui/SbSettings.h (P2-2) -------------------------------------------
+// ---- open upgrade tab (SC setOpenTabId / getOpenTabId, reopened with "keep tab open") -------------------
+
+constexpr char const* kOpenTabKey = "openTab";
+
+int openTabOf(Player& p, game::Backpack const& bp) {
+    if (!feature::gui::settingValue(p, bp, feature::gui::MainSetting::KeepTabOpen)) return -1; // removeOpenTabIfKeepOff
+    auto it = bp.data().settings.find("mainscreen");
+    if (it == bp.data().settings.end() || !it->is_object()) return -1;
+    auto v = it->find(kOpenTabKey);
+    return v != it->end() && v->is_number_integer() ? v->get<int>() : -1;
+}
+
+void setOpenTab(game::Backpack& bp, int slot) {
+    auto& s = bp.data().settings["mainscreen"];
+    if (!s.is_object()) s = nlohmann::json::object();
+    if (s.value(kOpenTabKey, -2) == slot) return;
+    s[kOpenTabKey] = slot;
+    bp.markDirty();
+}
 
 // ---- upgrade tabs bridged from the upgrades' settings menus ------------------------------------------
 // Until an upgrade has its own native tab, its settings menu (`IUpgrade::createSettingsMenu`, e.g.
@@ -526,6 +665,8 @@ BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu) {
         m.slots.push_back(d);
         if (!d.empty()) m.slotLimits[static_cast<std::size_t>(i)] = inv.slotLimit(i, d);
     }
+    // SC InventoryHandler.getSlotLimit: the limit for 64-stackable items (64 x multiplier).
+    m.baseSlotLimit = inv.size() > 0 ? inv.slotLimit(0, core::ItemStackData::of("minecraft:stone", 1, 64)) : 64;
     auto const& slots = bp.data().upgrades;
     for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
         auto const&               s = slots[static_cast<std::size_t>(i)];
@@ -562,6 +703,7 @@ BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu) {
     m.accentColor     = bp.data().accentColor;
     m.noSortColor     = core::kDyes[static_cast<std::size_t>(feature::gui::noSortColor(bp))].argb & 0xFFFFFF;
     m.extra["settings"] = feature::gui::settingsScreenJson(player, bp);
+    m.extra["mainscreen"] = nlohmann::json{{"openTab", openTabOf(player, bp)}}; // kept open upgrade tab
     return m;
 }
 
@@ -662,32 +804,38 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
     } else if ((action == "click" || action == "drop" || action == "hotbar") && area == Area::Inventory) {
         items = true;
         if (idx < 0 || idx >= kInventory) return false;
-        if (!s->errorMessage.empty()) setError(*s, {}, {});
         if (action == "click") {
-            ok = clickInventory(player, *base, idx, body.value("button", 0), body.value("shift", false));
+            ok = clickInventory(player, *base, *s, idx, body.value("button", 0), body.value("shift", false));
         } else if (action == "drop") {
             ok = mm.simulate(player, act(ActionType::Drop, {Where::Inventory, idx}, {}, body.value("all", false) ? 255 : 1));
         } else {
             int hb = body.value("hotbar", -1);
             if (hb < 0 || hb > 8 || idx == hb) return false;
+            if (base->lockedInventorySlot && (*base->lockedInventorySlot == hb || *base->lockedInventorySlot == idx)) return false;
             ok = mm.simulate(player, act(ActionType::Swap, {Where::Inventory, idx}, {Where::Inventory, hb}, 0));
         }
     } else if (!menu) {
         return false; // the remaining actions belong to the backpack screen
-    } else if (action == "click" || action == "double" || action == "drop" || action == "hotbar") {
+    } else if (action == "double" || action == "quickMoveAll") {
+        items = true;
+        if (area == Area::Invalid) return false;
+        ok = action == "double" ? pickupAll(player, *menu, area, idx) : quickMoveAll(player, *menu, *s, area);
+    } else if (action == "click" || action == "drop" || action == "hotbar") {
         auto bp = menu->backpack();
         items   = true;
         bool inRange = (area == Area::Storage && idx >= 0 && idx < bp->inventory().size())
                     || (area == Area::Upgrade && idx >= 0 && idx < static_cast<int>(bp->data().upgrades.size()));
-        if (!inRange && action != "double") return false;
-        if (!s->errorMessage.empty()) setError(*s, {}, {}); // SB clears the overlay on the next click
+        if (!inRange) return false;
+        if (area == Area::Storage && idx < static_cast<int>(s->sent.inaccessible.size()) && s->sent.inaccessible[static_cast<std::size_t>(idx)]) {
+            return false; // SC: inaccessible slots can't be clicked
+        }
         if (action == "click") {
             int  button = body.value("button", 0);
             bool shift  = body.value("shift", false);
             bool ctrl   = body.value("ctrl", false);
             ok          = clickMenuSlot(player, *menu, *s, area, idx, button, shift, ctrl);
-        } else if (action == "double") {
-            ok = collectToCursor(player, *menu);
+            // A successful upgrade slot change replaces SC's error result (no overlay).
+            if (ok && area == Area::Upgrade && !s->errorMessage.empty()) setError(*s, {}, {});
         } else if (action == "drop") {
             if (area != Area::Storage) return false;
             bool all = body.value("all", false);
@@ -696,6 +844,7 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
         } else { // hotbar
             int hb = body.value("hotbar", -1);
             if (hb < 0 || hb > 8 || area != Area::Storage) return false;
+            if (menu->lockedInventorySlot && *menu->lockedInventorySlot == hb) return false; // the open backpack stays put
             ok = mm.simulateOn(player, act(ActionType::Swap, {Where::Menu, idx}, {Where::Inventory, hb}, 0), menu->storageSlot(idx));
         }
     } else {
@@ -707,14 +856,20 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
             feature::gui::setBackpackOption(*bp, feature::gui::kSortBy, std::string(core::toString(next)));
             ok = true;
         } else if (action == "transfer") {
-            items = true;
-            feature::gui::TransferOptions opt;
-            opt.matchingOnly = body.value("matching", true);
-            opt.keepHotbar   = feature::gui::effective(&player, *bp).keepHotbar;
-            opt.lockedSlot   = menu->lockedInventorySlot;
-            int moved        = body.value("to", std::string{}) == "inventory" ? feature::gui::transferToPlayer(player, *bp, opt)
-                                                                              : feature::gui::transferToBackpack(player, *bp, opt);
+            // SC TransferItemsPayload (hotbar rules and exact matching, see Gui.h).
+            items         = true;
+            bool matching = body.value("matching", true);
+            int  moved    = body.value("to", std::string{}) == "inventory"
+                              ? feature::gui::transferToPlayerSB(player, *bp, matching, menu->lockedInventorySlot)
+                              : feature::gui::transferToBackpackSB(player, *bp, matching, menu->lockedInventorySlot);
             ok = moved > 0;
+        } else if (action == "openTab") {
+            // SC setOpenTabId / removeOpenTabId: the open upgrade tab (reopened with "keep tab open").
+            int slot = body.value("slot", -1);
+            if (slot < -1 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
+            setOpenTab(*bp, slot);
+            s->dirty = true;
+            ok       = true;
         } else if (action == "toggleUpgrade") {
             int slot = body.value("slot", -1);
             if (slot < 0 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;

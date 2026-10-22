@@ -57,6 +57,13 @@ struct BackpackScreenModel {
     int           storageSlots = 0;
     std::vector<ItemStackData> slots;      ///< storage contents (counts may exceed 255)
     std::vector<int>           slotLimits; ///< max count of each non-empty slot (0 = item max)
+    /// Slot limit of a storage slot for 64-stackable items (SC `InventoryHandler.getSlotLimit`:
+    /// 64 x stack multiplier). The "Count: n / max" tooltip line shows when it differs from the
+    /// hovered item's own max stack size.
+    int                        baseSlotLimit = 64;
+    /// Storage slots that can't be used (SC `isInaccessibleSlot`): drawn with the inaccessible
+    /// overlay, not clickable. Shorter than `slots` = the rest are accessible.
+    std::vector<bool>          inaccessible;
     std::vector<UpgradeView>   upgrades;
     std::vector<ItemStackData> memory;     ///< remembered item per slot (empty entries = none)
     std::vector<bool>          noSort;     ///< slots excluded from sorting

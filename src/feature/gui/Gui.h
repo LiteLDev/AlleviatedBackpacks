@@ -99,7 +99,25 @@ struct TransferOptions {
     bool               matchingOnly = false; ///< only items already in the destination
     bool               keepHotbar   = true;  ///< leave the hotbar (slots 0..8) alone
     std::optional<int> lockedSlot;           ///< player inventory slot never touched (the open backpack)
+    /// Player slots in index order (hotbar 0..8 first) instead of main inventory first.
+    bool               slotOrder    = false;
+    /// `matchingOnly` compares items exactly (id, aux and NBT; SC `ItemStackKey`) instead of by
+    /// id and aux. Memory slots still match by `core::memoryMatches`.
+    bool               exactMatch   = false;
 };
+
+/// Sophisticated Core's transfer buttons (`TransferItemsPayload`) for the native backpack screen:
+/// - to the backpack: from the main inventory (slots 9..35, never the hotbar); `matching` = only
+///   items already in the backpack or remembered by a memory slot;
+/// - to the inventory, everything: into slots 9..35 (never the hotbar);
+/// - to the inventory, `matching`: only items the player already has, into slots 0..35.
+/// Returns the moved count.
+int transferToBackpackSB(Player& player, game::Backpack& backpack, bool matching, std::optional<int> lockedSlot);
+int transferToPlayerSB(Player& player, game::Backpack& backpack, bool matching, std::optional<int> lockedSlot);
+
+/// Display name of an item as the server sees it (sorting by name); the id path when the server
+/// has no translation.
+[[nodiscard]] std::string itemDisplayName(core::ItemStackData const& item);
 /// Moves the player's inventory items into the backpack (backpack filters apply). Returns the count.
 int transferToBackpack(Player& player, game::Backpack& backpack, TransferOptions const& opt);
 /// Moves the backpack's items into the player's inventory, as far as they fit. Returns the count.

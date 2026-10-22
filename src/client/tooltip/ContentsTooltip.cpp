@@ -12,6 +12,7 @@
 #include "mc/client/gui/controls/renderers/HoverTextRenderer.h"
 #include "mc/client/player/LocalPlayer.h"
 #include "mc/client/renderer/screen/MinecraftUIRenderContext.h"
+#include "mc/locale/I18n.h"
 #include "mc/safety/RedactableString.h"
 #include "mc/world/PlayerUIContainer.h"
 #include "mc/world/item/Item.h"
@@ -26,6 +27,7 @@
 #include "client/ui/UiRoot.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "core/screen/CountFormat.h"
+#include "core/screen/SearchFilter.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "mod/Log.h"
@@ -176,9 +178,34 @@ bool drawBackpackTooltip(ui::Painter& p, ItemStack const& stack, float x, float 
 // ---- hooks ----------------------------------------------------------------------------------------------
 
 namespace {
+std::string withoutFormatting(std::string_view s) { return core::screen::stripFormatCodes(s); }
+
+/// Backpacks are dyeable items (two-colour tint), so Bedrock adds its "Dyed" hover line; SB's
+/// backpack tooltip has no such line.
+void stripDyedLine(std::string& s) {
+    std::string const dyed = withoutFormatting(getI18n().get("item.dyed", nullptr));
+    if (dyed.empty() || dyed == "item.dyed") return;
+    std::string out;
+    std::size_t start = 0;
+    bool        first = true;
+    while (start <= s.size()) {
+        auto end  = s.find('\n', start);
+        auto line = std::string_view(s).substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (withoutFormatting(line) != dyed) {
+            if (!first) out += '\n';
+            out += line;
+            first = false;
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    s = std::move(out);
+}
+
 void appendPressLine(::ItemStackBase const& stack, ::Level& level, ::Bedrock::Safety::RedactableString& hovertext) {
-    if (!level.isClientSide() || !net::serverReady() || input::shiftDown()) return;
-    if (!game::backpackTierOf(stack.getTypeName())) return;
+    if (!level.isClientSide() || !game::backpackTierOf(stack.getTypeName())) return;
+    stripDyedLine(hovertext.mUnredactedString);
+    if (!net::serverReady() || input::shiftDown()) return;
     auto  line = pressForContentsLine();
     auto& s    = hovertext.mUnredactedString;
     if (s.find(line) != std::string::npos) return; // both hooks ran (ComponentItem calls Item)

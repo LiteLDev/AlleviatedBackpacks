@@ -76,8 +76,11 @@ StorageLayout computeLayout(LayoutInput const& in) {
     // addSortButtons()
     switch (in.sortButtons) {
     case SortButtonsPosition::TitleLineRight:
-    case SortButtonsPosition::BelowUpgradeTabs: // needs the tab control; the client moves it
         l.sortButton = {l.imageWidth - 31, 4, kSmallButton, kSmallButton};
+        break;
+    case SortButtonsPosition::BelowUpgradeTabs:
+        // (settingsTabControl.x + 2, settingsTabControl.y + max(0, height + 2))
+        l.sortButton = {l.imageWidth + 2, kTabsY + std::max(0, in.tabsHeight + 2), kSmallButton, kSmallButton};
         break;
     case SortButtonsPosition::BelowUpgrades:
         l.sortButton = {

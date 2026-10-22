@@ -64,6 +64,9 @@ struct LayoutInput {
     /// Height of the screen in GUI units (decides how many rows fit before the scroll bar).
     int screenHeight = 240;
     SortButtonsPosition sortButtons = SortButtonsPosition::TitleLineRight;
+    /// Height of the settings tab column (`SettingsTabControl.getHeight`), for
+    /// `SortButtonsPosition::BelowUpgradeTabs`.
+    int tabsHeight = 0;
     /// Per upgrade slot: the upgrade can be switched on/off (shows a switch).
     std::vector<bool> upgradeSwitches;
 };

@@ -4,19 +4,28 @@
 
 namespace abp::core::screen {
 
-std::string searchFold(std::string_view text) {
+std::string stripFormatCodes(std::string_view text) {
     static constexpr std::string_view kSection = "\xC2\xA7"; // '§'
     std::string                       out;
     out.reserve(text.size());
     for (std::size_t i = 0; i < text.size();) {
         if (text.substr(i, kSection.size()) == kSection) {
             i += kSection.size();
-            if (i < text.size()) ++i; // the code character
+            if (i < text.size()) {
+                ++i; // the code character, with its UTF-8 continuation bytes
+                while (i < text.size() && (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) ++i;
+            }
             continue;
         }
-        char c = text[i++];
+        out += text[i++];
+    }
+    return out;
+}
+
+std::string searchFold(std::string_view text) {
+    std::string out = stripFormatCodes(text);
+    for (auto& c : out) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        out += c;
     }
     return out;
 }
