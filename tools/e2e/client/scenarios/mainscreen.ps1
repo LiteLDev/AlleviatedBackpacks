@@ -66,7 +66,8 @@ function Close-Backpack {
     $mark = Get-LogMark
     Press-Key 'E'
     Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
-    Start-Sleep -Milliseconds 1500
+    # The game drops a T pressed right after the screen closed (remote servers need longer).
+    Start-Sleep -Milliseconds $(if ($remote) { 3500 } else { 1500 })
 }
 # A fresh backpack of `tier` (plus a spare magnet upgrade); retried when the chat did not open (the
 # game sometimes drops the T right after a screen closed).
