@@ -224,8 +224,15 @@ ABP_REGISTER_SELFTEST("void.fluids", [](Context& ctx) {
     ctx.installUpgrade(bp3, "tank");
     auto h3  = api::backpack::fluidHandler(bp3);
     int  cap = h3->tankCapacity(0);
-    filled   = h3->fill(api::FluidStack{"minecraft:water", cap + 500}, false);
-    ctx.check(filled == cap + 500 && h3->fluidInTank(0).amount == cap, "tank full, overflow voided");
+    // Fill up (the tank takes at most its transfer rate per fill; the rest of each call is voided).
+    for (int i = 0; i < 1000 && h3->fluidInTank(0).amount < cap; ++i) {
+        ctx.check(h3->fill(api::FluidStack{"minecraft:water", cap}, false) == cap, "storage overflow accepts the whole fill");
+    }
+    ctx.check(h3->fluidInTank(0).amount == cap, "tank filled up");
+    filled = h3->fill(api::FluidStack{"minecraft:water", 500}, false);
+    ctx.check(filled == 500 && h3->fluidInTank(0).amount == cap, "full tank: overflow voided");
+    filled = h3->fill(api::FluidStack{"minecraft:lava", 500}, false);
+    ctx.check(filled == 0, "non-matching fluid is not voided");
 });
 
 ABP_REGISTER_SELFTEST("void.settings_menu", [](Context& ctx) {

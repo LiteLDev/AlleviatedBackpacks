@@ -31,6 +31,8 @@
 #include "mc/world/phys/AABB.h"
 
 #include "api/BackpackCapabilities.h"
+#include "api/Service.h"
+#include "api/abp/Capabilities.h"
 #include "api/abp/Xp.h"
 #include "feature/gui/Gui.h"
 #include "game/ItemConv.h"
@@ -158,7 +160,9 @@ bool isItemPullable(ItemActor& item, bool carried) {
 
 bool canFillStorageWithXp(std::shared_ptr<game::Backpack> const& backpack) {
     auto handler = api::backpack::fluidHandler(backpack);
-    return handler && handler->fill(api::FluidStack{std::string(api::fluids::Experience), 1, {}}, true) > 0;
+    // SC: fill(EXPERIENCE_TAG, 1, XP_STILL, SIMULATE) - an XP fluid already in a tank, else ours.
+    return handler
+        && api::fillTagged(api::service(), *handler, api::fluid_tags::Experience, 1, {std::string(api::fluids::Experience), 1}, true) > 0;
 }
 
 namespace {
@@ -253,7 +257,7 @@ bool tryToFillTank(UpgradeContext const& ctx, ExperienceOrb& orb, Player* player
     if (!handler) return false;
     int amount = api::xp::experienceToLiquid(static_cast<float>(orbValue(orb)));
     if (amount <= 0) return false;
-    int added = handler->fill(api::FluidStack{std::string(api::fluids::Experience), amount, {}}, false);
+    int added = api::fillTagged(api::service(), *handler, api::fluid_tags::Experience, amount, {std::string(api::fluids::Experience), amount}, false);
     if (added <= 0) return false;
     auto pos = orb.getPosition();
     orb.remove();

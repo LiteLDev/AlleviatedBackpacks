@@ -398,7 +398,11 @@ ABP_REGISTER_SELFTEST("magnet.xp_overflow_respawns", [](Context& ctx) -> ll::cor
     auto h = api::backpack::fluidHandler(bp);
     ctx.require(h != nullptr, "tank handler");
     int cap = h->tankCapacity(0);
-    h->fill(api::FluidStack{std::string(api::fluids::Experience), cap - 40, {}}, false); // room for 2 points
+    // Room for 2 points (the tank takes at most its transfer rate per fill).
+    for (int i = 0; i < 1000 && xpInTanks(bp) < cap - 40; ++i) {
+        if (h->fill(api::FluidStack{std::string(api::fluids::Experience), cap - 40 - xpInTanks(bp), {}}, false) <= 0) break;
+    }
+    ctx.require(xpInTanks(bp) == cap - 40, "tank pre-filled (" + std::to_string(xpInTanks(bp)) + "/" + std::to_string(cap) + ")");
     auto feet = player.getFeetPos();
     ExperienceOrb::_spawnOrb(player.getDimensionBlockSource(), player.getLevel(), Vec3{feet.x + 2.5f, feet.y + 0.2f, feet.z}, 7);
     tickMagnet(bp, slot, player);
