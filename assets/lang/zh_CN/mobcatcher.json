@@ -1,0 +1,23 @@
+{
+  "abp.mobcatcher.name": "生物捕捉升级",
+  "abp.mobcatcher.advanced.name": "高级生物捕捉升级",
+  "abp.mobcatcher.status.contains_mobs": "在移除生物捕捉升级前，需释放已捕捉的生物",
+  "abp.mobcatcher.status.mobs_need_advanced": "已捕捉的生物需要高级生物捕捉升级",
+  "abp.mobcatcher.status.only_one_allowed": "每个背包只允许安装一个生物捕捉升级",
+  "abp.mobcatcher.status.captured": "已捕捉{}",
+  "abp.mobcatcher.status.released": "已释放{}",
+  "abp.mobcatcher.status.invalid_entity": "该生物无法被捕捉",
+  "abp.mobcatcher.status.players_blocked": "玩家无法被捕捉",
+  "abp.mobcatcher.status.boss_blocked": "Boss无法被捕捉",
+  "abp.mobcatcher.status.passengers_blocked": "带有乘客的生物或载具无法被捕捉",
+  "abp.mobcatcher.status.blocklisted": "该生物被禁止捕捉",
+  "abp.mobcatcher.status.not_owner": "只有所有者才能捕捉该生物",
+  "abp.mobcatcher.status.inventory_blocked": "带有物品栏的生物无法被捕捉",
+  "abp.mobcatcher.status.hostile_needs_advanced": "敌对生物需要高级生物捕捉升级",
+  "abp.mobcatcher.status.too_large": "生物需要{}个槽位，超出了该升级允许的数量（{}）",
+  "abp.mobcatcher.status.no_space": "没有可用的{}x{}空闲槽位区域",
+  "abp.mobcatcher.status.release_failed": "无法在此处释放生物",
+  "abp.mobcatcher.status.no_release_space": "此处没有有效的释放空间",
+  "abp.mobcatcher.click_to_release": "点击释放",
+  "abp.mobcatcher.entity_preview_failed": "实体预览渲染失败"
+}

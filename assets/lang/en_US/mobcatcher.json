@@ -1,0 +1,23 @@
+{
+  "abp.mobcatcher.name": "Mob Catcher Upgrade",
+  "abp.mobcatcher.advanced.name": "Advanced Mob Catcher Upgrade",
+  "abp.mobcatcher.status.contains_mobs": "Release captured mobs before removing Mob Catcher Upgrade",
+  "abp.mobcatcher.status.mobs_need_advanced": "Captured mobs require Advanced Mob Catcher Upgrade",
+  "abp.mobcatcher.status.only_one_allowed": "Only one Mob Catcher Upgrade is allowed per backpack",
+  "abp.mobcatcher.status.captured": "Captured {}",
+  "abp.mobcatcher.status.released": "Released {}",
+  "abp.mobcatcher.status.invalid_entity": "That mob cannot be captured",
+  "abp.mobcatcher.status.players_blocked": "Players cannot be captured",
+  "abp.mobcatcher.status.boss_blocked": "Bosses cannot be captured",
+  "abp.mobcatcher.status.passengers_blocked": "Mobs with passengers or vehicles cannot be captured",
+  "abp.mobcatcher.status.blocklisted": "That mob is blocked from capture",
+  "abp.mobcatcher.status.not_owner": "Only the owner can capture that mob",
+  "abp.mobcatcher.status.inventory_blocked": "Mobs with inventories cannot be captured",
+  "abp.mobcatcher.status.hostile_needs_advanced": "Hostile mobs require Advanced Mob Catcher Upgrade",
+  "abp.mobcatcher.status.too_large": "Mob needs {} slots, more than this upgrade allows ({})",
+  "abp.mobcatcher.status.no_space": "No empty {}x{} slot area available",
+  "abp.mobcatcher.status.release_failed": "Could not release mob there",
+  "abp.mobcatcher.status.no_release_space": "No valid release space there",
+  "abp.mobcatcher.click_to_release": "Click to release",
+  "abp.mobcatcher.entity_preview_failed": "Entity preview failed to render"
+}

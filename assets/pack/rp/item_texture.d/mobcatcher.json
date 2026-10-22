@@ -1,0 +1,8 @@
+{
+  "abp_mob_catcher_upgrade": {
+    "textures": "textures/items/mob_catcher_upgrade"
+  },
+  "abp_advanced_mob_catcher_upgrade": {
+    "textures": "textures/items/advanced_mob_catcher_upgrade"
+  }
+}

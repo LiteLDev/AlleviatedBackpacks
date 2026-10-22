@@ -58,3 +58,5 @@ item.alleviatedbackpacks:xp_pump_upgrade.tooltip=在储罐升级与玩家之间�
 item.alleviatedbackpacks:battery_upgrade.tooltip=用能量存储替换背包的一部分物品栏
 item.alleviatedbackpacks:alchemy_upgrade.tooltip=自动使用药水、带效果的食物或奶桶
 item.alleviatedbackpacks:advanced_alchemy_upgrade.tooltip=自动使用药水、带效果的食物或奶桶~LINEBREAK~提供额外的效果过滤选项
+item.alleviatedbackpacks:mob_catcher_upgrade.tooltip=潜行右击可将被动生物捕捉到背包存储槽位中
+item.alleviatedbackpacks:advanced_mob_catcher_upgrade.tooltip=潜行右击可将被动与敌对生物捕捉到背包存储槽位中
