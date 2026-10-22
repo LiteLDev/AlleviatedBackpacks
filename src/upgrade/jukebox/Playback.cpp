@@ -1,8 +1,8 @@
-// Jukebox playback: which disc plays where, who hears it, when the next one starts.
+// Jukebox playback (SC JukeboxUpgradeWrapper + ServerStorageSoundHandler): which disc plays where,
+// who gets the sound, when the next one starts and when the music stops.
 
 #include <algorithm>
 #include <cmath>
-#include <set>
 
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/world/ServerLevelTickEvent.h"
@@ -16,19 +16,22 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/level/BlockPos.h"
 #include "mc/world/level/Level.h"
+#include "mc/world/level/dimension/Dimension.h"
 
+#include "feature/placed/PlacedBackpacks.h"
 #include "game/PlayerScan.h"
 #include "mod/Config.h"
 #include "mod/I18n.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
+#include "net/Companion.h"
 #include "upgrade/jukebox/Jukebox.h"
+#include "upgrade/jukebox/JukeboxNet.h"
 
 namespace abp::upgrade::jukebox {
 
 namespace {
-constexpr int kCheckEvery    = 10; ///< ticks between listener / carrier checks
-constexpr int kPlacedTimeout = 40; ///< ticks without `tickPlaced` before a placed backpack stops
+constexpr int kKeepAliveEvery = 5; ///< SC KEEP_ALIVE_SEND_INTERVAL
 
 Player* findPlayer(std::int64_t key) {
     auto level = ll::service::getLevel();
@@ -41,8 +44,8 @@ Player* findPlayer(std::int64_t key) {
 std::int64_t keyOf(Player const& p) { return p.getOrCreateUniqueID().rawID; }
 
 bool carries(Player& player, std::string const& uuid) {
-    for (auto const& c : game::scanBackpacks(player))
-        if (c.uuid && *c.uuid == uuid) return true;
+    for (auto const& [c, bp] : game::carriedBackpacks(player, false, true))
+        if (bp && bp->uuid() == uuid) return true;
     return false;
 }
 
@@ -53,6 +56,16 @@ float distance(Vec3 const& a, Vec3 const& b) {
 
 std::string message(Player* p, std::string_view key, std::string_view fallback) {
     return p ? trFor(*p, key, fallback) : tr(key, fallback);
+}
+
+/// The block of a placed backpack (feature/placed), if it is placed.
+std::optional<std::pair<int, Vec3>> placedAt(std::string const& uuid) {
+    auto e = placed::PlacedBackpacks::get().findUuid(uuid);
+    if (!e) return std::nullopt;
+    return std::pair{
+        e->loc.dim,
+        Vec3{static_cast<float>(e->loc.x) + 0.5f, static_cast<float>(e->loc.y) + 0.5f, static_cast<float>(e->loc.z) + 0.5f}
+    };
 }
 } // namespace
 
@@ -70,7 +83,7 @@ void Service::install() {
 void Service::uninstall() {
     for (auto& [key, p] : mPlaybacks) stopSounds(p);
     mPlaybacks.clear();
-    mPlaced.clear();
+    mReported.clear();
     if (mTick) ll::event::EventBus::getInstance().removeListener(mTick);
     mTick = nullptr;
 }
@@ -81,46 +94,46 @@ bool Service::play(UpgradeContext const& ctx, Player* starter, std::optional<int
     std::string dummy;
     auto&       why = reason ? *reason : dummy;
     if (!isJukebox(ctx) || !ctx.state().enabled) return false;
+    auto const& uuid = ctx.backpack().uuid();
+    if (mPlaybacks.contains(Key{uuid, ctx.slot()})) return true; // SC: play does nothing while playing
     auto occupied = occupiedDiscs(ctx);
     if (std::none_of(occupied.begin(), occupied.end(), [](bool b) { return b; })) {
         why = message(starter, "abp.jukebox.no_disc", "Put a music disc into the jukebox first.");
         return false;
     }
-    auto const& uuid = ctx.backpack().uuid();
-    Playback    p;
+    Playback p;
     p.backpack    = ctx.backpackPtr();
     p.uuid        = uuid;
     p.slot        = ctx.slot();
     p.upgradeItem = ctx.state().item.id;
-    p.phase       = static_cast<int>(std::hash<std::string>{}(uuid) % kCheckEvery);
+    p.phase       = static_cast<int>(std::hash<std::string>{}(uuid) % kKeepAliveEvery);
     p.queue       = core::JukeboxQueue(static_cast<std::uint32_t>(std::hash<std::string>{}(uuid) ^ static_cast<std::size_t>(mNow)));
-    // Where does it play from?
-    if (starter && carries(*starter, uuid)) {
-        p.carrier = keyOf(*starter);
-    } else if (auto it = mPlaced.find(uuid); it != mPlaced.end() && mNow - it->second.lastSeen <= kPlacedTimeout) {
-        p.carried = false;
+    // Where does it play? A placed backpack plays at its block (SC: the block menu's position),
+    // a carried one is attached to its carrier (SC: the menu's entity).
+    if (auto at = placedAt(uuid)) {
+        p.where = Emitter{std::nullopt, at->first, at->second};
+    } else if (auto r = reported(uuid)) {
+        p.where = Emitter{std::nullopt, r->dim, r->pos};
     } else {
-        Player* holder = nullptr;
-        if (auto level = ll::service::getLevel()) {
-            level->forEachPlayer([&](Player& pl) {
-                if (pl.isClientSide() || !carries(pl, uuid)) return true;
-                holder = &pl;
-                return false;
-            });
+        Player* carrier = starter && carries(*starter, uuid) ? starter : nullptr;
+        if (!carrier) {
+            if (auto level = ll::service::getLevel()) {
+                level->forEachPlayer([&](Player& pl) {
+                    if (pl.isClientSide() || !carries(pl, uuid)) return true;
+                    carrier = &pl;
+                    return false;
+                });
+            }
         }
-        if (!holder) {
+        if (!carrier) {
             why = message(starter, "abp.jukebox.not_carried", "Carry the backpack (or place it) to play music.");
             return false;
         }
-        p.carrier = keyOf(*holder);
+        p.where = Emitter{keyOf(*carrier), static_cast<int>(carrier->getDimensionId()), carrier->getPosition()};
     }
     auto first = p.queue.start(occupied, shuffle(ctx), index);
     if (!first) return false;
-    Key key{uuid, ctx.slot()};
-    if (auto it = mPlaybacks.find(key); it != mPlaybacks.end()) {
-        stopSounds(it->second);
-        mPlaybacks.erase(it);
-    }
+    Key   key{uuid, ctx.slot()};
     auto& stored = mPlaybacks.emplace(key, std::move(p)).first->second;
     if (!startTrack(stored, *first, ctx)) {
         mPlaybacks.erase(key);
@@ -148,14 +161,15 @@ void Service::stopAll(std::string const& uuid) {
             ++it;
         }
     }
-    mPlaced.erase(uuid);
+    mReported.erase(uuid);
 }
 
 bool Service::next(UpgradeContext const& ctx) {
     auto it = mPlaybacks.find(Key{ctx.backpack().uuid(), ctx.slot()});
     if (it == mPlaybacks.end() || !isJukebox(ctx)) return false;
     auto n = it->second.queue.skipNext(occupiedDiscs(ctx));
-    if (!n || !startTrack(it->second, *n, ctx)) {
+    if (!n) return false;
+    if (!startTrack(it->second, *n, ctx)) {
         stop(ctx.backpack().uuid(), ctx.slot());
         return false;
     }
@@ -166,7 +180,8 @@ bool Service::previous(UpgradeContext const& ctx) {
     auto it = mPlaybacks.find(Key{ctx.backpack().uuid(), ctx.slot()});
     if (it == mPlaybacks.end() || !isJukebox(ctx)) return false;
     auto n = it->second.queue.skipPrevious(occupiedDiscs(ctx));
-    if (!n || !startTrack(it->second, *n, ctx)) {
+    if (!n) return false; // SC: no history, nothing happens
+    if (!startTrack(it->second, *n, ctx)) {
         stop(ctx.backpack().uuid(), ctx.slot());
         return false;
     }
@@ -177,6 +192,11 @@ void Service::settingsChanged(UpgradeContext const& ctx) {
     auto it = mPlaybacks.find(Key{ctx.backpack().uuid(), ctx.slot()});
     if (it == mPlaybacks.end() || !isJukebox(ctx)) return;
     it->second.queue.setShuffle(occupiedDiscs(ctx), shuffle(ctx));
+}
+
+void Service::discChanged(UpgradeContext const& ctx, int index) {
+    auto it = mPlaybacks.find(Key{ctx.backpack().uuid(), ctx.slot()});
+    if (it != mPlaybacks.end() && it->second.index == index) stop(ctx.backpack().uuid(), ctx.slot());
 }
 
 std::optional<Service::Status> Service::status(std::string const& uuid, int slot) const {
@@ -193,9 +213,19 @@ std::vector<std::int64_t> Service::listeners(std::string const& uuid, int slot) 
     return out;
 }
 
+std::optional<std::int64_t> Service::emitterEntity(std::string const& uuid, int slot) const {
+    auto it = mPlaybacks.find(Key{uuid, slot});
+    return it == mPlaybacks.end() ? std::nullopt : it->second.where.entity;
+}
+
 void Service::tickPlaced(std::shared_ptr<game::Backpack> const& backpack, int dim, Vec3 const& pos) {
-    if (!backpack) return;
-    mPlaced[backpack->uuid()] = Placed{dim, pos, mNow};
+    if (backpack) mReported[backpack->uuid()] = Reported{dim, pos, mNow};
+}
+
+std::optional<Service::Reported> Service::reported(std::string const& uuid) const {
+    auto it = mReported.find(uuid);
+    if (it == mReported.end() || mNow - it->second.lastSeen > 40) return std::nullopt;
+    return it->second;
 }
 
 // ---- playback ------------------------------------------------------------------------------------
@@ -204,57 +234,95 @@ bool Service::startTrack(Playback& p, int index, UpgradeContext const& ctx) {
     auto d    = disc(ctx, index);
     auto info = discInfo(d);
     if (!info) return false;
-    auto e = emitter(p, false);
-    if (!e) return false;
+    auto at = locate(p, false);
+    if (!at) return false;
     stopSounds(p);
+    p.where = *at;
     p.index = index;
     p.disc  = d;
     p.info  = *info;
-    p.sound = p.carried ? followSoundName(*info) : blockSoundName(*info);
+    p.sound = soundName(*info);
     p.start = mNow;
     p.end   = mNow + std::max(1, mDurationOverride.value_or(info->durationTicks));
-    updateListeners(p, *e, true);
+    log().info("jukebox: track {} (disc slot {}) in backpack {}", p.sound, index, p.uuid);
+    // SC ServerStorageSoundHandler.startPlayingDisc: PlayDiscPayload to players within 128 blocks.
+    auto level = ll::service::getLevel();
+    if (!level) return true;
+    level->forEachPlayer([&](Player& pl) {
+        if (pl.isClientSide() || static_cast<int>(pl.getDimensionId()) != p.where.dim) return true;
+        if (distance(pl.getPosition(), p.where.pos) > kSoundRange) return true;
+        auto id = keyOf(pl);
+        if (net::hasCompanion(pl)) {
+            nlohmann::json body{{"uuid", p.uuid}, {"sound", p.sound}};
+            if (p.where.entity) body["entity"] = *p.where.entity;
+            else body["pos"] = {p.where.pos.x, p.where.pos.y, p.where.pos.z};
+            net::send(pl, JukeboxPlayPacket{std::move(body)});
+            p.vanilla.erase(id);
+        } else {
+            // No client mod: the vanilla record sound at the spot (it can't follow the carrier).
+            auto  pkt                   = MinecraftPackets::createPacket(MinecraftPacketIds::PlaySound);
+            auto& s                     = static_cast<PlaySoundPacket&>(*pkt);
+            s.mName                     = p.sound;
+            s.mPos                      = BlockPos{
+                static_cast<int>(std::floor(p.where.pos.x * 8.0f)),
+                static_cast<int>(std::floor(p.where.pos.y * 8.0f)),
+                static_cast<int>(std::floor(p.where.pos.z * 8.0f))
+            };
+            s.mVolume                   = 1.0f;
+            s.mPitch                    = 1.0f;
+            s.mLoopCount                = 0;
+            s.mBypassListenerRangeCheck = false;
+            s.mServerSoundHandle->reset();
+            s.mPlaybackPositionSeconds->reset();
+            if (!pl.isSimulatedPlayer()) s.sendTo(pl);
+            p.vanilla.insert(id);
+        }
+        p.heard.insert(id);
+        emit(SoundEvent{SoundEvent::Kind::Play, id, p.sound, net::hasCompanion(pl), p.where.entity, p.where.pos});
+        return true;
+    });
     return true;
 }
 
 void Service::stopSounds(Playback& p) {
     for (auto id : p.heard) {
-        if (auto* pl = findPlayer(id)) sendStop(*pl, p.sound);
-        forgetOthers(p, id);
+        auto* pl = findPlayer(id);
+        if (!pl) continue;
+        bool vanilla = p.vanilla.contains(id);
+        if (!vanilla) {
+            net::send(*pl, JukeboxStopPacket{nlohmann::json{{"uuid", p.uuid}}});
+        } else if (!pl->isSimulatedPlayer()) {
+            auto  pkt          = MinecraftPackets::createPacket(MinecraftPacketIds::StopSound);
+            auto& s            = static_cast<StopSoundPacket&>(*pkt);
+            s.mName            = p.sound;
+            s.mStopAll         = false;
+            s.mStopMusicLegacy = false;
+            s.sendTo(*pl);
+        }
+        emit(SoundEvent{SoundEvent::Kind::Stop, id, p.sound, !vanilla, std::nullopt, {}});
     }
     p.heard.clear();
+    p.vanilla.clear();
 }
 
-void Service::forgetOthers(Playback const& p, std::int64_t listener) {
-    // StopSound works by name: it also silenced other playbacks of the same disc for this
-    // listener. Forget them so the next listener update sends them again (at their position).
-    for (auto& [key, other] : mPlaybacks) {
-        if (&other != &p && other.sound == p.sound) other.heard.erase(listener);
-    }
-}
-
-void Service::spawnNotes(Emitter const& e) {
+void Service::spawnNotes(Playback const& p) const {
     auto level = ll::service::getLevel();
     if (!level) return;
-    auto at = e.pos;
-    at.y += e.carried ? 0.6f : 1.2f;
-    if (e.carrier) {
-        level->spawnParticleEffect("minecraft:note_particle", at, &e.carrier->getDimension());
-    } else if (auto dim = level->getDimension(e.dim).lock()) {
-        level->spawnParticleEffect("minecraft:note_particle", at, dim.get());
-    }
+    auto at = p.where.pos;
+    at.y   += p.where.entity ? 0.6f : 0.7f;
+    if (auto dim = level->getDimension(p.where.dim).lock()) level->spawnParticleEffect("minecraft:note_particle", at, dim.get());
 }
 
-std::optional<Service::Emitter> Service::emitter(Playback& p, bool deepCheck) {
-    if (p.carried) {
-        auto* pl = findPlayer(p.carrier);
+std::optional<Service::Emitter> Service::locate(Playback const& p, bool deep) const {
+    if (p.where.entity) {
+        auto* pl = findPlayer(*p.where.entity);
         if (!pl || !pl->isAlive()) return std::nullopt;
-        if (deepCheck && !carries(*pl, p.uuid)) return std::nullopt;
-        return Emitter{true, static_cast<int>(pl->getDimensionId()), pl->getPosition(), pl};
+        if (deep && (!carries(*pl, p.uuid) || placedAt(p.uuid))) return std::nullopt;
+        return Emitter{p.where.entity, static_cast<int>(pl->getDimensionId()), pl->getPosition()};
     }
-    auto it = mPlaced.find(p.uuid);
-    if (it == mPlaced.end() || mNow - it->second.lastSeen > kPlacedTimeout) return std::nullopt;
-    return Emitter{false, it->second.dim, it->second.pos, nullptr};
+    if (auto at = placedAt(p.uuid)) return Emitter{std::nullopt, at->first, at->second};
+    if (auto r = reported(p.uuid)) return Emitter{std::nullopt, r->dim, r->pos};
+    return std::nullopt;
 }
 
 std::optional<UpgradeContext> Service::validContext(Playback const& p) const {
@@ -269,113 +337,37 @@ std::optional<UpgradeContext> Service::validContext(Playback const& p) const {
 
 void Service::tick() {
     ++mNow;
-    if (mNow % 100 == 0) {
-        std::erase_if(mPlaced, [&](auto const& e) { return mNow - e.second.lastSeen > 100; });
-    }
+    if (mNow % 100 == 0) std::erase_if(mReported, [&](auto const& e) { return mNow - e.second.lastSeen > 100; });
     if (mPlaybacks.empty()) return;
     auto const& cfg = config::get<JukeboxConfig>();
     for (auto it = mPlaybacks.begin(); it != mPlaybacks.end();) {
-        auto& p     = it->second;
-        bool  check = (mNow + p.phase) % kCheckEvery == 0;
-        auto  ctx   = validContext(p);
-        auto  e     = ctx ? emitter(p, check) : std::nullopt;
-        if (!ctx || !e) {
+        auto& p         = it->second;
+        bool  keepAlive = (mNow + p.phase) % kKeepAliveEvery == 0;
+        auto  ctx       = validContext(p);
+        std::optional<Emitter> at;
+        if (ctx) at = locate(p, keepAlive);
+        bool alive = ctx && at && (!keepAlive || disc(*ctx, p.index).sameItem(p.disc));
+        if (!alive) {
             log().info("jukebox: stopped in backpack {} (slot {}): no longer playable", p.uuid, p.slot);
             stopSounds(p);
             it = mPlaybacks.erase(it);
             continue;
         }
-        std::optional<int> next;
-        bool               change = false;
-        if (check && !disc(*ctx, p.index).sameItem(p.disc)) {
-            change   = true;
-            auto occ = occupiedDiscs(*ctx);
-            if (occ[static_cast<std::size_t>(p.index)]) {
-                // Swapped for another disc: play the new one.
-                next = p.index;
-            } else {
-                // Taken out: carry on as if the track had ended (repeat mode applies; "repeat one"
-                // has nothing left to repeat and moves on).
-                next = p.queue.onTrackEnd(occ, repeatMode(*ctx));
-            }
-        } else if (mNow >= p.end) {
-            change = true;
-            next   = p.queue.onTrackEnd(occupiedDiscs(*ctx), repeatMode(*ctx));
-        }
-        if (change) {
+        p.where.pos = at->pos;
+        p.where.dim = at->dim;
+        if (mNow >= p.end) {
+            // SC onDiscFinished: ONE replays, ALL plays on (starting over), NO plays the rest.
+            auto next = p.queue.onTrackEnd(occupiedDiscs(*ctx), repeatMode(*ctx));
             if (!next || !startTrack(p, *next, *ctx)) {
                 log().info("jukebox: finished in backpack {} (slot {})", p.uuid, p.slot);
                 stopSounds(p);
                 it = mPlaybacks.erase(it);
                 continue;
             }
-        } else if (check) {
-            updateListeners(p, *e, false);
         }
-        if (cfg.particles && (mNow + p.phase) % 20 == 0) spawnNotes(*e);
+        if (cfg.particles && (mNow + p.phase) % 20 == 0) spawnNotes(p);
         ++it;
     }
-}
-
-void Service::updateListeners(Playback& p, Emitter const& e, bool force) {
-    auto level = ll::service::getLevel();
-    if (!level) return;
-    float                  range = static_cast<float>(std::max(1, config::get<JukeboxConfig>().range));
-    float                  offset = static_cast<float>(mNow - p.start) / 20.0f;
-    std::set<std::int64_t> present;
-    level->forEachPlayer([&](Player& pl) {
-        if (pl.isClientSide()) return true;
-        auto id = keyOf(pl);
-        present.insert(id);
-        bool  isCarrier = p.carried && id == p.carrier;
-        float d         = distance(pl.getPosition(), e.pos);
-        bool  inRange   = isCarrier || (static_cast<int>(pl.getDimensionId()) == e.dim && d <= range);
-        bool  hearing   = p.heard.contains(id);
-        if (inRange && (!hearing || force)) {
-            // 2D copies can't fade with distance: scale the volume once, when the player starts hearing it.
-            float volume = (isCarrier || !p.carried) ? 1.0f : std::clamp(1.0f - d / range, 0.25f, 1.0f);
-            sendPlay(pl, p, e, volume, offset);
-            p.heard.insert(id);
-        } else if (!inRange && hearing) {
-            sendStop(pl, p.sound);
-            p.heard.erase(id);
-            forgetOthers(p, id);
-        }
-        return true;
-    });
-    std::erase_if(p.heard, [&](std::int64_t id) { return !present.contains(id); });
-}
-
-void Service::sendPlay(Player& to, Playback const& p, Emitter const& e, float volume, float offset) {
-    bool  positional = !p.carried || p.info.key.empty();
-    Vec3  at         = p.carried ? to.getPosition() : e.pos;
-    auto  pkt        = MinecraftPackets::createPacket(MinecraftPacketIds::PlaySound);
-    auto& s          = static_cast<PlaySoundPacket&>(*pkt);
-    s.mName          = p.sound;
-    s.mPos           = BlockPos{
-        static_cast<int>(std::floor(at.x * 8.0f)),
-        static_cast<int>(std::floor(at.y * 8.0f)),
-        static_cast<int>(std::floor(at.z * 8.0f))
-    };
-    s.mVolume                   = volume;
-    s.mPitch                    = 1.0f;
-    s.mLoopCount                = 0;
-    s.mBypassListenerRangeCheck = !positional;
-    s.mServerSoundHandle->reset();
-    if (offset >= 0.25f) *s.mPlaybackPositionSeconds = offset;
-    else s.mPlaybackPositionSeconds->reset();
-    s.sendTo(to);
-    emit(SoundEvent{SoundEvent::Kind::Play, keyOf(to), p.sound, volume, offset, positional});
-}
-
-void Service::sendStop(Player& to, std::string const& sound) {
-    auto  pkt         = MinecraftPackets::createPacket(MinecraftPacketIds::StopSound);
-    auto& s           = static_cast<StopSoundPacket&>(*pkt);
-    s.mName           = sound;
-    s.mStopAll        = false;
-    s.mStopMusicLegacy = false;
-    s.sendTo(to);
-    emit(SoundEvent{SoundEvent::Kind::Stop, keyOf(to), sound});
 }
 
 void Service::emit(SoundEvent const& ev) const {

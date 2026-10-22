@@ -15,7 +15,7 @@ namespace abp::upgrade::jukebox {
 /// What the jukebox needs to know about a music disc.
 struct DiscInfo {
     std::string soundEvent;    ///< the disc's own sound event, e.g. "record.cat"
-    std::string key;           ///< vanilla disc key ("cat") when our RP defines `abp.jukebox.<key>`; else empty
+    std::string key;           ///< vanilla disc key ("cat") when our RP defines `abp.jukebox3d.<key>`; else empty
     int         durationTicks; ///< length of the track in game ticks
     std::string title;         ///< "C418 - cat" (untranslated; artist and title are proper names)
 };
@@ -28,9 +28,9 @@ struct DiscInfo {
 /// Item ids of every vanilla music disc (selftests).
 [[nodiscard]] std::vector<std::string> const& vanillaDiscIds();
 
-/// Sound names in our resource pack (see assets/pack/rp/sounds.d/jukebox.json).
-[[nodiscard]] std::string followSoundName(DiscInfo const& disc); ///< 2D (follows the carrier)
-[[nodiscard]] std::string blockSoundName(DiscInfo const& disc);  ///< 3D (placed backpacks)
+/// The positional record sound played for a disc: our RP copy `abp.jukebox3d.<key>` (64 blocks,
+/// see assets/pack/rp/sounds.d/jukebox.json) for vanilla discs, else the disc's own sound event.
+[[nodiscard]] std::string soundName(DiscInfo const& disc);
 
 /// "m:ss"
 [[nodiscard]] std::string formatTime(int ticks);

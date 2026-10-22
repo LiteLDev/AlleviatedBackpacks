@@ -1,11 +1,14 @@
 #include "upgrade/UpgradeManager.h"
 
 #include <algorithm>
+#include <random>
 
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/player/PlayerPickUpItemEvent.h"
 
 #include "mc/deps/nbt/CompoundTag.h"
+#include "mc/deps/shared_types/legacy/LevelSoundEvent.h"
+#include "mc/world/level/Level.h"
 #include "mc/world/actor/item/ItemActor.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
@@ -60,6 +63,11 @@ core::ItemStackData embedSettings(core::ItemStackData const& item, nlohmann::jso
 
 TypeGate& typeGate() {
     static TypeGate gate;
+    return gate;
+}
+
+InstallGate& installGate() {
+    static InstallGate gate;
     return gate;
 }
 
@@ -160,6 +168,8 @@ void IUpgrade::openSettings(Player& player, UpgradeContext const& ctx) {
 
 void setTypeGate(TypeGate gate) { typeGate() = std::move(gate); }
 
+void setInstallGate(InstallGate gate) { installGate() = std::move(gate); }
+
 bool typeAllowed(IUpgrade const& upgrade) {
     auto const& gate = typeGate();
     return !gate || gate(upgrade);
@@ -235,6 +245,7 @@ bool canInstall(
         why = message(player, "abp.upgrade.error.max", "This backpack already has the maximum of this upgrade.");
         return false;
     }
+    if (auto const& gate = installGate(); gate && !gate(backpack, *type, player, why)) return false;
     return type->canInstallItem(UpgradeContext(backpack, slot, player), item.withCount(1), why);
 }
 
@@ -401,12 +412,15 @@ public:
                 auto data  = game::ItemConv::toData(stack);
                 int  taken = dispatchPickup(player, data);
                 if (taken <= 0) return;
-                if (data.empty()) {
-                    ev.cancel();
-                    ev.itemActor().remove();
-                } else {
-                    stack.set(data.count);
-                }
+                // SB CommonEventHandler.onItemPickup: once a backpack took something the vanilla
+                // pickup is cancelled (the rest stays on the ground) and the pickup sound plays
+                // (InventoryHelper.playPickupSound: volume 0.2, pitch 2 +- 1.4).
+                ev.cancel();
+                static thread_local std::minstd_rand rng{std::random_device{}()};
+                float r = std::uniform_real_distribution<float>(-1.f, 1.f)(rng);
+                player.getLevel().playSound(SharedTypes::Legacy::LevelSoundEvent::Pop, player.getPosition(), 0.2f, r * 1.4f + 2.0f);
+                if (data.empty()) ev.itemActor().remove();
+                else stack.set(data.count);
             }
         );
     }

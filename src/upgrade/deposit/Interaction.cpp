@@ -5,7 +5,10 @@
 // those upgrades against that inventory instead of the normal use: neither the container nor the
 // backpack GUI opens. The player sees "Deposited N stacks" / "Restocked N stacks" above the hotbar.
 
+#include <algorithm>
 #include <chrono>
+#include <string>
+#include <vector>
 #include <cstdint>
 #include <unordered_map>
 
@@ -20,10 +23,13 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockSource.h"
+#include "mc/world/level/block/Block.h"
 
+#include "feature/admin/SbConfig.h"
 #include "game/BackpackItem.h"
 #include "game/Storage.h"
 #include "mod/Config.h"
+#include "mod/Log.h"
 #include "mod/Module.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
@@ -52,6 +58,10 @@ bool hasInteractionUpgrade(std::shared_ptr<game::Backpack> const& bp) {
 }
 
 } // namespace
+
+bool interactionDisallowed(Block const& block) { return admin::isBlockInteractionDisallowed(block.getTypeName()); }
+
+bool interactionDisallowed(BlockSource& region, BlockPos const& pos) { return interactionDisallowed(region.getBlock(pos)); }
 
 class ContainerInteraction {
 public:
@@ -99,7 +109,9 @@ public:
         if (!uuid || !game::Storage::get().available()) return false;
         auto bp = game::Storage::get().find(*uuid);
         if (!bp || !hasInteractionUpgrade(bp)) return false;
-        auto container = player.getDimensionBlockSource().tryGetContainer(ev.blockPos());
+        auto& region = player.getDimensionBlockSource();
+        if (admin::isBlockInteractionDisallowed(region.getBlock(ev.blockPos()).getTypeName())) return false; // SB noInteractionBlocks
+        auto container = region.tryGetContainer(ev.blockPos());
         if (!container) return false;
 
         ev.cancel(); // neither open the container nor use the item
@@ -114,6 +126,10 @@ public:
 
         auto result = interact(bp, player, *container, static_cast<int>(ev.face()));
         if (result.handled && !result.message.empty()) sendTip(player, result.message);
+        log().info(
+            "inventory interaction: {} used a backpack on a container ({} stacks deposited, {} restocked): {}",
+            player.getRealName(), result.deposited.stacks, result.restocked.stacks, result.message
+        );
         mLastResult = result;
         return true;
     }
@@ -179,8 +195,8 @@ ABP_REGISTER_SELFTEST("deposit.use_on_container", [](Context& ctx) -> ll::coro::
     auto const& last = module.lastResult();
     ctx.check(last.handled && last.deposited.stacks == 2 && last.restocked.stacks == 1, "result counts");
     ctx.check(
-        last.message.find("2") != std::string::npos && last.message.find("1") != std::string::npos,
-        "message mentions the stack counts: " + last.message
+        last.message.find("1") != std::string::npos && last.message.find("restocked") != std::string::npos,
+        "the last upgrade's status message (SB shows each in turn): " + last.message
     );
     ctx.check(ui::MenuManager::get().current(sp) == nullptr, "the backpack GUI did not open");
     ctx.check(game::isBackpack(sp.getInventory().getItem(0)), "the backpack stays in hand");
@@ -235,6 +251,35 @@ ABP_REGISTER_SELFTEST("deposit.furnace_faces", [](Context& ctx) -> ll::coro::Cor
     UpgradeContext rc(bp, ctx.installUpgrade(bp, "restock"), &player);
     (void)restock::run(rc, c, kDown, false);
     ctx.check(countIn(*bp, "minecraft:iron_ingot") == 4, "bottom: output taken");
+});
+
+
+ABP_REGISTER_SELFTEST("deposit.no_interaction_blocks", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& sp     = ctx.spawnPlayer();
+    auto& module = ContainerInteraction::get();
+    module.forgetCooldowns();
+    co_await settle(ctx, sp);
+    auto bp = ctx.createBackpack(core::Tier::Iron);
+    ctx.installUpgrade(bp, "deposit"); // empty block list: deposits everything
+    fill(*bp, "minecraft:cobblestone", 10);
+    ctx.require(ctx.give(sp, ctx.backpackItem(*bp), 0) == 0, "give backpack");
+    PlacedBlock barrel(ctx, sp, "minecraft:barrel");
+    auto&       cfg   = config::mut<admin::SbServerConfig>();
+    auto        saved = cfg.noInteractionBlocks;
+    cfg.noInteractionBlocks = {"minecraft:barrel"};
+    ctx.check(interactionDisallowed(sp.getDimensionBlockSource(), barrel.pos()), "barrel disallowed");
+    ctx.check(sp.simulateSneaking(), "sneaking");
+    (void)useOn(sp, barrel.pos());
+    co_await ctx.ticks(3);
+    ctx.check(countIn(barrel.container(), "minecraft:cobblestone") == 0, "no interaction with a listed block");
+    cfg.noInteractionBlocks = saved;
+    module.forgetCooldowns();
+    co_await ctx.ticks(8);
+    (void)useOn(sp, barrel.pos());
+    co_await ctx.ticks(3);
+    ctx.check(countIn(barrel.container(), "minecraft:cobblestone") == 10, "allowed again (SB default: empty list)");
+    sp.simulateStopSneaking();
+    ui::MenuManager::get().close(sp);
 });
 
 } // namespace

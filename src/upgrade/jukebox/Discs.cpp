@@ -130,11 +130,7 @@ std::vector<std::string> const& vanillaDiscIds() {
     return ids;
 }
 
-std::string followSoundName(DiscInfo const& disc) {
-    return disc.key.empty() ? disc.soundEvent : "abp.jukebox." + disc.key;
-}
-
-std::string blockSoundName(DiscInfo const& disc) {
+std::string soundName(DiscInfo const& disc) {
     return disc.key.empty() ? disc.soundEvent : "abp.jukebox3d." + disc.key;
 }
 
