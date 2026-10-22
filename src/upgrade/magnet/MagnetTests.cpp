@@ -9,6 +9,8 @@
 #include "mc/world/actor/ActorType.h"
 #include "mc/world/actor/item/ExperienceOrb.h"
 #include "mc/world/actor/item/ItemActor.h"
+#include "mc/world/PlayerUIContainer.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockSource.h"
@@ -20,6 +22,7 @@
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "mod/Config.h"
+#include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
@@ -116,6 +119,22 @@ int xpInTanks(std::shared_ptr<game::Backpack> const& bp) {
     }
     return n;
 }
+
+/// The native tab data / actions registered for `group` (what the client tab gets and sends).
+nlohmann::json tabData(Player& p, UpgradeContext const& ctx, std::string_view group) {
+    auto out = nlohmann::json::object();
+    for (auto const& e : net::TabDataRegistry::entries()) {
+        if (e.upgrade == group && e.data) out.update(e.data(p, ctx));
+    }
+    return out;
+}
+bool tabAction(Player& p, UpgradeContext const& ctx, std::string_view group, nlohmann::json const& data) {
+    for (auto const& h : net::TabActionRegistry::entries()) {
+        if (h.upgrade == group && h.handle && h.handle(p, ctx, data)) return true;
+    }
+    return false;
+}
+void setCursor(Player& p, ItemStack const& item) { p.setPlayerUIItem(PlayerUISlot::CursorSelected, item, false); }
 
 ABP_REGISTER_SELFTEST("magnet.registration", [](Context& ctx) {
     auto* basic = byId(kBasicId);
@@ -225,7 +244,7 @@ ABP_REGISTER_SELFTEST("magnet.filter", [](Context& ctx) -> ll::coro::CoroTask<> 
     ctx.check(diamonds.count == 0 && countOf(*bp, "minecraft:diamond") == 5, "onPickup inserts matching items");
 
     // "Match Backpack Contents": only items already stored.
-    uc.settings()["filter"]["byStorage"] = true;
+    uc.settings()["filter"]["storage"] = true;
     uc.saveSettings(true);
     clearAround(player);
     spawnItem(player, "minecraft:diamond", 1, 2.0f);
@@ -404,6 +423,37 @@ ABP_REGISTER_SELFTEST("magnet.settings_menu", [](Context& ctx) {
     auto s = Settings::read(uc.settings(), kAdvancedSlots, true);
     ctx.check(!s.filter.ghosts[15].empty() && s.filter.ghosts[15].id == "minecraft:diamond", "16th filter slot works");
     mm.close(player);
+});
+
+ABP_REGISTER_SELFTEST("magnet.native_tab", [](Context& ctx) {
+    auto& p   = ctx.player();
+    auto  bp  = ctx.createBackpack(Tier::Iron);
+    int   b   = ctx.installUpgrade(bp, std::string(kBasicId));
+    int   a   = ctx.installUpgrade(bp, std::string(kAdvancedId));
+    UpgradeContext basic(bp, b, &p), adv(bp, a, &p);
+    auto           t = tabData(p, basic, "magnet");
+    ctx.check(t.value("title", "") == "Magnet" && t.value("tooltip", "") == "Magnet Settings", "SB tab texts: " + t.value("title", ""));
+    ctx.check(tabData(p, adv, "magnet").value("title", "") == "Adv. Magnet", "advanced title");
+    ctx.check(t.value("pickupItems", false) && t.value("pickupXp", false), "toggles on");
+    auto const& f = t["filter"];
+    ctx.check(f.value("type", "") == "contents" && f.value("slots", 0) == 9 && f.value("perRow", 0) == 3 && !f.value("advanced", true),
+              "basic contents filter, 9 slots in rows of 3");
+    auto fa = tabData(p, adv, "magnet")["filter"];
+    ctx.check(fa.value("slots", 0) == 16 && fa.value("perRow", 0) == 4 && fa.value("advanced", false), "advanced: 16 slots, rows of 4");
+    ctx.check(f.value("typeState", -1) == 1, "default: block list");
+    ctx.check(tabAction(p, basic, "magnet", {{"op", "pickupItems"}}), "toggle items");
+    ctx.check(!Settings::read(basic.settings(), 9, false).pickupItems, "items off");
+    ctx.check(tabAction(p, basic, "magnet", {{"op", "pickupXp"}}), "toggle xp");
+    ctx.check(!Settings::read(basic.settings(), 9, false).pickupXp, "xp off");
+    ctx.check(tabAction(p, basic, "magnet", {{"filter", "filter"}, {"op", "type"}}), "type button");
+    ctx.check(tabData(p, basic, "magnet")["filter"].value("typeState", -1) == 2, "BLOCK -> MATCH BACKPACK CONTENTS");
+    ctx.check(Settings::read(basic.settings(), 9, false).filter.filterByStorage, "stored as contents filter");
+    tabAction(p, basic, "magnet", {{"filter", "filter"}, {"op", "type"}});
+    setCursor(p, game::ItemConv::make("minecraft:diamond", 3));
+    ctx.check(tabAction(p, basic, "magnet", {{"filter", "filter"}, {"op", "slot"}, {"index", 2}}), "ghost slot");
+    setCursor(p, ItemStack::EMPTY_ITEM());
+    auto s = Settings::read(basic.settings(), 9, false);
+    ctx.check(s.filter.ghosts[2].id == "minecraft:diamond" && s.filter.mode == core::FilterMode::Allow, "allow list with a diamond");
 });
 
 } // namespace

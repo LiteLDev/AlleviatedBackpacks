@@ -1,10 +1,13 @@
 {
   "abp.magnet.magnet.name": "Magnet Upgrade",
   "abp.magnet.advanced_magnet.name": "Advanced Magnet Upgrade",
-  "abp.magnet.items": "Pick up items: {}",
-  "abp.magnet.xp": "Pick up XP: {}",
-  "abp.magnet.lore.range": "§7Range: §f{} blocks",
-  "abp.magnet.lore.items": "§7Pick up items: {}",
-  "abp.magnet.lore.xp": "§7Pick up XP: {}",
-  "abp.magnet.lore.filter": "§7Filter: §f{} item(s)"
+  "abp.magnet.tab": "Magnet",
+  "abp.magnet.tab.advanced": "Adv. Magnet",
+  "abp.magnet.tab.tooltip": "Magnet Settings",
+  "abp.magnet.tab.advanced.tooltip": "Advanced Magnet Settings",
+  "abp.magnet.button.pickup_items": "Pickup Items",
+  "abp.magnet.button.do_not_pickup_items": "Do Not Pickup Items",
+  "abp.magnet.button.pickup_xp": "Pickup Experience",
+  "abp.magnet.button.pickup_xp.detail": "Requires Tank Upgrade",
+  "abp.magnet.button.do_not_pickup_xp": "Do Not Pickup Experience"
 }

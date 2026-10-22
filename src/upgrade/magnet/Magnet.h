@@ -6,6 +6,7 @@
 #include "nlohmann/json.hpp"
 
 #include "core/Filter.h"
+#include "upgrade/filter/FilterTab.h"
 #include "upgrade/IUpgrade.h"
 
 class Player;
@@ -60,14 +61,17 @@ struct MagnetConfig {
 struct Settings {
     bool         pickupItems = true;
     bool         pickupXp    = true;
-    bool         byStorage   = false; ///< SC ContentsFilterType.STORAGE ("Match Backpack Contents")
     core::Filter filter;
 
     [[nodiscard]] static Settings read(nlohmann::json const& settings, int filterSlots, bool advanced);
 };
 
-/// SC `ContentsFilterLogic.matchesFilter`: the filter, or with "match backpack contents" any
-/// stored stack / memorized slot of the same item.
+/// The shared filter control of a magnet (SC ContentsFilterControl: Allow / Block / Match
+/// Backpack Contents).
+[[nodiscard]] filtering::FilterSpec filterSpec(bool advanced);
+
+/// SC `ContentsFilterLogic.matchesFilter`: the filter, or with "Match Backpack Contents" the
+/// stored stacks and memorized slots.
 [[nodiscard]] bool matchesFilter(Settings const& s, game::Backpack& backpack, core::ItemStackData const& item);
 
 /// Something that can take XP collected by a magnet. Kept for other units (XP Pump); the magnet

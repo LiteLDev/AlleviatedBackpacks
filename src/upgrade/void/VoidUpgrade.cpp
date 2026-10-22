@@ -32,7 +32,9 @@
 #include "mod/Module.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/FilterMenu.h"
+#include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/filter/FilterCommon.h"
 
 ABP_REGISTER_CONFIG("void", abp::upgrade::voiding::VoidConfig);
 
@@ -55,10 +57,8 @@ VoidSettings VoidSettings::read(UpgradeContext const& ctx) {
     s.advanced        = type && type->info().id == kAdvancedId;
     auto tc           = tierConfig(s.advanced);
     s.voidAlwaysEnabled = tc.voidAlwaysEnabled;
-    s.filter            = core::Filter(tc.filterSlots);
-    s.filter.mode       = core::FilterMode::Allow; // SC: setAllowByDefault(true)
+    s.filter            = readFilter(j, s.advanced);
     if (j.is_object()) {
-        if (auto it = j.find(kFilterKey); it != j.end() && it->is_object()) s.filter = core::Filter::fromJson(*it, tc.filterSlots);
         if (auto it = j.find(kVoidTypeKey); it != j.end() && it->is_string()) {
             s.storedType = voidTypeFromName(it->get<std::string>());
         } else if (auto old = j.find("overflow"); old != j.end() && old->is_boolean()) {
@@ -67,17 +67,27 @@ VoidSettings VoidSettings::read(UpgradeContext const& ctx) {
         }
         if (auto it = j.find(kWorkInGuiKey); it != j.end() && it->is_boolean()) s.workInGui = it->get<bool>();
     }
-    s.filter.emptyAllowsAll = false;
-    if (!s.advanced) {
-        s.filter.matchBy         = core::MatchBy::Item;
-        s.filter.matchNbt        = false;
-        s.filter.matchDurability = false;
-    }
     return s;
 }
 
+core::Filter readFilter(nlohmann::json const& settings, bool advanced) {
+    int  slots  = tierConfig(advanced).filterSlots;
+    auto stored = settings.is_object() ? settings.value(std::string(kFilterKey), nlohmann::json()) : nlohmann::json();
+    auto f      = core::Filter::fromJson(stored, slots, core::FilterDefaults{.allowList = true});
+    if (stored.is_object() && !stored.empty() && !stored.contains("v") && f.mode == core::FilterMode::Deny && f.isEmpty()) {
+        f.mode = core::FilterMode::Allow; // phase 1: an empty list never voided anything
+    }
+    filtering::normalize(f, advanced ? UpgradeTier::Advanced : UpgradeTier::Basic, slots);
+    return f;
+}
+
+filtering::FilterSpec filterSpec(bool advanced) {
+    auto tc = tierConfig(advanced);
+    return filtering::FilterSpec{tc.filterSlots, tc.slotsInRow, advanced, filtering::TypeButton::AllowList};
+}
+
 bool VoidSettings::matches(core::ItemStackData const& item) const {
-    return !item.empty() && filter.passes(item, &game::ItemConv::tags());
+    return !item.empty() && filter.passes(item, &filtering::matcher());
 }
 
 api::FluidStack containedFluid(core::ItemStackData const& item) {
@@ -278,7 +288,7 @@ public:
     VoidMenu(std::string title, UpgradeContext ctx, bool advanced, Options options)
     : FilterMenu(
           std::move(title),
-          [ctx] { return alive(ctx) ? VoidSettings::read(ctx).filter : core::Filter(9); },
+          [ctx] { return alive(ctx) ? VoidSettings::read(ctx).filter : core::Filter(9, core::FilterDefaults{.allowList = true}); },
           [ctx](core::Filter const& f) { writeSetting(ctx, kFilterKey, f.toJson()); },
           std::move(options)
       ),
@@ -358,6 +368,50 @@ public:
         return {"§7" + typeText(player, s.type(), true).first};
     }
 };
+
+// ---- native tab (client: client/ui/tabs/void) --------------------------------------------------
+
+ABP_REGISTER_TAB_DATA(net::TabDataProvider{
+    "void",
+    [](Player& player, UpgradeContext const& ctx) {
+        auto s = VoidSettings::read(ctx);
+        return nlohmann::json{
+            {"title",             s.advanced ? trFor(player, "abp.void.tab.advanced", "Adv. Void") : trFor(player, "abp.void.tab", "Void")},
+            {"tooltip",           s.advanced ? trFor(player, "abp.void.tab.advanced.tooltip", "Advanced Void Settings")
+                                             : trFor(player, "abp.void.tab.tooltip", "Void Settings")},
+            {"workInGui",         s.workInGui},
+            {"voidType",          static_cast<int>(s.type())},
+            {"voidAlwaysEnabled", s.voidAlwaysEnabled},
+            {"filter",            filtering::tabJson(s.filter, filterSpec(s.advanced))},
+        };
+    },
+});
+
+ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
+    "void",
+    [](Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+        if (!data.is_object() || !alive(ctx)) return false;
+        auto s = VoidSettings::read(ctx);
+        if (data.value("filter", std::string{}) == "filter") {
+            auto spec = filterSpec(s.advanced);
+            if (filtering::applyAction(s.filter, spec, data, filtering::cursorOf(player))) {
+                filtering::normalize(s.filter, s.advanced ? UpgradeTier::Advanced : UpgradeTier::Basic, spec.slots);
+                writeSetting(ctx, kFilterKey, s.filter.toJson());
+            }
+            return true;
+        }
+        auto op = data.value("op", std::string{});
+        if (op == "workInGui") {
+            writeSetting(ctx, kWorkInGuiKey, !s.workInGui);
+            return true;
+        }
+        if (op == "voidType") {
+            writeSetting(ctx, kVoidTypeKey, std::string(toString(next(s.type(), s.voidAlwaysEnabled))));
+            return true;
+        }
+        return false;
+    },
+});
 
 class VoidUpgrade final : public VoidUpgradeBase {
 public:

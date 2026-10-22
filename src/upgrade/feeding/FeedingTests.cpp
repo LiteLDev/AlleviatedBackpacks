@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "mc/world/PlayerUIContainer.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/actor/player/Inventory.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
@@ -10,6 +12,7 @@
 #include "game/ItemConv.h"
 #include "game/Storage.h"
 #include "mod/Config.h"
+#include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
@@ -61,6 +64,22 @@ bool feed(std::shared_ptr<game::Backpack> const& bp, int slot, Player& p) {
 void setFilter(std::shared_ptr<game::Backpack> const& bp, int slot, core::Filter const& f) {
     writeSetting(UpgradeContext(bp, slot), kFilterKey, f.toJson());
 }
+
+/// The native tab data / actions registered for `group` (what the client tab gets and sends).
+nlohmann::json tabData(Player& p, UpgradeContext const& ctx, std::string_view group) {
+    auto out = nlohmann::json::object();
+    for (auto const& e : net::TabDataRegistry::entries()) {
+        if (e.upgrade == group && e.data) out.update(e.data(p, ctx));
+    }
+    return out;
+}
+bool tabAction(Player& p, UpgradeContext const& ctx, std::string_view group, nlohmann::json const& data) {
+    for (auto const& h : net::TabActionRegistry::entries()) {
+        if (h.upgrade == group && h.handle && h.handle(p, ctx, data)) return true;
+    }
+    return false;
+}
+void setCursor(Player& p, ItemStack const& item) { p.setPlayerUIItem(PlayerUISlot::CursorSelected, item, false); }
 
 ABP_REGISTER_SELFTEST("feeding.registration_and_config", [](Context& ctx) {
     ctx.check(nutritionOf(data("minecraft:cooked_beef", 1)).value_or(-1) == 8, "steak nutrition 8");
@@ -263,6 +282,29 @@ ABP_REGISTER_SELFTEST("feeding.settings_menu", [](Context& ctx) -> ll::coro::Cor
     (void)mm.simulate(p, {Action::Take, {Where::Menu, control + 6}, {Where::Cursor, 0}, 1});
     ctx.check(!optionsOf(uc).feedImmediatelyWhenHurt, "hurt toggle off");
     mm.close(p);
+});
+
+ABP_REGISTER_SELFTEST("feeding.native_tab", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Iron);
+    int   b  = ctx.installUpgrade(bp, "feeding");
+    int   a  = ctx.installUpgrade(bp, "advanced_feeding");
+    UpgradeContext basic(bp, b, &p), adv(bp, a, &p);
+    auto           t = tabData(p, adv, "feeding");
+    ctx.check(t.value("title", "") == "Adv. Feeding" && t.value("tooltip", "") == "Advanced Feeding Settings", "SB tab texts");
+    ctx.check(tabData(p, basic, "feeding").value("title", "") == "Feeding", "basic title");
+    ctx.check(t.value("hungerLevel", -1) == 1 && t.value("whenHurt", false), "HALF + hurt by default");
+    ctx.check(t["filter"].value("type", "") == "allowList" && t["filter"].value("slots", 0) == 16, "advanced allow/block filter, 16 slots");
+    ctx.check(tabAction(p, adv, "feeding", {{"op", "hungerLevel"}}) && optionsOf(adv).level == HungerLevel::Full, "HALF -> FULL");
+    ctx.check(tabAction(p, adv, "feeding", {{"op", "whenHurt"}}) && !optionsOf(adv).feedImmediatelyWhenHurt, "hurt off");
+    ctx.check(!tabAction(p, basic, "feeding", {{"op", "hungerLevel"}}), "the basic tab has no buttons");
+    setCursor(p, game::ItemConv::make("minecraft:stone", 1));
+    tabAction(p, basic, "feeding", {{"filter", "filter"}, {"op", "slot"}, {"index", 0}});
+    ctx.check(filterOf(basic, false).ghosts[0].empty(), "non-food refused in the filter");
+    setCursor(p, game::ItemConv::make("minecraft:bread", 1));
+    tabAction(p, basic, "feeding", {{"filter", "filter"}, {"op", "slot"}, {"index", 0}});
+    setCursor(p, ItemStack::EMPTY_ITEM());
+    ctx.check(filterOf(basic, false).ghosts[0].id == "minecraft:bread", "food accepted in the filter");
 });
 
 } // namespace

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/Filter.h"
+#include "upgrade/filter/FilterTab.h"
 #include "upgrade/IUpgrade.h"
 #include "upgrade/feeding/FeedingRules.h"
 
@@ -45,6 +46,8 @@ inline constexpr char const* kWhenHurtKey    = "feedImmediatelyWhenHurt"; ///< b
 [[nodiscard]] FeedingOptions optionsOf(UpgradeContext const& ctx);
 /// SC FilterLogic: a block list by default (an empty one matches every food).
 [[nodiscard]] core::Filter filterOf(UpgradeContext const& ctx, bool advanced);
+/// The shared filter control (SC FilterLogicControl: Allow / Block).
+[[nodiscard]] filtering::FilterSpec filterSpec(bool advanced);
 /// Stores one settings value (feeding registers no inventory hooks, so no hook rebuild).
 void writeSetting(UpgradeContext const& ctx, char const* key, nlohmann::json value);
 

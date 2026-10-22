@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/Filter.h"
+#include "upgrade/filter/FilterTab.h"
 #include "upgrade/IUpgrade.h"
 #include "upgrade/compacting/CompactingRecipes.h"
 
@@ -45,6 +46,8 @@ struct CompactingConfig {
 
 [[nodiscard]] int filterSlots(bool advanced);
 [[nodiscard]] int slotsInRow(bool advanced);
+/// The shared filter control (SC FilterLogicControl: Allow / Block).
+[[nodiscard]] filtering::FilterSpec filterSpec(bool advanced);
 
 /// Settings of one installed compacting upgrade.
 struct CompactingSettings {

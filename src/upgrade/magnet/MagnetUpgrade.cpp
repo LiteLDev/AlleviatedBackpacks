@@ -41,7 +41,9 @@
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/FilterMenu.h"
 #include "ui/menu/MenuManager.h"
+#include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/filter/FilterCommon.h"
 #include "upgrade/magnet/MagnetInternal.h"
 
 ABP_REGISTER_CONFIG("magnet", abp::upgrade::magnet::MagnetConfig);
@@ -61,53 +63,22 @@ MagnetTierConfig tierConfig(bool advanced) {
 
 Settings Settings::read(nlohmann::json const& settings, int filterSlots, bool advanced) {
     Settings s;
-    // SC FilterLogic defaults: a block list (an empty one matches everything), match by item.
-    s.filter                = core::Filter(filterSlots);
-    s.filter.mode           = core::FilterMode::Deny;
-    s.filter.emptyAllowsAll = false;
+    // SC ContentsFilterLogic: a block list by default (an empty one matches everything).
+    s.filter = filtering::read(settings, filterSlots, {}, "magnet");
+    filtering::normalize(s.filter, advanced ? UpgradeTier::Advanced : UpgradeTier::Basic, filterSlots);
     if (!settings.is_object()) return s;
     if (auto it = settings.find("pickupItems"); it != settings.end() && it->is_boolean()) s.pickupItems = it->get<bool>();
     if (auto it = settings.find("pickupXp"); it != settings.end() && it->is_boolean()) s.pickupXp = it->get<bool>();
-    if (auto it = settings.find("filter"); it != settings.end() && it->is_object()) {
-        s.filter                = core::Filter::fromJson(*it, filterSlots);
-        s.filter.emptyAllowsAll = false; // SC: an empty allow list matches nothing
-        s.byStorage             = it->value("byStorage", false);
-    }
-    if (!advanced) {
-        s.filter.matchBy         = core::MatchBy::Item;
-        s.filter.matchNbt        = false;
-        s.filter.matchDurability = false;
-    }
     return s;
 }
 
-namespace {
-
-/// SC `FilterLogic.stackMatchesFilter` (used by "match backpack contents").
-bool stackMatches(core::Filter const& f, core::ItemStackData const& stack, core::ItemStackData const& filter) {
-    if (filter.empty()) return false;
-    if (f.matchBy == core::MatchBy::Namespace) {
-        if (stack.itemNamespace() != filter.itemNamespace()) return false;
-    } else if (f.matchBy == core::MatchBy::Item && (stack.id != filter.id || stack.aux != filter.aux)) {
-        return false;
-    }
-    if (f.matchDurability && stack.damage != filter.damage) return false;
-    return !f.matchNbt || (stack.nbtHash() == filter.nbtHash() && stack.nbt() == filter.nbt());
+filtering::FilterSpec filterSpec(bool advanced) {
+    auto tc = tierConfig(advanced);
+    return filtering::FilterSpec{tc.filterSlots, tc.slotsInRow, advanced, filtering::TypeButton::Contents};
 }
 
-} // namespace
-
 bool matchesFilter(Settings const& s, game::Backpack& backpack, core::ItemStackData const& item) {
-    if (item.empty()) return false;
-    if (!s.byStorage) return s.filter.passes(item, &game::ItemConv::tags());
-    auto const& inv = backpack.inventory();
-    for (int i = 0; i < inv.size(); ++i) {
-        if (stackMatches(s.filter, item, inv.at(i))) return true;
-    }
-    for (auto const& m : feature::gui::memory(backpack)) {
-        if (!m.empty() && m.id == item.id && m.aux == item.aux) return true;
-    }
-    return false;
+    return filtering::matchesContents(s.filter, backpack, item);
 }
 
 // ---- XP consumers (other units) ----------------------------------------------------------------
@@ -452,10 +423,9 @@ MagnetMenu::MagnetMenu(Player& player, UpgradeContext const& ctx, int slots, boo
       }(),
       [ctx, slots, advanced] { return menuFilter(ctx, slots, advanced); },
       [ctx](core::Filter const& f) {
-          auto& j    = ctx.settings();
-          auto  keep = j.is_object() && j.contains("filter") && j["filter"].is_object() ? j["filter"].value("byStorage", false) : false;
+          auto& j = ctx.settings();
+          if (!j.is_object()) j = nlohmann::json::object();
           j["filter"] = f.toJson();
-          j["filter"]["byStorage"] = keep;
           ctx.saveSettings(true);
       },
       ui::FilterMenuOptions{
@@ -504,13 +474,72 @@ void MagnetMenu::build(Player& player) {
                 "minecraft:experience_bottle",
                 s.pickupXp ? trFor(player, "abp.magnet.button.pickup_xp", "Pickup Experience")
                            : trFor(player, "abp.magnet.button.do_not_pickup_xp", "Do Not Pickup Experience"),
-                s.pickupXp ? std::vector<std::string>{trFor(player, "abp.magnet.button.pickup_xp.detail", "§8§oRequires Tank Upgrade")}
+                s.pickupXp ? std::vector<std::string>{"§8§o" + trFor(player, "abp.magnet.button.pickup_xp.detail", "Requires Tank Upgrade")}
                            : std::vector<std::string>{}
             ),
             toggle("pickupXp")
         )
     );
 }
+
+// ---- native tab (client: client/ui/tabs/magnet) -----------------------------------------------
+
+namespace {
+
+bool isAdvanced(UpgradeContext const& ctx) {
+    auto* type = upgradeFor(ctx.state().item);
+    return type && type->info().id == kAdvancedId;
+}
+
+void toggle(UpgradeContext const& ctx, char const* key) {
+    auto& j = ctx.settings();
+    if (!j.is_object()) j = nlohmann::json::object();
+    bool v = j.contains(key) && j[key].is_boolean() ? j[key].get<bool>() : true;
+    j[key] = !v;
+    ctx.saveSettings();
+}
+
+ABP_REGISTER_TAB_DATA(net::TabDataProvider{
+    "magnet",
+    [](Player& player, UpgradeContext const& ctx) {
+        bool adv = isAdvanced(ctx);
+        auto s   = Settings::read(ctx.settings(), tierConfig(adv).filterSlots, adv);
+        return nlohmann::json{
+            {"title",       adv ? trFor(player, "abp.magnet.tab.advanced", "Adv. Magnet") : trFor(player, "abp.magnet.tab", "Magnet")},
+            {"tooltip",     adv ? trFor(player, "abp.magnet.tab.advanced.tooltip", "Advanced Magnet Settings")
+                                : trFor(player, "abp.magnet.tab.tooltip", "Magnet Settings")},
+            {"pickupItems", s.pickupItems},
+            {"pickupXp",    s.pickupXp},
+            {"filter",      filtering::tabJson(s.filter, filterSpec(adv))},
+        };
+    },
+});
+
+ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
+    "magnet",
+    [](Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+        if (!data.is_object()) return false;
+        bool adv = isAdvanced(ctx);
+        if (data.value("filter", std::string{}) == "filter") {
+            auto spec = filterSpec(adv);
+            auto s    = Settings::read(ctx.settings(), spec.slots, adv);
+            if (filtering::applyAction(s.filter, spec, data, filtering::cursorOf(player))) {
+                filtering::normalize(s.filter, adv ? UpgradeTier::Advanced : UpgradeTier::Basic, spec.slots);
+                ctx.settings()["filter"] = s.filter.toJson();
+                ctx.saveSettings(true);
+            }
+            return true;
+        }
+        auto op = data.value("op", std::string{});
+        if (op == "pickupItems" || op == "pickupXp") {
+            toggle(ctx, op == "pickupItems" ? "pickupItems" : "pickupXp");
+            return true;
+        }
+        return false;
+    },
+});
+
+} // namespace
 
 namespace {
 struct BasicMagnet : MagnetUpgrade {

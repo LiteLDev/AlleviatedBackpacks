@@ -3,11 +3,14 @@
 #include <memory>
 #include <string>
 
+#include "mc/world/PlayerUIContainer.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "game/ItemConv.h"
 #include "mod/Config.h"
+#include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
@@ -40,6 +43,22 @@ void setSetting(std::shared_ptr<game::Backpack> const& bp, int slot, std::string
     ctx.settings()[std::string(key)] = std::move(value);
     ctx.saveSettings(true);
 }
+
+/// The native tab data / actions registered for `group` (what the client tab gets and sends).
+nlohmann::json tabData(Player& p, UpgradeContext const& ctx, std::string_view group) {
+    auto out = nlohmann::json::object();
+    for (auto const& e : net::TabDataRegistry::entries()) {
+        if (e.upgrade == group && e.data) out.update(e.data(p, ctx));
+    }
+    return out;
+}
+bool tabAction(Player& p, UpgradeContext const& ctx, std::string_view group, nlohmann::json const& data) {
+    for (auto const& h : net::TabActionRegistry::entries()) {
+        if (h.upgrade == group && h.handle && h.handle(p, ctx, data)) return true;
+    }
+    return false;
+}
+void setCursor(Player& p, ItemStack const& item) { p.setPlayerUIItem(PlayerUISlot::CursorSelected, item, false); }
 
 ABP_REGISTER_SELFTEST("compacting.recipe_lookup", [](Context& ctx) {
     invalidateCache();
@@ -192,6 +211,28 @@ ABP_REGISTER_SELFTEST("compacting.settings_menu", [](Context& ctx) -> ll::coro::
     (void)mm.simulate(player, {Action::Take, {Where::Menu, control + 6}, {Where::Cursor, 0}, 1});
     ctx.check(settings().workInGui, "Works in GUI as well");
     mm.close(player);
+});
+
+ABP_REGISTER_SELFTEST("compacting.native_tab", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(core::Tier::Iron);
+    int   b  = ctx.installUpgrade(bp, "compacting");
+    int   a  = ctx.installUpgrade(bp, "advanced_compacting");
+    UpgradeContext basic(bp, b, &p), adv(bp, a, &p);
+    auto           t = tabData(p, basic, "compacting");
+    ctx.check(t.value("title", "") == "Compa..." && t.value("tooltip", "") == "Compacting Settings", "SB tab texts: " + t.value("title", ""));
+    ctx.check(tabData(p, adv, "compacting").value("title", "") == "Adv. Compacting", "advanced title");
+    ctx.check(!t.value("compactAnything", true) && !t.value("workInGui", true), "defaults");
+    ctx.check(tabAction(p, basic, "compacting", {{"op", "compactAnything"}}), "toggle");
+    ctx.check(CompactingSettings::read(basic.settings(), false).compactAnything, "Compact Anything stored");
+    ctx.check(tabAction(p, basic, "compacting", {{"op", "workInGui"}}) && CompactingSettings::read(basic.settings(), false).workInGui, "work in GUI");
+    setCursor(p, game::ItemConv::make("minecraft:dirt", 1));
+    tabAction(p, adv, "compacting", {{"filter", "filter"}, {"op", "slot"}, {"index", 0}});
+    ctx.check(CompactingSettings::read(adv.settings(), true).filter.ghosts[0].empty(), "items that can't compact are refused");
+    setCursor(p, game::ItemConv::make("minecraft:iron_ingot", 1));
+    tabAction(p, adv, "compacting", {{"filter", "filter"}, {"op", "slot"}, {"index", 0}});
+    setCursor(p, ItemStack::EMPTY_ITEM());
+    ctx.check(CompactingSettings::read(adv.settings(), true).filter.ghosts[0].id == "minecraft:iron_ingot", "compactable item accepted");
 });
 
 } // namespace

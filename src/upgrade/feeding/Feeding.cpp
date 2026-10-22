@@ -30,7 +30,9 @@
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/FilterMenu.h"
 #include "ui/menu/MenuManager.h"
+#include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/filter/FilterCommon.h"
 
 ABP_REGISTER_CONFIG("feeding", abp::upgrade::feeding::FeedingConfig);
 
@@ -62,18 +64,15 @@ FeedingOptions optionsOf(UpgradeContext const& ctx) {
 }
 
 core::Filter filterOf(UpgradeContext const& ctx, bool advanced) {
-    auto const&  s     = ctx.settings();
-    int          slots = tierConfig(advanced).filterSlots;
-    core::Filter f(slots);
-    f.mode = core::FilterMode::Deny; // SC: block list by default
-    if (s.is_object() && s.contains(kFilterKey)) f = core::Filter::fromJson(s.at(kFilterKey), slots);
-    f.emptyAllowsAll = false; // SC: an empty allow list matches nothing
-    if (!advanced) {
-        f.matchBy         = core::MatchBy::Item;
-        f.matchNbt        = false;
-        f.matchDurability = false;
-    }
+    int  slots = tierConfig(advanced).filterSlots;
+    auto f     = filtering::read(ctx.settings(), slots, {}, "feeding"); // SC: block list by default
+    filtering::normalize(f, advanced ? UpgradeTier::Advanced : UpgradeTier::Basic, slots);
     return f;
+}
+
+filtering::FilterSpec filterSpec(bool advanced) {
+    auto tc = tierConfig(advanced);
+    return filtering::FilterSpec{tc.filterSlots, tc.slotsInRow, advanced, filtering::TypeButton::AllowList};
 }
 
 void writeSetting(UpgradeContext const& ctx, char const* key, nlohmann::json value) {
@@ -179,7 +178,7 @@ bool feedPlayerAndGetHungry(Player& player, UpgradeContext const& ctx, bool adva
         if (item.empty()) continue;
         auto nutrition = nutritionOf(item);
         if (!nutrition || !isEdible(item.id, *nutrition)) continue;
-        if (!filter.passes(item, &game::ItemConv::tags())) continue;
+        if (!filter.passes(item, &filtering::matcher())) continue;
         if (!shouldFeed(state, *nutrition, options)) continue;
         if (!eatFrom(player, bp, i)) continue;
         if (fedSlot) *fedSlot = i;
@@ -344,6 +343,60 @@ private:
         std::int64_t until = 0;
     };
 };
+
+// ---- native tab (client: client/ui/tabs/feeding) ----------------------------------------------
+
+bool isAdvancedFeeding(UpgradeContext const& ctx) {
+    auto* type = upgradeFor(ctx.state().item);
+    return type && type->info().id == kAdvancedId;
+}
+
+ABP_REGISTER_TAB_DATA(net::TabDataProvider{
+    "feeding",
+    [](Player& player, UpgradeContext const& ctx) {
+        bool adv = isAdvancedFeeding(ctx);
+        auto o   = optionsOf(ctx);
+        return nlohmann::json{
+            {"title",       adv ? trFor(player, "abp.feeding.tab.advanced", "Adv. Feeding") : trFor(player, "abp.feeding.tab", "Feeding")},
+            {"tooltip",     adv ? trFor(player, "abp.feeding.tab.advanced.tooltip", "Advanced Feeding Settings")
+                                : trFor(player, "abp.feeding.tab.tooltip", "Feeding Settings")},
+            {"hungerLevel", static_cast<int>(o.level)},
+            {"whenHurt",    o.feedImmediatelyWhenHurt},
+            {"filter",      filtering::tabJson(filterOf(ctx, adv), filterSpec(adv))},
+        };
+    },
+});
+
+ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
+    "feeding",
+    [](Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+        if (!data.is_object()) return false;
+        bool adv = isAdvancedFeeding(ctx);
+        if (data.value("filter", std::string{}) == "filter") {
+            auto cursor = filtering::cursorOf(player);
+            // SC FilterLogic(isItemValid = food): only food goes into the filter slots.
+            if (data.value("op", std::string{}) == "slot" && !cursor.empty() && !nutritionOf(cursor)) return true;
+            auto spec = filterSpec(adv);
+            auto f    = filterOf(ctx, adv);
+            if (filtering::applyAction(f, spec, data, cursor)) {
+                filtering::normalize(f, adv ? UpgradeTier::Advanced : UpgradeTier::Basic, spec.slots);
+                writeSetting(ctx, kFilterKey, f.toJson());
+            }
+            return true;
+        }
+        if (!adv) return false; // the basic tab has no buttons
+        auto op = data.value("op", std::string{});
+        if (op == "hungerLevel") {
+            writeSetting(ctx, kHungerLevelKey, std::string(toString(next(optionsOf(ctx).level))));
+            return true;
+        }
+        if (op == "whenHurt") {
+            writeSetting(ctx, kWhenHurtKey, !optionsOf(ctx).feedImmediatelyWhenHurt);
+            return true;
+        }
+        return false;
+    },
+});
 
 using FeedingUpgrade         = FeedingUpgradeT<false>;
 using AdvancedFeedingUpgrade = FeedingUpgradeT<true>;

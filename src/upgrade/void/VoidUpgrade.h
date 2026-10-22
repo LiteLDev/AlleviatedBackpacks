@@ -3,6 +3,7 @@
 #include "api/abp/Fluid.h"
 #include "core/BackpackInventory.h"
 #include "core/Filter.h"
+#include "upgrade/filter/FilterTab.h"
 #include "upgrade/IUpgrade.h"
 #include "upgrade/void/VoidRules.h"
 
@@ -32,6 +33,10 @@ struct VoidConfig {
 };
 
 [[nodiscard]] VoidTierConfig tierConfig(bool advanced);
+/// The shared filter control (SC VoidFilterLogicControl: Allow / Block, advanced match options).
+[[nodiscard]] filtering::FilterSpec filterSpec(bool advanced);
+/// SC FilterLogic with `setAllowByDefault(true)`: a new filter is an (empty) allow list.
+[[nodiscard]] core::Filter readFilter(nlohmann::json const& settings, bool advanced);
 
 /// Runs after the foundation rules (priority 1000) and after other upgrades' filters, so a Deny
 /// from them (e.g. a Filter upgrade) wins over voiding.

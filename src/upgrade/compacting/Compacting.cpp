@@ -34,7 +34,9 @@
 #include "mod/Module.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/FilterMenu.h"
+#include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/filter/FilterCommon.h"
 
 ABP_REGISTER_CONFIG("compacting", abp::upgrade::compacting::CompactingConfig);
 
@@ -53,12 +55,9 @@ int slotsInRow(bool advanced) {
 CompactingSettings CompactingSettings::read(nlohmann::json const& settings, bool advanced) {
     CompactingSettings s;
     s.advanced    = advanced;
-    s.filter      = core::Filter(filterSlots(advanced));
-    s.filter.mode = core::FilterMode::Deny; // SC: block list by default
+    s.filter      = filtering::read(settings, filterSlots(advanced), {}, "compacting"); // SC: block list by default
+    filtering::normalize(s.filter, advanced ? UpgradeTier::Advanced : UpgradeTier::Basic, filterSlots(advanced));
     if (settings.is_object()) {
-        if (auto it = settings.find(kFilterKey); it != settings.end() && it->is_object()) {
-            s.filter = core::Filter::fromJson(*it, filterSlots(advanced));
-        }
         if (auto it = settings.find(kCompactAnythingKey); it != settings.end() && it->is_boolean()) {
             s.compactAnything = it->get<bool>();
         } else if (auto old = settings.find("onlyUncraftable"); old != settings.end() && old->is_boolean()) {
@@ -66,13 +65,11 @@ CompactingSettings CompactingSettings::read(nlohmann::json const& settings, bool
         }
         if (auto it = settings.find(kWorkInGuiKey); it != settings.end() && it->is_boolean()) s.workInGui = it->get<bool>();
     }
-    s.filter.emptyAllowsAll = false;
-    if (!advanced) {
-        s.filter.matchBy         = core::MatchBy::Item;
-        s.filter.matchNbt        = false;
-        s.filter.matchDurability = false;
-    }
     return s;
+}
+
+filtering::FilterSpec filterSpec(bool advanced) {
+    return filtering::FilterSpec{filterSlots(advanced), slotsInRow(advanced), advanced, filtering::TypeButton::AllowList};
 }
 
 namespace {
@@ -138,7 +135,7 @@ struct Engine : std::enable_shared_from_this<Engine> {
     bool                          scheduled  = false;
 
     [[nodiscard]] bool matches(core::ItemStackData const& item) const {
-        return !item.empty() && settings.filter.passes(item, &game::ItemConv::tags());
+        return !item.empty() && settings.filter.passes(item, &filtering::matcher());
     }
     [[nodiscard]] std::optional<CompactingDefinition> definition(core::ItemStackData const& item) const {
         return compactingDefinition(item, settings.advanced, settings.compactAnything);
@@ -402,6 +399,62 @@ public:
         };
     }
 };
+
+// ---- native tab (client: client/ui/tabs/compacting) --------------------------------------------
+
+bool isAdvancedCompacting(UpgradeContext const& ctx) {
+    auto* type = upgradeFor(ctx.state().item);
+    return type && type->info().id == kAdvancedId;
+}
+
+ABP_REGISTER_TAB_DATA(net::TabDataProvider{
+    "compacting",
+    [](Player& player, UpgradeContext const& ctx) {
+        bool adv = isAdvancedCompacting(ctx);
+        auto s   = CompactingSettings::read(ctx.settings(), adv);
+        return nlohmann::json{
+            {"title",           adv ? trFor(player, "abp.compacting.tab.advanced", "Adv. Compacting") : trFor(player, "abp.compacting.tab", "Compa...")},
+            {"tooltip",         adv ? trFor(player, "abp.compacting.tab.advanced.tooltip", "Advanced Compacting Settings")
+                                    : trFor(player, "abp.compacting.tab.tooltip", "Compacting Settings")},
+            {"compactAnything", s.compactAnything},
+            {"workInGui",       s.workInGui},
+            {"filter",          filtering::tabJson(s.filter, filterSpec(adv))},
+        };
+    },
+});
+
+ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
+    "compacting",
+    [](Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+        if (!data.is_object() || !alive(ctx)) return false;
+        bool adv = isAdvancedCompacting(ctx);
+        auto s   = CompactingSettings::read(ctx.settings(), adv);
+        if (data.value("filter", std::string{}) == "filter") {
+            auto cursor = filtering::cursorOf(player);
+            // SC FilterLogic(isItemValid = canCompact): only compactable items go into the filter.
+            if (data.value("op", std::string{}) == "slot" && !cursor.empty()
+                && !compactingDefinition(cursor, adv, s.compactAnything)) {
+                return true;
+            }
+            auto spec = filterSpec(adv);
+            if (filtering::applyAction(s.filter, spec, data, cursor)) {
+                filtering::normalize(s.filter, adv ? UpgradeTier::Advanced : UpgradeTier::Basic, spec.slots);
+                writeSetting(ctx, kFilterKey, s.filter.toJson());
+            }
+            return true;
+        }
+        auto op = data.value("op", std::string{});
+        if (op == "compactAnything") {
+            writeSetting(ctx, kCompactAnythingKey, !s.compactAnything);
+            return true;
+        }
+        if (op == "workInGui") {
+            writeSetting(ctx, kWorkInGuiKey, !s.workInGui);
+            return true;
+        }
+        return false;
+    },
+});
 
 class CompactingUpgrade final : public CompactingUpgradeBase {
 public:

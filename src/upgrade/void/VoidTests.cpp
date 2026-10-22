@@ -2,12 +2,15 @@
 
 #include <memory>
 
+#include "mc/world/PlayerUIContainer.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "api/BackpackCapabilities.h"
 #include "game/ItemConv.h"
 #include "mod/Config.h"
+#include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
@@ -59,6 +62,22 @@ UpgradeContext setup(
     uc.saveSettings(true);
     return uc;
 }
+
+/// The native tab data / actions registered for `group` (what the client tab gets and sends).
+nlohmann::json tabData(Player& p, UpgradeContext const& ctx, std::string_view group) {
+    auto out = nlohmann::json::object();
+    for (auto const& e : net::TabDataRegistry::entries()) {
+        if (e.upgrade == group && e.data) out.update(e.data(p, ctx));
+    }
+    return out;
+}
+bool tabAction(Player& p, UpgradeContext const& ctx, std::string_view group, nlohmann::json const& data) {
+    for (auto const& h : net::TabActionRegistry::entries()) {
+        if (h.upgrade == group && h.handle && h.handle(p, ctx, data)) return true;
+    }
+    return false;
+}
+void setCursor(Player& p, ItemStack const& item) { p.setPlayerUIItem(PlayerUISlot::CursorSelected, item, false); }
 
 ABP_REGISTER_SELFTEST("void.defaults_and_config", [](Context& ctx) {
     auto const& c = config::get<VoidConfig>();
@@ -228,6 +247,26 @@ ABP_REGISTER_SELFTEST("void.settings_menu", [](Context& ctx) {
     (void)mm.simulate(player, {Action::Take, {Where::Menu, control + 6}, {Where::Cursor, 0}, 1});
     ctx.check(VoidSettings::read(uc).type() == VoidType::Always, "-> ALWAYS");
     mm.close(player);
+});
+
+ABP_REGISTER_SELFTEST("void.native_tab", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Leather);
+    int   b  = ctx.installUpgrade(bp, "void");
+    UpgradeContext uc(bp, b, &p);
+    auto           t = tabData(p, uc, "void");
+    ctx.check(t.value("title", "") == "Void" && t.value("tooltip", "") == "Void Settings", "SB tab texts");
+    ctx.check(!t.value("workInGui", true) && t.value("voidType", -1) == 0 && t.value("voidAlwaysEnabled", false), "defaults");
+    ctx.check(t["filter"].value("type", "") == "allowList" && t["filter"].value("typeState", -1) == 0, "allow list by default");
+    ctx.check(tabAction(p, uc, "void", {{"op", "workInGui"}}) && VoidSettings::read(uc).workInGui, "work in GUI");
+    ctx.check(tabAction(p, uc, "void", {{"op", "voidType"}}) && VoidSettings::read(uc).type() == VoidType::SlotOverflow, "-> slot overflow");
+    auto saved = config::get<VoidConfig>();
+    config::mut<VoidConfig>().voidUpgrade.voidAlwaysEnabled = false;
+    tabAction(p, uc, "void", {{"op", "voidType"}}); // -> storage overflow
+    tabAction(p, uc, "void", {{"op", "voidType"}}); // skips ALWAYS
+    ctx.check(VoidSettings::read(uc).type() == VoidType::SlotOverflow, "ALWAYS skipped when disabled");
+    ctx.check(!tabData(p, uc, "void").value("voidAlwaysEnabled", true), "client told ALWAYS is disabled");
+    config::mut<VoidConfig>() = saved;
 });
 
 } // namespace
