@@ -21,6 +21,14 @@ public static class Mouse {
 
 Wait-LogLine 'companion: server ready' 90 | Out-Null
 Write-Step 'companion handshake done'
+$keys = (Get-LeviLog -All | Select-String -Pattern 'keys: ' | Select-Object -Last 1).Line
+Write-Step "bindings: $keys"
+if ($keys -notmatch 'open_backpack=66,-96' -or $keys -notmatch 'tool_swap=86' -or $keys -notmatch 'toggle_upgrade_3=78') {
+    throw "the key bindings saved in options.txt were not applied: $keys"
+}
+function Assert-NoEmote([string]$when) {
+    if ((Get-LeviLog -All) -match 'input: screen \S*emote') { throw "the emote list opened ()" }
+}
 
 function Key-Combo([int]$mod, [string]$key) {
     Assert-GameForeground
@@ -107,6 +115,8 @@ Press-Key 'B'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'b-closed' | Out-Null
+Start-Sleep -Milliseconds 600
+Assert-NoEmote 'B in game / B to close'
 
 # ---- Toggle upgrades (Alt+Z / Alt+X; N = toggle 3 without modifier) ----------------------------------------
 $mark = Get-LogMark
@@ -125,6 +135,15 @@ $mark = Get-LogMark
 Key-Combo 0x12 'X'
 Wait-LogLine 'key action: .* switched upgrade 2 \(deposit\) off' 10 -Since $mark | Out-Null
 Key-Combo 0x12 'X'
+$mark = Get-LogMark
+Press-Key 'N'                               # rebound Toggle Upgrade 3 (no Alt): inception can't be switched
+Wait-LogLine 'key action: .* toggle upgrade 3: nothing that can be switched' 10 -Since $mark | Out-Null
+$mark = Get-LogMark
+Press-Key 'V'                               # rebound Tool Swap (backpack in hand: SB refuses)
+Wait-LogLine 'key action: .* tool swap -> ' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 300
+Save-Screenshot 'toolswap-backpack-in-hand' | Out-Null
+
 # ---- Inventory interaction (C) on a chest -------------------------------------------------------------------
 Invoke-Chat '/setblock ~ ~ ~2 chest'
 Invoke-Chat '/replaceitem block ~ ~ ~2 slot.container 0 apple 10'
@@ -245,6 +264,22 @@ Press-Key 'B'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 1000
 Save-Screenshot 'inv-b-back-to-inventory' | Out-Null
+# Open Backpack on the mouse side button (second binding from options.txt).
+V-Move 'inventory:1'
+Start-Sleep -Milliseconds 300
+$mark = Get-LogMark
+[AbpInputE2E.Mouse]::X1()
+Wait-LogLine 'key action: .* opens the backpack at inventory 1' 10 -Since $mark | Out-Null
+Read-Layout $mark
+Start-Sleep -Milliseconds 800
+Save-Screenshot 'inv-x1-opened' | Out-Null
+$mark = Get-LogMark
+Gui-Move 30 5
+Press-Key 'B'
+Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 800
+Close-Screen
+
 # ---- Native screen: stashing, sort (middle mouse), transfer keys ------------------------------------
 $mark = Get-LogMark
 Press-Key 'B'
@@ -301,6 +336,7 @@ Save-Screenshot 'native-transferred' | Out-Null
 $mark = Get-LogMark
 Press-Key 'E'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 600
+Start-Sleep -Milliseconds 1200
+Assert-NoEmote 'E to close the native screen'
 if ((Get-LeviLog -Since 0) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
 Assert-NoErrors

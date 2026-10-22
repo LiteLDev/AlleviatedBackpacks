@@ -29,6 +29,7 @@
 #include "mc/deps/input/MouseAction.h"
 
 #include "client/input/InputState.h"
+#include "client/net/ClientNet.h"
 #include "client/ui/UiRoot.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
@@ -61,6 +62,7 @@ constexpr std::size_t                      BUTTONS = 3;
 std::array<std::atomic<bool>, BUTTONS>     gHeldButtons{};
 std::array<std::atomic<bool>, 256>         gHeldKeys{};
 std::array<std::atomic<bool>, 256>         gKeysDown{};
+std::array<std::atomic<bool>, 256>         gHotkeyKeys{}; ///< pressed keys a key binding took
 std::array<std::atomic<std::int64_t>, 256> gKeyDownTime{};
 constexpr std::int64_t                     REPEAT_WINDOW_MS = 1100;
 
@@ -176,6 +178,7 @@ void releaseHeld(bool notifyLayers) {
         post([vk] { ui::UiRoot::get().dispatchKey(static_cast<int>(vk), false); });
     }
     for (auto& key : gKeysDown) key = false;
+    for (auto& key : gHotkeyKeys) key = false;
 }
 
 void onClientUpdate(ClientInstance& client) {
@@ -185,6 +188,16 @@ void onClientUpdate(ClientInstance& client) {
     bool wasCursor    = snap.cursorScreen.load();
     bool cursor       = inLevel && !client.getMouseGrabbed() && client.getScreenName() != "hud_screen";
     snap.inLevel      = inLevel;
+    snap.serverReady  = net::serverReady();
+    // Screen changes, for the e2e harness (e.g. "no emote list after B").
+    static std::string lastScreen;
+    if (inLevel) {
+        auto name = client.getScreenName();
+        if (name != lastScreen) {
+            lastScreen = name;
+            log().info("input: screen {}", name);
+        }
+    }
     snap.cursorScreen = cursor;
     if (wasCursor && !cursor) clearSlotHover();
 
@@ -287,12 +300,27 @@ void onKey(ll::event::KeyInputEvent& ev) {
     bool repeat = gKeysDown[idx].exchange(down) && down && now - gKeyDownTime[idx].load() < REPEAT_WINDOW_MS;
     if (down) gKeyDownTime[idx] = now;
 
+    // A key one of our bindings took (and its repeats / release) never reaches the game.
+    auto& hotkey = gHotkeyKeys[idx];
+    if (down && hotkey.load()) {
+        ev.cancel();
+        return;
+    }
+    if (!down && hotkey.exchange(false)) {
+        ev.cancel();
+        return;
+    }
+
     bool consume;
     if (down) {
         bool live = snap.inLevel.load() && snap.cursorScreen.load();
         consume   = live && (snap.textFocus.load() || snap.captured(vk));
         if (consume) held = true;
-        else if (!repeat) onHotkeyKeyDown(vk);
+        else if (!repeat && onHotkeyKeyDown(vk)) {
+            hotkey = true;
+            ev.cancel();
+            return;
+        }
     } else {
         consume = held.exchange(false);
     }

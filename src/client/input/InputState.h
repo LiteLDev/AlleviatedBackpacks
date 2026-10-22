@@ -17,6 +17,7 @@ namespace abp::client::input::detail {
 /// whether to swallow an event. Written on the client thread, read anywhere.
 struct Snapshot {
     std::atomic<bool>  inLevel{false};
+    std::atomic<bool>  serverReady{false}; ///< the server answered the companion handshake
     std::atomic<bool>  cursorScreen{false}; ///< a screen with a free cursor is on top
     std::atomic<bool>  overUi{false};       ///< the last cursor position is over a layer
     std::atomic<bool>  textFocus{false};    ///< a companion text box has focus
@@ -49,7 +50,7 @@ void registerHotkeys(); ///< once per process, at mod load
 void installHotkeys();
 void uninstallHotkeys();
 /// Window thread: a key was pressed (not a repeat) and no layer took it.
-void onHotkeyKeyDown(int vk);
+bool onHotkeyKeyDown(int vk); ///< true: the key is ours here (swallow it, and its release)
 /// Window thread: a mouse button (key-mapping code, e.g. -97 = middle, -96/-95 = X1/X2) was
 /// pressed outside the companion layers. Returns true when the click should be swallowed.
 bool onHotkeyMouseDown(int code);

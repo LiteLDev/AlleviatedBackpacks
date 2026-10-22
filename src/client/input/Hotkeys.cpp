@@ -12,6 +12,12 @@
 #include <string_view>
 #include <vector>
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
+
 #include "ll/api/input/KeyRegistry.h"
 #include "ll/api/memory/Hook.h"
 
@@ -36,6 +42,7 @@
 #include "client/ui/screen/BackpackScreen.h"
 #include "game/BackpackItem.h"
 #include "mod/I18n.h"
+#include "mod/Main.h"
 #include "mod/Log.h"
 
 namespace abp::client::input {
@@ -243,6 +250,82 @@ void run(KeyAction action) {
 
 } // namespace
 
+// ---- saved bindings ----------------------------------------------------------------------------------
+// The game reads options.txt before mod key bindings exist, so a rebinding saved there (from the
+// controls screen or by hand) would be dropped and then overwritten with the defaults. We read our
+// own "keyboard_type_0_key.AlleviatedBackpacks.<name>:<codes>" lines once and put them into the
+// layout, which the game then shows and saves like any vanilla control.
+
+std::filesystem::path gModDir; // set at load (registerHotkeys)
+bool                  gSavedApplied = false;
+
+std::optional<std::filesystem::path> optionsFile() {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> roots;
+    if (!gModDir.empty()) roots.push_back(gModDir.parent_path().parent_path() / "Minecraft Bedrock" / "Users"); // LeviLauncher
+    if (auto const* appData = std::getenv("APPDATA")) roots.push_back(fs::path(appData) / "Minecraft Bedrock" / "Users");
+    std::optional<fs::path>        best;
+    fs::file_time_type             bestTime{};
+    std::error_code                ec;
+    for (auto const& root : roots) {
+        if (!fs::is_directory(root, ec)) continue;
+        for (auto const& user : fs::directory_iterator(root, ec)) {
+            auto file = user.path() / "games" / "com.mojang" / "minecraftpe" / "options.txt";
+            if (!fs::is_regular_file(file, ec)) continue;
+            auto t = fs::last_write_time(file, ec);
+            if (!best || t > bestTime) best = file, bestTime = t;
+        }
+        if (best) break; // the launcher's own data first
+    }
+    return best;
+}
+
+std::unordered_map<std::string, std::vector<int>> savedBindings() {
+    std::unordered_map<std::string, std::vector<int>> out;
+    auto file = optionsFile();
+    if (!file) return out;
+    std::ifstream in(*file);
+    std::string   line;
+    std::string const prefix = "keyboard_type_0_" + std::string{KEY_PREFIX};
+    while (std::getline(in, line)) {
+        if (!line.starts_with(prefix)) continue;
+        auto colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        auto name = line.substr(prefix.size(), colon - prefix.size());
+        std::vector<int> codes;
+        std::stringstream list(line.substr(colon + 1));
+        for (std::string part; std::getline(list, part, ',');) {
+            try {
+                codes.push_back(std::stoi(part));
+            } catch (...) {
+            }
+        }
+        if (!codes.empty()) out[name] = std::move(codes);
+    }
+    return out;
+}
+
+void applySavedBindings(RemappingLayout& layout) {
+    if (gSavedApplied) return;
+    auto const& defs  = keyDefs();
+    bool        known = false;
+    for (auto const& def : defs) {
+        auto action = std::string{KEY_PREFIX} + std::string{def.name};
+        if (*layout.getKeymappingByAction(action).mAction == action) known = true;
+    }
+    if (!known) return; // our bindings are not in this layout yet
+    gSavedApplied = true;
+    auto saved    = savedBindings();
+    for (auto const& def : defs) {
+        auto it = saved.find(std::string{def.name});
+        if (it == saved.end()) continue;
+        auto        action  = std::string{KEY_PREFIX} + std::string{def.name};
+        auto const& mapping = layout.getKeymappingByAction(action);
+        if (*mapping.mAction != action || *mapping.mKeys == it->second) continue;
+        layout.setMapping(action, it->second);
+        log().info("keys: saved binding {} restored", def.name);
+    }
+}
 // Mark our default keymappings as shared keys before the game de-duplicates its layout (B, C, Z,
 // X and the middle mouse button also have vanilla bindings or may get them).
 LL_TYPE_INSTANCE_HOOK(
@@ -268,7 +351,10 @@ LL_TYPE_INSTANCE_HOOK(
     IOptionRegistry& options
 ) {
     origin(options);
-    if (auto layout = mKeyboardRemappingLayout.lock()) readLayout(*layout);
+    if (auto layout = mKeyboardRemappingLayout.lock()) {
+        applySavedBindings(*layout);
+        readLayout(*layout);
+    }
 }
 
 // The controls menu localizes "key.AlleviatedBackpacks.<name>"; answer from our translations.
@@ -315,6 +401,7 @@ void registerHotkeys() {
     }
     static bool const registered = [] {
         resetToDefaults();
+        gModDir = abp::Mod::getInstance().getSelf().getModDir();
         auto& registry = ll::input::KeyRegistry::getInstance();
         for (auto const& def : keyDefs()) {
             auto& handle = registry.getOrCreateKey(def.name, def.defaults, true);
@@ -341,18 +428,42 @@ void uninstallHotkeys() {
     }
 }
 
-void onHotkeyKeyDown(int vk) {
-    if (!gActive.load() || vk <= 0) return;
+bool onHotkeyKeyDown(int vk) {
+    if (!gActive.load() || vk <= 0) return false;
     auto& snap = snapshot();
-    if (snap.vanillaTextFocus.load() || snap.textFocus.load()) return;
-    bool const alt  = altDown();
-    auto const& defs = keyDefs();
+    if (snap.vanillaTextFocus.load() || snap.textFocus.load()) return false;
+    bool const alt     = altDown();
+    bool const inLevel = snap.inLevel.load();
+    bool const inGame  = inLevel && !snap.cursorScreen.load();
+    bool       consume = false;
+    auto const& defs   = keyDefs();
     for (std::size_t i = 0; i < defs.size(); ++i) {
         if (defs[i].alt && !alt) continue;
         if (!bound(i, vk)) continue;
         auto action = defs[i].action;
+        // The key is ours when the binding acts here (SB's key conflict contexts): the game must
+        // not also see it (B is the emote key in Bedrock).
+        switch (action) {
+        case KeyAction::OpenBackpack:
+            consume |= inGame || (snap.cursorScreen.load() && snap.hoverBackpack.load());
+            break;
+        case KeyAction::InventoryInteraction:
+        case KeyAction::ToolSwap:
+            consume |= inGame;
+            break;
+        case KeyAction::ToggleUpgrade1:
+        case KeyAction::ToggleUpgrade2:
+        case KeyAction::ToggleUpgrade3:
+        case KeyAction::ToggleUpgrade4:
+        case KeyAction::ToggleUpgrade5:
+            consume |= inLevel;
+            break;
+        default:
+            break;
+        }
         post([action] { run(action); });
     }
+    return consume && snap.serverReady.load();
 }
 
 bool onHotkeyMouseDown(int code) {
