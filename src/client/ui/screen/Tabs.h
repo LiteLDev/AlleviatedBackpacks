@@ -22,6 +22,8 @@
 //
 // Data flows server -> client through `UpgradeView::tab` (server: `ABP_REGISTER_TAB_DATA`) and
 // client -> server through `TabContext::sendTabAction` (server: `ABP_REGISTER_TAB_ACTION`).
+// Reserved tab data keys read by the host: "tabTitle" (the open tab's label, SC translUpgrade) and
+// "tabTooltip" (the closed tab's tooltip, SC translUpgradeTooltip); both default to the upgrade name.
 // Upgrades with settings but without a native tab get the built-in generic tab (description +
 // a button that opens the upgrade's server-side settings UI).
 
