@@ -74,6 +74,20 @@ ll::coro::CoroTask<> groundPlayer(Context& ctx) {
     co_await ctx.ticks(2);
 }
 
+/// Moves the test player `dx` blocks east onto the ground (away from what other tests left behind).
+ll::coro::CoroTask<> isolatePlayer(Context& ctx, float dx) {
+    auto&    p   = ctx.player();
+    auto&    bs  = p.getDimensionBlockSource();
+    auto     pos = p.getPosition();
+    BlockPos column{static_cast<int>(std::floor(pos.x + dx)), 0, static_cast<int>(std::floor(pos.z))};
+    p.teleport(Vec3{pos.x + dx, pos.y, pos.z}, p.getDimensionId());
+    for (int i = 0; i < 100 && !bs.hasChunksAt(column, 2, false); ++i) co_await ctx.ticks(2);
+    ctx.require(bs.hasChunksAt(column, 2, false), "chunks around the isolated spot did not load");
+    auto y = bs.getAboveTopSolidBlock(column.x, column.z, false, false);
+    p.teleport(Vec3{pos.x + dx, static_cast<float>(y), pos.z}, p.getDimensionId());
+    co_await ctx.ticks(2);
+}
+
 Mob* spawnMob(Context& ctx, std::string const& id, float dx) {
     auto& player = ctx.player();
     auto  p      = player.getPosition();
@@ -333,6 +347,7 @@ namespace {
 /// placed).
 ABP_REGISTER_SELFTEST("mobcatcher.capture_through_use", [](Context& ctx) -> ll::coro::CoroTask<> {
     co_await groundPlayer(ctx);
+    co_await isolatePlayer(ctx, 40.f);
     auto&           p = static_cast<SimulatedPlayer&>(ctx.player());
     DifficultyGuard difficulty(p.getLevel());
     auto            bp = ctx.createBackpack(Tier::Netherite);
@@ -341,11 +356,25 @@ ABP_REGISTER_SELFTEST("mobcatcher.capture_through_use", [](Context& ctx) -> ll::
     ctx.give(p, ctx.backpackItem(*bp), hand);
     auto* zombie = spawnMob(ctx, "minecraft:zombie", 2.5f);
     auto  id     = zombie->getOrCreateUniqueID();
-    auto  zp     = zombie->getPosition();
-    p.simulateLookAt(Vec3{zp.x, zp.y + 0.8f, zp.z});
+    // Aim at the zombie (it may wander a little): retry until the look ray hits it.
     ctx.check(p.simulateSneaking(), "sneaking");
-    co_await ctx.ticks(1);
-    auto hit = p.traceRay(5.f, true, true);
+    Vec3      zp;
+    HitResult hit;
+    for (int i = 0; i < 10; ++i) {
+        zombie = static_cast<Mob*>(p.getLevel().fetchEntity(id, false));
+        ctx.require(zombie != nullptr, "the zombie is still there");
+        zp = zombie->getPosition();
+        p.simulateLookAt(Vec3{zp.x, zp.y + 0.8f, zp.z});
+        co_await ctx.ticks(1);
+        hit = p.traceRay(5.f, true, true);
+        if (hit.mType == HitResultType::Entity) break;
+    }
+    if (hit.mType != HitResultType::Entity) {
+        ctx.info(
+            "trace hit type " + std::to_string(static_cast<int>(hit.mType)) + " block " + std::to_string(hit.mBlock.x) + ","
+            + std::to_string(hit.mBlock.y) + "," + std::to_string(hit.mBlock.z)
+        );
+    }
     ctx.require(hit.mType == HitResultType::Entity, "the zombie is in the line of sight");
     BlockPos ground{static_cast<int>(std::floor(zp.x)), static_cast<int>(std::floor(zp.y)) - 1, static_cast<int>(std::floor(zp.z))};
     p.simulateUseItemInSlotOnBlock(hand, ground, ScriptModuleMinecraft::ScriptFacing::Up, Vec3{0.5f, 1.f, 0.5f});
