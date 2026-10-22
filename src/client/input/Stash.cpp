@@ -362,6 +362,28 @@ LL_TYPE_INSTANCE_HOOK(
     origin(renderContext, owner, pass);
 }
 
+// TEMP diagnostics: which vanilla handler a click with an item on the cursor runs.
+namespace {
+int gHandlerLogs = 0;
+void logHandler(char const* what, std::string const& c, int i) {
+    if (gHandlerLogs < 40 && cursorItem()) {
+        ++gHandlerLogs;
+        log().info("stash diag: {} {} #{}", what, c, i);
+    }
+}
+} // namespace
+LL_TYPE_INSTANCE_HOOK(AbpDiagPlaceAll, ll::memory::HookPriority::Normal, ContainerScreenController, &ContainerScreenController::$_handlePlaceAll, void, std::string const& c, int i) {
+    logHandler("placeAll", c, i);
+    origin(c, i);
+}
+LL_TYPE_INSTANCE_HOOK(AbpDiagAutoPlace, ll::memory::HookPriority::Normal, ContainerScreenController, &ContainerScreenController::_handleAutoPlace, void, int amount, std::string const& c, int i) {
+    logHandler("autoPlace", c, i);
+    origin(amount, c, i);
+}
+LL_TYPE_INSTANCE_HOOK(AbpDiagSelect, ll::memory::HookPriority::Normal, ContainerScreenController, &ContainerScreenController::$_handleSelectSlot, void, std::string const& c, int i) {
+    logHandler("selectSlot", c, i);
+    origin(c, i);
+}
 // Slot signs: every item icon of the open container screen reports its slot and position.
 LL_TYPE_INSTANCE_HOOK(
     AbpStashItemRenderHook,
@@ -528,6 +550,9 @@ void installStash() {
     AbpStashFurnacePlaceOneHook::hook();
     AbpStashTakePlaceHook::hook();
     AbpStashItemRenderHook::hook();
+    AbpDiagPlaceAll::hook();
+    AbpDiagAutoPlace::hook();
+    AbpDiagSelect::hook();
     AbpStashItemRenderInnerHook::hook();
     auto& bus = ll::event::EventBus::getInstance();
     gListeners.push_back(bus.emplaceListener<ll::event::ClientLevelTickEvent>([](auto&) { pump(); }));
@@ -548,6 +573,9 @@ void uninstallStash() {
     for (auto& l : gListeners) bus.removeListener(l);
     gListeners.clear();
     AbpStashItemRenderInnerHook::unhook();
+    AbpDiagSelect::unhook();
+    AbpDiagAutoPlace::unhook();
+    AbpDiagPlaceAll::unhook();
     AbpStashItemRenderHook::unhook();
     AbpStashTakePlaceHook::unhook();
     AbpStashFurnacePlaceOneHook::unhook();

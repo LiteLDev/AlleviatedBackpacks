@@ -19,6 +19,10 @@
 #include <chrono>
 #include <unordered_map>
 
+#include "mc/network/packet/InventorySlotPacket.h"
+#include "mc/network/packet/InventorySlotPacketPayload.h"
+#include "mc/world/ContainerID.h"
+#include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/ActorSwingSource.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/HandSlot.h"
@@ -30,6 +34,7 @@
 #include "feature/admin/SbConfig.h"
 #include "feature/stash/Stash.h"
 #include "game/BackpackItem.h"
+#include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "mod/I18n.h"
 #include "mod/Log.h"
@@ -180,11 +185,24 @@ bool stash(Player& player, nlohmann::json const& body) {
     if (!queryAllowed(player)) return false; // shares the stash rate limit (a click is far below it)
     auto loc = feature::stash::parseLocation(body);
     if (!loc) return false;
-    int moved = feature::stash::rightClick(player, *loc);
+    auto cursorBefore = game::ItemConv::toData(player.mPlayerUIContainer->getItem(0));
+    int  moved        = feature::stash::rightClick(player, *loc);
     log().info("key action: {} stash at {}: {} moved", player.getRealName(), feature::stash::key(*loc), moved);
-    // The client predicted nothing (it swallowed the click): send the server truth.
-    if (moved > 0) ui::MenuManager::get().resyncPlayer(player);
-    return moved > 0;
+    if (moved <= 0) return false;
+    // The client predicted nothing (it swallowed the click): send the server truth. The cursor is
+    // only re-sent when it changed: a re-sent cursor gets a new item net id, and the vanilla screen's
+    // next request for the old one would be rejected.
+    if (ui::MenuManager::get().current(player)) {
+        ui::MenuManager::get().resyncPlayer(player);
+    } else {
+        player.sendInventory(false);
+        auto cursorAfter = game::ItemConv::toData(player.mPlayerUIContainer->getItem(0));
+        if (!(cursorAfter == cursorBefore)) {
+            InventorySlotPacket pkt{InventorySlotPacketPayload{ContainerID::PlayerOnlyUi, 0, player.mPlayerUIContainer->getItem(0)}};
+            pkt.sendTo(player);
+        }
+    }
+    return true;
 }
 } // namespace
 
