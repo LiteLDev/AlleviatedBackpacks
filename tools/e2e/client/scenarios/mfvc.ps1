@@ -180,7 +180,13 @@ $mark = Get-LogMark
 # not deliver ESC to the screen, then E.
 Press-Key ESC
 try { Wait-LogLine 'native screen action: close by' 4 -Since $mark | Out-Null }
-catch { Press-Key 'E'; Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null }
+catch {
+    Press-Key 'E'
+    Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
+    # The same E also opens the emote wheel once the screen is gone: dismiss it.
+    Start-Sleep -Milliseconds 800
+    Press-Key ESC
+}
 Start-Sleep -Milliseconds 2000
 Save-Screenshot 'closed' | Out-Null
 
