@@ -11,6 +11,7 @@
 #include "client/Client.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "game/ItemConv.h"
+#include "mod/Log.h"
 
 namespace abp::client::ui {
 
@@ -446,6 +447,11 @@ NativeTab::Size FilterTab::build(TabContext const& ctx, Rect area, WidgetGroup& 
     auto it = ctx.upgrade.tab.find(mKey);
     if (it != ctx.upgrade.tab.end()) control.setState(*it);
     (void)control.consumeSizeChange();
+    abp::log().info(
+        "filter control: tab built key={} at {},{} size {}x{} slots={} perRow={} type={} primary={} tags={}",
+        mKey, area.x + 3, area.y + mControlY, control.width(), control.height(), it != ctx.upgrade.tab.end() ? it->value("slots", 0) : 0,
+        it != ctx.upgrade.tab.end() ? it->value("perRow", 0) : 0, static_cast<int>(control.type()), control.primaryMatch(), control.tags().size()
+    );
     // SC SettingsTabBase: widget extent + 6 right / bottom border.
     return {3 + control.width() + 6, mControlY + control.height() + 6};
 }
