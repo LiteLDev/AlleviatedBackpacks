@@ -38,12 +38,20 @@ pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario vanilla-refused -Mode r
 How the remote modes work: `run.ps1` starts `server/run.ps1 -Scenario client-host` in the
 background with `$env:ABP_E2E_HOST_DIR` (`client/out/<scenario>/host/`). The host writes
 `ready.json` with its UDP port, runs console commands dropped as `cmd-*.txt`
-(`Send-HostConsole 'cmd'`) and stops when `stop` appears. The client writes the server into the
-user's `games/com.mojang/minecraftpe/external_servers.txt` (restored afterwards) and joins it
-from the Servers tab (screenshots `join-*.png`). The BDS console log is merged into the session
-log as `[host] ...` lines, so `Wait-LogLine` / `Get-LeviLog` see client and server lines in every
-mode; ERR/FTL lines from the host fail the run too, and so does a failing host harness. The BDS
-uses `default-player-permission-level=operator`, so chat commands work in remote modes.
+(`Send-HostConsole 'cmd'`) and stops when `stop` appears. The client joins it through Play >
+Servers > "+ Add server" (name, `127.0.0.1`, port) > "Add and play" (screenshots `join-*.png`;
+user-added servers are listed below the featured ones, out of view, so the dialog is the
+deterministic path). The game refuses an address/port that is already listed, so our entries are
+dropped from `games/com.mojang/minecraftpe/external_servers.txt` before every launch, a launch
+joins once (a failed join restarts the game), and the original list is restored afterwards.
+The e2e BDS uses `transport=raknet` (it logs a "NetherNet is the only supported transport" ERR,
+but direct connections work; NetherNet needs the online signaling service) and `allow-list=false`.
+The BDS console log is merged into the session log as `[host] ...` lines, so `Wait-LogLine` /
+`Get-LeviLog` see client and server lines in every mode; ERR/FTL lines of AlleviatedBackpacks,
+LeviLamina or CrashLogger on the host fail the run too, and so does a failing host harness. The
+BDS uses `default-player-permission-level=operator`, so chat commands work in remote modes.
+Calibrated click positions (fractions of the client area) live at the end of `Enter-RemoteServer`
+in `client/lib.ps1`.
 
 Since the client mod is required and draws every backpack screen natively, the older client
 scenarios that click the phase-1 fake chest (`menus`, `gui`, ...) no longer see a chest: they are
