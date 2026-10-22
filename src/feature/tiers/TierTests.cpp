@@ -191,6 +191,13 @@ ABP_REGISTER_SELFTEST("tiers.recipes_match", [](Context& ctx) {
     ctx.check(!craftResult(noDye).ends_with("_backpack"), "ink sac is not one of the 16 dyes: " + craftResult(noDye));
 });
 
+ABP_REGISTER_SELFTEST("tiers.item_names", [](Context& ctx) {
+    // SB's en_US names, resolved on the server too (behavior-pack texts).
+    ctx.check(game::ItemConv::make("alleviatedbackpacks:leather_backpack").getName() == "Backpack", "leather: " + game::ItemConv::make("alleviatedbackpacks:leather_backpack").getName());
+    ctx.check(game::ItemConv::make("alleviatedbackpacks:netherite_backpack").getName() == "Netherite Backpack", "netherite: " + game::ItemConv::make("alleviatedbackpacks:netherite_backpack").getName());
+    ctx.check(game::ItemConv::make("alleviatedbackpacks:advanced_feeding_upgrade").getName() == "Advanced Feeding upgrade", "advanced feeding: " + game::ItemConv::make("alleviatedbackpacks:advanced_feeding_upgrade").getName());
+});
+
 ABP_REGISTER_SELFTEST("tiers.next_tier_upgrades", [](Context& ctx) {
     ctx.check(isNextTierUpgrade("alleviatedbackpacks:pickup_upgrade", "alleviatedbackpacks:advanced_pickup_upgrade"), "pickup -> advanced");
     ctx.check(isNextTierUpgrade("alleviatedbackpacks:pickup_upgrade", "alleviatedbackpacks:magnet_upgrade"), "pickup -> magnet");
