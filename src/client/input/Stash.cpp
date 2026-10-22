@@ -268,13 +268,11 @@ bool recentRightPress() {
     return at > 0 && ms - at < 400 && at != gHandledPress;
 }
 
-bool takeRightClick(ContainerScreenController& controller, std::string const& collection, int index) {
+bool takeRightClick(ContainerScreenController const& controller, std::string const& collection, int index) {
     if (!recentRightPress()) return false;
     if (!vanillaRightClick(controller, collection, index)) return false;
     gHandledPress = detail::snapshot().rightPressMs.load();
-    // The vanilla handler we skipped would have finished the slot selection the press started;
-    // left selected, the next click would act on this slot instead of the one under the cursor.
-    controller._handleUnselectSlot();
+
     return true;
 }
 } // namespace
