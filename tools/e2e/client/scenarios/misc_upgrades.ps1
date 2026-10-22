@@ -14,8 +14,8 @@ Invoke-Chat '/gamemode survival @s'                                    # the too
 $mark = Get-LogMark
 Invoke-Chat '/backpack misc setup'
 Wait-LogLine 'misc setup: gave netherite backpack' 15 -Since $mark | Out-Null
-Press-Key '1'
-Start-Sleep -Milliseconds 600
+Invoke-Chat '/tp @s ~ ~ ~ 0 20'
+$by = 24 + 54 + 3                                                      # jukebox buttons row (12 slots, 4 per row)
 
 # ---- layout helpers (GUI units, from the mod's layout log line; see companion.ps1) -----------------
 $script:L = $null
@@ -39,14 +39,40 @@ function Tab-Toggle([int]$i) { Gui-Click ($L.Width + 1 + 8) ((Tab-Y $i) + 4 + 8)
 # A widget at (dx, dy) of tab i (SB positions are relative to the tab's top-left), centre of an 18x18 button.
 function Tab-Button([int]$i, [double]$dx, [double]$dy) { @(($L.Width + $dx + 9), ((Tab-Y $i) + $dy + 9)) }
 
+# Opens the backpack in hotbar slot 0 by using it (right click). B also opens it, but B is the game's
+# emote key too: its hotkey list then takes the number keys and chat for a while.
 function Open-Backpack {
+    Press-Key '1'
+    Start-Sleep -Milliseconds 400
     $m = Get-LogMark
-    Press-Key 'B'
+    Click 0.5 0.5 -Relative -Right
     Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $m | Out-Null
     Read-Layout $m
     Start-Sleep -Milliseconds 600
     if ((Get-LeviLog -Since $m) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
 }
+
+# ---- Jukebox in the world: the record follows the carrier; dropping the backpack stops it ------------
+Open-Backpack
+Tab-Toggle 1
+$mark = Get-LogMark
+$p = Tab-Button 1 39 $by; Gui-Click $p[0] $p[1]
+Wait-LogLine 'jukebox: playing abp.jukebox3d.' 10 -Since $mark | Out-Null
+Press-Key 'E'
+Wait-LogLine 'jukebox: sound of backpack .* active=true' 15 -Since $mark | Out-Null
+Save-Screenshot 'jukebox-in-world' | Out-Null                          # note particles above the player
+$mark = Get-LogMark
+Press-Key 'Q'                                                          # drop the (everlasting) backpack
+Wait-LogLine 'jukebox: stopped in backpack .*no longer playable' 10 -Since $mark | Out-Null
+Wait-LogLine 'jukebox: stopping the sound of backpack' 10 -Since $mark | Out-Null
+Start-Sleep -Seconds 3
+Save-Screenshot 'everlasting-dropped' | Out-Null                       # happy villager particles
+
+# A fresh backpack for the rest (the first one was dropped).
+$mark = Get-LogMark
+Invoke-Chat '/backpack misc setup'
+Wait-LogLine 'misc setup: gave netherite backpack' 15 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 800
 
 # ---- Tool Swapper in the world: mining grass with the pickaxe takes the shovel ----------------------
 Invoke-Chat '/tp @s ~ ~ ~ 0 90'
@@ -160,39 +186,9 @@ Press-Key 'E'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 600
 
-# ---- Jukebox in the world: the record follows the carrier; dropping the backpack stops it ------------
-# (B is also the game's emote key: its hotkey list takes the number keys for a few seconds, so
-# a fresh setup selects hotbar slot 0 server-side instead.)
-Start-Sleep -Seconds 6
-$mark = Get-LogMark
-Invoke-Chat '/backpack misc setup'
-Wait-LogLine 'misc setup: gave netherite backpack' 15 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
-Open-Backpack
-Tab-Toggle 1
-$mark = Get-LogMark
-$p = Tab-Button 1 39 $by; Gui-Click $p[0] $p[1]
-Wait-LogLine 'jukebox: playing abp.jukebox3d.' 10 -Since $mark | Out-Null
-Press-Key 'E'
-Wait-LogLine 'jukebox: sound of backpack .* active=true' 15 -Since $mark | Out-Null
-Save-Screenshot 'jukebox-in-world' | Out-Null                          # note particles above the player
-Invoke-Chat '/tp @s ~ ~ ~ 0 20'
-$mark = Get-LogMark
-Press-Key 'Q'                                                          # drop the (everlasting) backpack
-Wait-LogLine 'jukebox: stopped in backpack .*no longer playable' 10 -Since $mark | Out-Null
-Wait-LogLine 'jukebox: stopping the sound of backpack' 10 -Since $mark | Out-Null
-Start-Sleep -Seconds 3
-Save-Screenshot 'everlasting-dropped' | Out-Null                       # happy villager particles
-
 # ---- B over the backpack stored inside opens it; ESC goes back -------------------------------------
-# (Last: B inside the screen may also reach the game's emote wheel.) A fresh setup: the first
-# backpack was dropped.
-$mark = Get-LogMark
-Invoke-Chat '/backpack misc setup'
-Wait-LogLine 'misc setup: gave netherite backpack' 15 -Since $mark | Out-Null
-Start-Sleep -Seconds 6
-Press-Key '1'
-Start-Sleep -Milliseconds 600
+# (Last: B is also the game's emote key.)
+Invoke-Chat '/tp @s ~ ~ ~ 0 20'
 Open-Backpack
 $s0 = Storage-Pos 0
 Gui-Move $s0[0] $s0[1]
