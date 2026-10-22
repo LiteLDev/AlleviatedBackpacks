@@ -1,11 +1,11 @@
-// Anvil upgrade: an anvil tab for the backpack (repair, combine, enchanted books, rename) that never
-// gets damaged. Inputs live in the upgrade's settings.
+// Anvil upgrade (SB `upgrades/anvil`): an anvil tab for the backpack (repair, combine, enchanted
+// books, rename) that never gets damaged. Inputs and the item name live in the upgrade's settings,
+// so they stay with the upgrade (and travel with the upgrade item when it is removed).
 
 #include "upgrade/anvil/AnvilUpgrade.h"
 
 #include <algorithm>
 
-#include "ll/api/form/CustomForm.h"
 #include "ll/api/service/Bedrock.h"
 
 #include "mc/deps/shared_types/legacy/LevelSoundEvent.h"
@@ -23,181 +23,155 @@
 namespace abp::upgrade::anvil {
 
 namespace {
-constexpr char const* kLeft  = "left";
-constexpr char const* kRight = "right";
-constexpr char const* kName  = "name";
+constexpr char const* kLeft        = "left";
+constexpr char const* kRight       = "right";
+constexpr char const* kName        = "name";
+constexpr char const* kNameDefault = "nameDefault";
 
 StationRef refFor(UpgradeContext const& ctx) { return StationRef(ctx.withPlayer(nullptr), "anvil"); }
+
+/// The item's name as the server shows it (custom name, else the item name).
+std::string hoverName(ItemStack const& s) {
+    auto custom = s.getCustomName();
+    return custom.empty() ? s.getName() : custom;
+}
+
+bool isBlank(std::string const& s) {
+    return std::all_of(s.begin(), s.end(), [](unsigned char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
+}
+
+/// SB PersistableAnvilMenu input slot 0 `setChanged`: the name box follows the left slot (the
+/// item's name when an item is put into the empty slot, "" when the slot becomes empty).
+void syncNameWithLeft(StationRef const& ref) {
+    auto left = ref.stack(kLeft);
+    if (left.isNull()) {
+        ref.setText(kName, std::nullopt);
+        ref.setText(kNameDefault, std::nullopt);
+    } else if (itemName(ref).empty()) {
+        ref.setText(kName, math::truncateUtf8(hoverName(left), kMaxNameLength));
+        ref.setText(kNameDefault, std::nullopt);
+    }
+}
 } // namespace
 
-// ---- menu ---------------------------------------------------------------------------------------
+// ---- station ------------------------------------------------------------------------------------
+
+std::string itemName(StationRef const& ref) { return ref.text(kName).value_or(std::string{}); }
+
+void setItemName(StationRef const& ref, std::string const& name, std::optional<std::string> const& clientDefault) {
+    if (ref.stack(kLeft).isNull()) return; // SB: the box is only editable with an item in the left slot
+    ref.setText(kName, math::truncateUtf8(name, kMaxNameLength));
+    if (clientDefault) ref.setText(kNameDefault, math::truncateUtf8(*clientDefault, kMaxNameLength));
+}
+
+std::optional<std::string> requestedName(StationRef const& ref) {
+    auto left = ref.stack(kLeft);
+    auto name = ref.text(kName);
+    if (left.isNull() || !name) return std::nullopt;
+    // Vanilla AnvilMenu.createResult: a blank name removes the custom name, the item's own
+    // (hover) name changes nothing, anything else renames.
+    if (isBlank(*name)) return std::string{};
+    auto hover = math::truncateUtf8(hoverName(left), kMaxNameLength);
+    if (*name == hover || *name == ref.text(kNameDefault).value_or(hover)) return std::nullopt;
+    return name;
+}
+
+AnvilOutcome stationOutcome(Player& player, StationRef const& ref) {
+    return compute(ref.stack(kLeft), ref.stack(kRight), requestedName(ref), player.isCreative());
+}
+
+std::optional<OutputSlot::Crafted> craft(Player& player, StationRef const& ref) {
+    auto o = stationOutcome(player, ref);
+    if (!o.hasResult() || !canAfford(player, o)) return std::nullopt;
+    auto left    = ref.stack(kLeft);
+    auto right   = ref.stack(kRight);
+    auto name    = ref.text(kName);
+    auto nameDef = ref.text(kNameDefault);
+    int  paid    = player.isCreative() ? 0 : o.cost;
+    ref.setItem(kLeft, {});
+    ref.consume(kRight, o.rightUsed);
+    syncNameWithLeft(ref);
+    if (paid > 0) player.addLevels(-paid);
+    // The upgrade's anvil never takes damage (unlike the block).
+    if (auto level = ll::service::getLevel()) {
+        level->playSound(SharedTypes::Legacy::LevelSoundEvent::AnvilUse, player.getPosition(), 1.0f, 1.0f);
+    }
+    return OutputSlot::Crafted{o.result, [ref, left, right, name, nameDef, paid](Player& p) {
+                                   ref.setStack(kLeft, left);
+                                   ref.setStack(kRight, right);
+                                   ref.setText(kName, name);
+                                   ref.setText(kNameDefault, nameDef);
+                                   if (paid > 0) p.addLevels(paid);
+                               }};
+}
+
+std::shared_ptr<InputSlot> leftSlot(StationRef const& ref) {
+    return std::make_shared<InputSlot>(ref, kLeft, [ref](Player&) { syncNameWithLeft(ref); });
+}
+
+std::shared_ptr<InputSlot> rightSlot(StationRef const& ref) { return std::make_shared<InputSlot>(ref, kRight); }
+
+std::shared_ptr<OutputSlot> resultSlot(StationRef const& ref, std::optional<PendingUndo>& pending) {
+    return std::make_shared<OutputSlot>(
+        ref,
+        pending,
+        [ref](Player& p) -> ItemStack {
+            auto o = stationOutcome(p, ref);
+            return o.hasResult() && !o.tooExpensive ? o.result : ItemStack{};
+        },
+        [ref](Player& p) { return craft(p, ref); }
+    );
+}
+
+// ---- chest menu ---------------------------------------------------------------------------------
 
 AnvilMenu::AnvilMenu(std::string title, StationRef ref) : StationMenu(std::move(title), std::move(ref)) {}
-
-std::optional<std::string> AnvilMenu::pendingName(StationRef const& ref) { return ref.text(kName); }
-
-void AnvilMenu::setPendingName(StationRef const& ref, std::optional<std::string> const& name) { ref.setText(kName, name); }
 
 AnvilOutcome const& AnvilMenu::outcome(Player& player) {
     auto rev      = ref().ctx().backpack().revision();
     bool creative = player.isCreative();
     if (!mCache || mCacheRevision != rev || mCacheCreative != creative) {
-        mCache         = compute(ref().stack(kLeft), ref().stack(kRight), pendingName(ref()), creative);
+        mCache         = stationOutcome(player, ref());
         mCacheRevision = rev;
         mCacheCreative = creative;
     }
     return *mCache;
 }
 
-std::optional<OutputSlot::Crafted> AnvilMenu::craft(Player& player) {
-    auto o = outcome(player); // copy: consuming the inputs invalidates the cache
-    if (!o.hasResult()) return std::nullopt;
-    if (!canAfford(player, o)) {
-        player.sendMessage(
-            o.tooExpensive ? trFor(player, "abp.anvil.too_expensive", "§cToo Expensive!")
-                           : trFor(player, "abp.anvil.not_enough_levels", "§cYou need {} levels.", o.cost)
-        );
-        return std::nullopt;
-    }
-    auto const& r     = ref();
-    auto        left  = r.stack(kLeft);
-    auto        right = r.stack(kRight);
-    auto        name  = pendingName(r);
-    int         paid  = player.isCreative() ? 0 : o.cost;
-    r.setItem(kLeft, {});
-    r.consume(kRight, o.rightUsed);
-    setPendingName(r, std::nullopt);
-    if (paid > 0) player.addLevels(-paid);
-    // The upgrade's anvil never takes damage (unlike the block).
-    if (auto level = ll::service::getLevel()) {
-        level->playSound(SharedTypes::Legacy::LevelSoundEvent::AnvilUse, player.getPosition(), 1.0f, 1.0f);
-    }
-    return OutputSlot::Crafted{o.result, [r, left, right, name, paid](Player& p) {
-                                   r.setStack(kLeft, left);
-                                   r.setStack(kRight, right);
-                                   setPendingName(r, name);
-                                   if (paid > 0) p.addLevels(paid);
-                               }};
-}
-
 void AnvilMenu::buildStation(Player& player) {
-    auto clearName = [r = ref()](Player&) { setPendingName(r, std::nullopt); };
-    setSlot(kLeftSlot, std::make_shared<InputSlot>(ref(), kLeft, clearName));
+    setSlot(kLeftSlot, leftSlot(ref()));
     setSlot(3, filler("+"));
-    setSlot(kRightSlot, std::make_shared<InputSlot>(ref(), kRight));
+    setSlot(kRightSlot, rightSlot(ref()));
 
     auto cost       = std::make_shared<ui::CallbackSlot>();
     cost->onDisplay = [this](Player& p) -> ItemStack {
         auto const& o = outcome(p);
         if (o.hasResult() && o.tooExpensive) {
-            return ui::icon("minecraft:barrier", trFor(p, "abp.anvil.too_expensive", "§cToo Expensive!"));
+            return ui::icon("minecraft:barrier", trFor(p, "abp.anvil.too_expensive", "Too Expensive!"));
         }
-        if (!o.hasResult()) return ui::icon("minecraft:gray_stained_glass_pane", trFor(p, "abp.anvil.no_result", "§7Anvil"));
-        bool ok = canAfford(p, o);
+        if (!o.hasResult()) return ui::icon("minecraft:gray_stained_glass_pane", " ");
         return ui::icon(
             "minecraft:experience_bottle",
-            ok ? trFor(p, "abp.anvil.cost_ok", "§aCost: {} levels", o.cost)
-               : trFor(p, "abp.anvil.cost_missing", "§cCost: {} levels", o.cost),
-            {trFor(p, "abp.anvil.your_level", "§7Your level: {}", playerLevel(p))},
+            trFor(p, "abp.anvil.cost", "Enchantment Cost: {}", o.cost),
+            {},
             std::clamp(o.cost, 1, 64)
         );
     };
     cost->onClick = [](ui::ClickContext const&) { return true; };
     setSlot(kCostSlot, cost);
-
-    setSlot(
-        kResultSlot,
-        std::make_shared<OutputSlot>(
-            *this,
-            [this](Player& p) -> ItemStack {
-                auto const& o = outcome(p);
-                if (!o.hasResult() || o.tooExpensive) return {};
-                ItemStack shown = o.result;
-                auto      lore  = shown.getCustomLore();
-                lore.push_back(
-                    canAfford(p, o) ? trFor(p, "abp.anvil.cost_ok", "§aCost: {} levels", o.cost)
-                                    : trFor(p, "abp.anvil.cost_missing", "§cCost: {} levels", o.cost)
-                );
-                shown.setCustomLore(lore);
-                return shown;
-            },
-            [this](Player& p) { return craft(p); }
-        )
-    );
-
-    mBuiltName = pendingName(ref());
-    std::vector<std::string> lore{trFor(player, "abp.anvil.rename_hint", "§7Click to type a new name")};
-    if (mBuiltName) lore.push_back(trFor(player, "abp.anvil.rename_current", "§7New name: §f{}", *mBuiltName));
-    setSlot(
-        kRenameSlot,
-        std::make_shared<ui::ButtonSlot>(
-            ui::icon("minecraft:name_tag", trFor(player, "abp.anvil.rename", "Rename"), lore),
-            [r = ref()](ui::ClickContext const& c) { AnvilMenu::openRenameForm(c.player, r); }
-        )
-    );
-    setSlot(
-        13,
-        std::make_shared<ui::StaticSlot>(ui::icon(
-            "minecraft:anvil",
-            trFor(player, "abp.anvil.help_title", "Anvil"),
-            {trFor(player, "abp.anvil.help1", "§7Left: item to repair, enchant or rename"),
-             trFor(player, "abp.anvil.help2", "§7Right: material, same item or enchanted book"),
-             trFor(player, "abp.anvil.help3", "§7This anvil never breaks")}
-        ))
-    );
-}
-
-void AnvilMenu::onTick(Player& player) {
-    StationMenu::onTick(player);
-    if (pendingName(ref()) != mBuiltName) invalidate(); // refresh the rename button
+    setSlot(kResultSlot, resultSlot(ref(), pendingUndo));
+    (void)player;
 }
 
 int AnvilMenu::quickMoveStation(Player& player, ItemStack const& stack) {
     auto left = ref().stack(kLeft);
     if (left.isNull()) {
         if (!isAnvilSubject(stack)) return 0;
-        InputSlot slot(ref(), kLeft, [r = ref()](Player&) { setPendingName(r, std::nullopt); });
-        return slot.accept(player, stack);
+        return leftSlot(ref())->accept(player, stack);
     }
     // Only what the anvil can use with the left item (material, same item, book).
     if (!compute(left, stack, std::nullopt, true).hasResult()) return 0;
-    InputSlot slot(ref(), kRight);
-    return slot.accept(player, stack);
-}
-
-void AnvilMenu::openRenameForm(Player& player, StationRef ref) {
-    if (ref.stack(kLeft).isNull()) {
-        player.sendMessage(trFor(player, "abp.anvil.rename_empty", "§cPut an item into the left slot first."));
-        return;
-    }
-    ui::MenuManager::get().closeThen(player, [ref](Player& p) {
-        auto left = ref.stack(kLeft);
-        if (left.isNull()) {
-            if (ref.valid()) open(p, ref.ctx());
-            return;
-        }
-        auto current = left.getCustomName();
-        ll::form::CustomForm form(trFor(p, "abp.anvil.rename_title", "Rename item"));
-        form.appendInput(
-            "name",
-            trFor(p, "abp.anvil.rename_label", "New name (leave empty to remove a custom name)"),
-            current.empty() ? left.getName() : current,
-            pendingName(ref).value_or(current)
-        );
-        form.sendTo(p, [ref](Player& pl, ll::form::CustomFormResult const& result, ll::form::FormCancelReason) {
-            if (result && ref.valid() && !ref.stack(kLeft).isNull()) {
-                auto it = result->find("name");
-                if (it != result->end()) {
-                    if (auto const* text = std::get_if<std::string>(&it->second)) {
-                        setPendingName(ref, math::truncateUtf8(*text, kMaxNameLength));
-                    }
-                }
-            }
-            openLater(pl, [ref](Player& p) {
-                if (ref.valid()) open(p, ref.ctx());
-            });
-        });
-    });
+    return rightSlot(ref())->accept(player, stack);
 }
 
 bool AnvilMenu::open(Player& player, UpgradeContext const& ctx) {

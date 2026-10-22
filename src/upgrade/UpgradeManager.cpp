@@ -209,10 +209,12 @@ bool canInstall(
     }
     auto const& info  = type->info();
     int         count = 0;
-    for (auto const& s : slots) {
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        auto const& s = slots[i];
         if (s.empty()) continue;
         auto* other = upgradeFor(s.item);
         if (!other) continue;
+        if (!other->allowsInstallOf(UpgradeContext(backpack, static_cast<int>(i), player), *type, why)) return false;
         if (other->info().groupOrId() == info.groupOrId()) ++count;
         bool conflict = std::any_of(info.conflicts.begin(), info.conflicts.end(), [&](std::string const& c) {
             return sameGroupOrId(*other, c);

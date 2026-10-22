@@ -117,6 +117,19 @@ void requestClose(); // host: close the screen now (and tell the server)
 
 bool isFillerItem(core::ItemStackData const& d) { return d.id == cs::kFillerId; }
 
+/// SC Infinity upgrades: an installed upgrade whose tab data says "infinite" makes every non-empty
+/// storage slot infinite; the slot count shows "∞" (InfinityInventoryPart.isInfinite).
+bool infiniteStorage(cs::BackpackScreenModel const& m) {
+    return std::any_of(m.upgrades.begin(), m.upgrades.end(), [](cs::UpgradeView const& u) {
+        return u.tab.is_object() && u.tab.value("infinite", false);
+    });
+}
+
+void drawInfinite(Painter& p, float x, float y) {
+    static std::string const kInfinity = "\xE2\x88\x9E"; // U+221E
+    p.text(kInfinity, x + 19 - 2 - p.textWidth(kInfinity), y + 6 + 3, Color::rgb(0xFFFFFF), true);
+}
+
 class BackpackScreenLayer final : public IUiLayer {
 public:
     // ---- host ---------------------------------------------------------------------------------
@@ -593,6 +606,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     }
 
     // Storage slots.
+    bool infinite = infiniteStorage(m);
     for (auto const& ps : mPlaced) {
         float x = L + static_cast<float>(ps.pos.x), y = T + static_cast<float>(ps.pos.y);
         auto  i = static_cast<std::size_t>(ps.index);
@@ -606,7 +620,8 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         } else {
             p.item(mSlotStacks[i], x, y);
             render::decorateItemIcon(p, mSlotStacks[i], x, y);
-            drawCount(p, d.count, x, y);
+            if (infinite) drawInfinite(p, x, y);
+            else drawCount(p, d.count, x, y);
         }
         if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index) highlight(x, y);
         else if (mDistSlots.size() > 1 && std::find(mDistSlots.begin(), mDistSlots.end(), SlotRef{SlotRef::Area::Storage, ps.index}) != mDistSlots.end()) highlight(x, y);
@@ -742,7 +757,7 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
     if (mHover.area == SlotRef::Area::Storage) {
         auto const& d   = m.slots[static_cast<std::size_t>(mHover.index)];
         int         lim = m.slotLimits[static_cast<std::size_t>(mHover.index)];
-        if (lim > 0 && lim != d.maxStack) {
+        if (lim > 0 && lim != d.maxStack && !infiniteStorage(m)) {
             extra.push_back(
                 {ctr("abp.companion.tooltip.stack_count", "§7Count: {}", "§3" + cs::groupedCount(d.count) + "§7 / §3" + cs::groupedCount(lim)), 0xAAAAAA}
             );

@@ -121,6 +121,11 @@ public:
     // ---- lifecycle --------------------------------------------------------------------------
     /// Extra install checks (slot limits and conflicts are already checked by the manager).
     virtual bool canInstall(UpgradeContext const& /*ctx*/, std::string& /*reason*/) const { return true; }
+    /// This installed upgrade (`self`) vetoes installing `other` into the same backpack, e.g. the
+    /// Infinity upgrade allows no other upgrade. Checked by the manager for every installed upgrade.
+    virtual bool allowsInstallOf(UpgradeContext const& /*self*/, IUpgrade const& /*other*/, std::string& /*reason*/) const {
+        return true;
+    }
     virtual void onInstall(UpgradeContext const& /*ctx*/) {}
     /// E.g. a Stack upgrade refuses removal while slots hold more than the base limit.
     virtual bool canRemove(UpgradeContext const& /*ctx*/, std::string& /*reason*/) const { return true; }
