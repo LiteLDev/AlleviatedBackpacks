@@ -139,6 +139,6 @@ core::render::BackpackModel buildModel(game::Backpack& backpack) {
 
 } // namespace abp::model
 
-ABP_REGISTER_RENDER_INFO([](abp::game::Backpack& backpack, abp::core::screen::RenderInfo& info) {
-    info.extra["model"] = abp::model::buildModel(backpack).toJson();
+ABP_REGISTER_RENDER_INFO([](abp::game::Backpack& backpack, nlohmann::json& extra) {
+    extra["model"] = abp::model::buildModel(backpack).toJson();
 });

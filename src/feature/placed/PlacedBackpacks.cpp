@@ -706,15 +706,19 @@ bool PlacedBackpacks::useFluidContainer(Player& player, BlockPos const& pos) {
     if (upgrade::tank::tanks(bp).empty()) return false;
     // SB BackpackBlock.useItemOn: empty the container into the tanks, else fill it from them.
     std::optional<core::ItemStackData> result;
-    if (isFull) result = upgrade::tank::emptyContainer(data.withCount(1), upgrade::tank::fillerOf(bp));
-    if (!result && isEmpty) {
-        auto fluids = upgrade::tank::fluids(bp);
-        for (auto const& fluid : fluids) {
-            result = upgrade::tank::fillContainer(data.withCount(1), fluid, upgrade::tank::drainerOf(bp));
-            if (result) break;
+    auto tanks = upgrade::tank::tanks(bp);
+    if (isFull) {
+        for (auto const& t : tanks) {
+            if ((result = upgrade::tank::emptyContainer(data.withCount(1), upgrade::tank::fillerOf(t)))) break;
         }
     }
-    if (result) {
+    if (!result && isEmpty) {
+        for (auto const& t : tanks) {
+            auto fluid = upgrade::tank::read(t).fluid();
+            if (fluid.empty()) continue;
+            if ((result = upgrade::tank::fillContainer(data.withCount(1), fluid, upgrade::tank::drainerOf(t)))) break;
+        }
+    }    if (result) {
         auto  out  = game::ItemConv::toStack(*result, 1);
         auto& inv  = player.getInventory();
         int   slot = player.getSelectedItemSlot();

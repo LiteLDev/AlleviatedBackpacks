@@ -33,13 +33,23 @@ struct BackpackData {
     std::uint32_t            accentColor = 0xFF622E1A; ///< ARGB
     BackpackInventory        inventory;
     std::vector<UpgradeSlot> upgrades;
+    /// Storage columns taken by upgrade inventory parts (SB `getInventoryColumnsTaken`: 2 per Tank
+    /// and Battery upgrade). The inventory then has `capacity::slotsAfterColumns(base, columnsTaken)`
+    /// slots, where `base` is the tier's layout (see `baseStorageSlots`).
+    int                      columnsTaken = 0;
     nlohmann::json           settings = nlohmann::json::object();
 
     /// A fresh backpack of `tier` with the tier's slot counts.
     [[nodiscard]] static BackpackData create(std::string uuid, Tier tier);
 
-    /// Changes tier, growing (never shrinking) storage and upgrade slots.
+    /// Changes tier, growing (never shrinking) storage and upgrade slots. Storage grows to the tier's
+    /// slots minus the rows x `columnsTaken` taken by upgrade inventory parts.
     void setTier(Tier t);
+
+    /// Storage slots of the layout before upgrade inventory parts took columns (SB
+    /// `getNumberOfInventorySlots`): the inventory size plus the taken columns' slots. SB sizes
+    /// tanks and batteries ("slot rows") from this.
+    [[nodiscard]] int baseStorageSlots() const;
 
     [[nodiscard]] nlohmann::json toJson() const;
     /// Returns nullopt for unreadable data (wrong type, newer version, bad tier).
