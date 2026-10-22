@@ -19,4 +19,8 @@ namespace abp::client::ui {
 /// True while the native backpack screen is drawn this frame (client thread).
 [[nodiscard]] bool nativeScreenActive();
 
+/// Open Backpack pressed while the native screen is shown (a binding the screen layer didn't
+/// receive itself, e.g. a mouse side button): nested backpack / back / close (P2-14, additive).
+void nativeScreenOpenBackpackKey();
+
 } // namespace abp::client::ui

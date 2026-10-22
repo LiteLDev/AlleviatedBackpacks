@@ -4,10 +4,14 @@
 #include <chrono>
 #include <unordered_map>
 
+#include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/player/Player.h"
+#include "mc/world/item/ItemStack.h"
 
+#include "api/Service.h"
 #include "core/screen/CountFormat.h"
 #include "core/screen/ScreenModel.h"
+#include "feature/stash/Stash.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/PlayerScan.h"
@@ -62,6 +66,12 @@ bool canSee(Player& player, std::string const& uuid) {
     for (auto const& [carried, bp] : game::carriedBackpacks(player, false, true)) {
         if (carried.uuid && *carried.uuid == uuid) return true;
     }
+    // Right-click stashing shows the contents of the backpack on the cursor and of backpacks in the
+    // open vanilla container too.
+    if (auto const& cursor = player.mPlayerUIContainer->getItem(0); !cursor.isNull() && game::isBackpack(cursor) && game::backpackUuid(cursor) == uuid) {
+        return true;
+    }
+    if (feature::stash::inOpenContainer(player, uuid)) return true;
     auto menu = ui::MenuManager::get().current(player);
     auto* bm  = menu ? dynamic_cast<ui::BackpackMenu*>(menu.get()) : nullptr;
     if (!bm) return false;
@@ -89,29 +99,34 @@ core::screen::ContentsModel buildContents(Player& player, std::shared_ptr<game::
     if (!backpack) return m;
     m.uuid  = backpack->uuid();
     m.known = true;
+    // SC ClientStorageContentsTooltipBase: the stack multiplier (green, value white), every tank
+    // (blue, amount white), the energy (red, amount white). Arguments carry their own colour and
+    // switch back to the line's colour after themselves (styled Component arguments).
     double mult = upgrade::stack::totalMultiplier(*backpack);
     if (mult > 1) {
-        m.lines.push_back(trFor(
-            player,
-            "abp.companion.tooltip.stack_multiplier",
-            "§aStack multiplier: §f×{}",
-            core::screen::formatMultiplier(mult)
-        ));
+        m.lines.push_back(
+            "§a"
+            + trFor(player, "abp.input.tooltip.stack_multiplier", "Stack Size Multiplier: {}", "§f" + core::screen::formatMultiplier(mult) + "§a")
+        );
     }
     for (auto const& ctx : upgrade::tank::tanks(backpack)) {
         auto tank = upgrade::tank::read(ctx);
         if (tank.empty()) {
-            m.lines.push_back("§9" + trFor(player, "abp.companion.tooltip.fluid_empty", "Empty tank"));
+            m.lines.push_back("§9" + trFor(player, "abp.input.tooltip.fluid_empty", "Empty tank"));
         } else {
-            m.lines.push_back(trFor(
-                player,
-                "abp.companion.tooltip.fluid",
-                "§f{} mB §9{}",
-                core::screen::abbreviateCount(tank.amount()),
-                upgrade::tank::fluidName(&player, tank.fluid())
-            ));
+            m.lines.push_back(
+                "§9"
+                + trFor(
+                    player,
+                    "abp.input.tooltip.fluid",
+                    "{} mB {}",
+                    "§f" + core::screen::abbreviateCount(tank.amount()) + "§9",
+                    "§9" + upgrade::tank::fluidName(&player, tank.fluid()) + "§9"
+                )
+            );
         }
     }
+    // Energy ("§c§f<n>§c FE"): the Battery upgrade adds it through ABP_REGISTER_CONTENTS_LINES.
     for (auto const& provider : ContentsLineRegistry::entries()) {
         if (provider) provider(player, *backpack, m.lines);
     }

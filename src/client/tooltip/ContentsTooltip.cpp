@@ -3,7 +3,9 @@
 #include "client/tooltip/ContentsTooltip.h"
 
 #include <algorithm>
+#include <atomic>
 #include <optional>
+#include <unordered_set>
 
 #include "ll/api/memory/Hook.h"
 
@@ -13,15 +15,18 @@
 #include "mc/client/player/LocalPlayer.h"
 #include "mc/client/renderer/screen/MinecraftUIRenderContext.h"
 #include "mc/locale/I18n.h"
+#include "mc/locale/Localization.h"
 #include "mc/safety/RedactableString.h"
 #include "mc/world/PlayerUIContainer.h"
 #include "mc/world/item/Item.h"
-#include "mc/world/item/components/ComponentItem.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/world/item/components/ComponentItem.h"
 #include "mc/world/level/Level.h"
 
 #include "client/Client.h"
 #include "client/input/InputRouter.h"
+#include "client/input/Keys.h"
+#include "client/input/Stash.h"
 #include "client/net/ClientNet.h"
 #include "client/render/RenderHooks.h"
 #include "client/ui/UiRoot.h"
@@ -36,24 +41,41 @@
 namespace abp::client::tooltip {
 
 namespace {
+// SC ClientStorageContentsTooltipBase constants.
 constexpr int   kMaxStacksOnLine = 9;
 constexpr float kStackWidth      = 18;
 constexpr float kCountPadding    = 2;
+// SB ClientLinkedStorageTooltip / ClientBackpackContentsTooltip.
+constexpr std::uint32_t kRoleTextColor   = 0xAE8BC7;
+constexpr float         kRoleHeight      = 16;
+constexpr float         kRoleHeaderHeight = 18;
+
+constexpr char const* kYellow = "\xC2\xA7" "e";
+constexpr char const* kGray   = "\xC2\xA7" "7";
+constexpr char const* kAqua   = "\xC2\xA7" "b";
+constexpr char const* kDarkGray = "\xC2\xA7" "8";
+
+LinkedEndpointProvider gLinkedProvider;
 
 /// Item stacks built from the last contents received for one backpack.
 struct Built {
-    std::string            uuid;
-    double                 receivedAt = -1;
-    bool                   known      = false;
+    std::string              uuid;
+    double                   receivedAt = -1;
+    bool                     known      = false;
     std::vector<std::string> lines;
-    std::vector<ItemStack> upgrades;
-    std::vector<bool>      toggleable, enabled;
-    std::vector<ItemStack> items;
-    std::vector<long long> counts;
+    std::vector<ItemStack>   upgrades;
+    std::vector<bool>        toggleable, enabled;
+    std::vector<ItemStack>   items;
+    std::vector<long long>   counts;
 };
 Built gBuilt; // client thread
 
 Built const& build(std::string const& uuid) {
+    if (uuid.empty()) {
+        // SC: a storage without contents uuid has nothing to request (only the "empty" line).
+        static Built const none;
+        return none;
+    }
     auto const* cached = net::contents(uuid);
     double      at     = cached ? cached->receivedAt : 0;
     if (gBuilt.uuid == uuid && gBuilt.receivedAt == at) return gBuilt;
@@ -82,44 +104,62 @@ bool cursorHasItem() {
     return !player->mPlayerUIContainer->getItem(0).isNull();
 }
 
-std::string yellow(std::string s) { return "§e" + s; }
+std::optional<LinkedEndpoint> linkedOf(ItemStack const& stack) {
+    if (!gLinkedProvider) return std::nullopt;
+    try {
+        return gLinkedProvider(stack);
+    } catch (std::exception const& e) {
+        log().error("linked storage tooltip provider failed: {}", e.what());
+        return std::nullopt;
+    }
+}
 
-/// SC's contents image: lines, "Upgrades" + pips/icons, "Inventory" + compacted grid.
-ui::TooltipImage contentsImage(ui::Painter& p, Built const& b) {
+/// SB ClientLinkedStorageTooltip.renderRole: icon at x - 2, description at (x + 16, y + 4).
+void drawRole(ui::Painter& p, LinkedEndpoint const& role, float x, float y) {
+    if (role.drawIcon) role.drawIcon(p, x - 2, y);
+    p.text(role.description, x + 16, y + 4, ui::Color::rgb(kRoleTextColor), false);
+}
+
+/// SC's contents image (+ SB's role header for linked endpoints).
+ui::TooltipImage contentsImage(ui::Painter& p, Built const& b, std::optional<LinkedEndpoint> const& role) {
     std::vector<std::string> lines = b.lines;
-    bool empty = b.upgrades.empty() && b.items.empty();
-    if (empty) lines.push_back(yellow(ctr("abp.companion.tooltip.empty", "No upgrades or items inside")));
+    if (b.upgrades.empty() && b.items.empty()) {
+        lines.push_back(kYellow + ctr("abp.input.tooltip.empty", "No Upgrades or Inventory Contents"));
+    }
+    auto countWidth = [&p](long long n) { return p.textWidth(core::screen::abbreviateCount(n)) + kCountPadding; };
 
+    // calculateWidth: max(upgrades, contents (first row), lines); the section titles don't count.
     float upgradesWidth = 0;
     for (std::size_t i = 0; i < b.upgrades.size(); ++i) upgradesWidth += (b.toggleable[i] ? 4 : 0) + kStackWidth;
-    auto countWidth = [&](long long n) { return p.textWidth(core::screen::abbreviateCount(n)) + kCountPadding; };
     float contentsWidth = 0;
-    for (std::size_t i = 0; i < b.items.size() && i < kMaxStacksOnLine; ++i) contentsWidth += std::max(countWidth(b.counts[i]), kStackWidth);
+    for (std::size_t i = 0; i < b.items.size() && i < kMaxStacksOnLine; ++i) {
+        contentsWidth += std::max(countWidth(b.counts[i]), kStackWidth);
+    }
     float linesWidth = 0;
     for (auto const& l : lines) linesWidth = std::max(linesWidth, p.textWidth(l));
-    float upgradesTitle  = b.upgrades.empty() ? 0 : p.textWidth(ctr("abp.companion.tooltip.upgrades", "Upgrades"));
-    float inventoryTitle = b.items.empty() ? 0 : p.textWidth(ctr("abp.companion.tooltip.inventory", "Inventory"));
-
-    ui::TooltipImage img;
-    img.width  = std::max({upgradesWidth, contentsWidth, linesWidth, upgradesTitle, inventoryTitle});
+    // calculateHeight.
     float upgradesHeight  = b.upgrades.empty() ? 0 : 32;
     float inventoryHeight = b.items.empty() ? 0 : 12 + static_cast<float>(1 + (static_cast<int>(b.items.size()) - 1) / kMaxStacksOnLine) * 20;
     float total           = upgradesHeight + inventoryHeight + static_cast<float>(lines.size()) * 10;
-    img.height            = total > 0 ? total : 12;
 
-    img.draw = [&b, lines, countWidth](ui::Painter& painter, float left, float top) {
-        float y = top;
+    float roleH = role ? kRoleHeaderHeight : 0;
+    ui::TooltipImage img;
+    img.width  = std::max({upgradesWidth, contentsWidth, linesWidth, role ? 16 + p.textWidth(role->description) : 0.f});
+    img.height = (total > 0 ? total : 12) + roleH;
+    img.draw   = [&b, lines, countWidth, role, roleH](ui::Painter& painter, float left, float top) {
+        if (role) drawRole(painter, *role, left, top);
+        float y = top + roleH;
         for (auto const& l : lines) {
             painter.text(l, left, y, ui::Color::rgb(0xFFFFFF), true);
             y += 10;
         }
         if (!b.upgrades.empty()) {
-            painter.text(yellow(ctr("abp.companion.tooltip.upgrades", "Upgrades")), left, y, ui::Color::rgb(0xFFFFFF), true);
+            painter.text(kYellow + ctr("abp.input.tooltip.upgrades", "Upgrades"), left, y, ui::Color::rgb(0xFFFFFF), true);
             y += 10;
             float x = left;
             for (std::size_t i = 0; i < b.upgrades.size(); ++i) {
                 if (b.toggleable[i]) {
-                    ui::sb::switchPip(painter, x, y + 3, b.enabled[i]);
+                    ui::sb::switchPip(painter, x, y + 3, b.enabled[i]); // UPGRADE_ON / UPGRADE_OFF, 4x10
                     x += 4;
                 }
                 painter.item(b.upgrades[i], x, y);
@@ -128,7 +168,7 @@ ui::TooltipImage contentsImage(ui::Painter& p, Built const& b) {
             y += 20;
         }
         if (!b.items.empty()) {
-            painter.text(yellow(ctr("abp.companion.tooltip.inventory", "Inventory")), left, y, ui::Color::rgb(0xFFFFFF), true);
+            painter.text(kYellow + ctr("abp.input.tooltip.inventory", "Inventory"), left, y, ui::Color::rgb(0xFFFFFF), true);
             y += 10;
             float x = left;
             for (std::size_t i = 0; i < b.items.size(); ++i) {
@@ -138,44 +178,82 @@ ui::TooltipImage contentsImage(ui::Painter& p, Built const& b) {
                 float xOffset = w - kStackWidth;
                 painter.item(b.items[i], x + xOffset, rowY);
                 render::decorateItemIcon(painter, b.items[i], x + xOffset, rowY);
+                // renderItemDecorations with the abbreviated count as text (always drawn).
                 auto text = core::screen::abbreviateCount(b.counts[i]);
-                // renderItemDecorations: count right-aligned at the icon's bottom-right corner.
-                painter.text(text, x + xOffset + 17 - painter.textWidth(text), rowY + 9, ui::Color::rgb(0xFFFFFF), true);
+                painter.text(text, x + xOffset + 19 - 2 - painter.textWidth(text), rowY + 6 + 3, ui::Color::rgb(0xFFFFFF), true);
                 x += w;
             }
         }
     };
     return img;
 }
+
+/// Role header only (SB getTooltipImage for a linked endpoint without Shift).
+ui::TooltipImage roleImage(ui::Painter& p, LinkedEndpoint const& role) {
+    ui::TooltipImage img;
+    img.width  = 16 + p.textWidth(role.description);
+    img.height = kRoleHeight;
+    img.draw   = [role](ui::Painter& painter, float left, float top) { drawRole(painter, role, left, top); };
+    return img;
+}
+
+std::string contentsUuidOf(ItemStack const& stack, std::optional<LinkedEndpoint> const& role) {
+    if (role && !role->contentsUuid.empty()) return role->contentsUuid;
+    return game::backpackUuid(stack).value_or(std::string{});
+}
 } // namespace
 
 bool contentsWanted() { return input::shiftDown() || cursorHasItem(); }
 
+namespace {
+std::atomic<bool> gAdvanced{false};
+}
+bool advancedTooltips() { return gAdvanced.load(); }
+void setAdvancedTooltips(bool on) {
+    gAdvanced = on;
+    log().info("tooltip: advanced tooltips {}", on ? "on" : "off");
+}
+
 std::string pressForContentsLine() {
-    return ctr(
-        "abp.companion.tooltip.press_for_contents",
-        "§7Hold {}§7 to show the contents",
-        "§b" + ctr("abp.companion.tooltip.shift", "Left Shift")
-    );
+    // translatable(press_for_contents, translatable(shift).withStyle(AQUA)).withStyle(GRAY)
+    return kGray
+         + ctr("abp.input.tooltip.press_for_contents",
+               "Press <{}> to View Contents",
+               kAqua + ctr("abp.input.tooltip.shift", "Left Shift") + kGray);
 }
 
 bool drawBackpackTooltip(ui::Painter& p, ItemStack const& stack, float x, float y, std::vector<ui::TooltipLine> extra) {
     if (stack.isNull() || !game::isBackpack(stack)) return false;
     auto lines = ui::itemTooltipLines(stack);
     lines.insert(lines.end(), extra.begin(), extra.end());
+    auto role = linkedOf(stack);
+    if (role && !input::shiftDown() && !cursorHasItem()) {
+        auto img = roleImage(p, *role);
+        ui::drawTooltip(p, lines, x, y, &img);
+        return true;
+    }
     if (!contentsWanted()) {
         ui::drawTooltip(p, lines, x, y);
         return true;
     }
-    auto  uuid  = game::backpackUuid(stack).value_or(std::string{});
-    auto& built = uuid.empty() ? (gBuilt = Built{}, gBuilt) : build(uuid);
-    (void)net::renderInfo(uuid);
-    auto img = contentsImage(p, built);
+    auto const& built = build(contentsUuidOf(stack, role));
+    (void)net::renderInfo(game::backpackUuid(stack).value_or(std::string{}));
+    auto img = contentsImage(p, built, role);
     ui::drawTooltip(p, lines, x, y, &img);
     return true;
 }
 
-// ---- hooks ----------------------------------------------------------------------------------------------
+void drawRightClickToAdd(ui::Painter& p, ItemStack const& backpack, float x, float y) {
+    if (backpack.isNull()) return;
+    auto        role  = linkedOf(backpack);
+    auto const& built = build(contentsUuidOf(backpack, role));
+    auto        img   = contentsImage(p, built, role);
+    ui::drawTooltip(p, {{ctr("abp.input.tooltip.right_click_to_add_to_storage", "Right Click To Add"), 0xFFFFFF}}, x, y, &img);
+}
+
+void setLinkedEndpointProvider(LinkedEndpointProvider provider) { gLinkedProvider = std::move(provider); }
+
+// ---- hover text --------------------------------------------------------------------------------------------
 
 namespace {
 std::string withoutFormatting(std::string_view s) { return core::screen::stripFormatCodes(s); }
@@ -202,20 +280,90 @@ void stripDyedLine(std::string& s) {
     s = std::move(out);
 }
 
-void appendPressLine(::ItemStackBase const& stack, ::Level& level, ::Bedrock::Safety::RedactableString& hovertext) {
-    if (!level.isClientSide() || !game::backpackTierOf(stack.getTypeName())) return;
-    stripDyedLine(hovertext.mUnredactedString);
-    if (!net::serverReady() || input::shiftDown()) return;
-    auto  line = pressForContentsLine();
-    auto& s    = hovertext.mUnredactedString;
-    if (s.find(line) != std::string::npos) return; // both hooks ran (ComponentItem calls Item)
+void appendLine(std::string& s, std::string const& line) {
     if (!s.empty() && s.back() != '\n') s += '\n';
     s += line;
 }
+
+/// The game's own translation of `key` (resource pack lang), nullopt if there is none.
+std::optional<std::string> packText(std::string const& key) {
+    try {
+        std::shared_ptr<::Localization const> loc = getI18n().getCurrentLanguage();
+        auto text = getI18n().get(key, std::vector<std::string>{}, loc);
+        if (text.empty() || text == key) return std::nullopt;
+        return text;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+/// SC UpgradeItemBase: `<descriptionId>.tooltip`, split into lines (`\n`), dark gray.
+void appendUpgradeLines(::ItemStackBase const& stack, std::string& s) {
+    auto const* item = stack.mItem.get();
+    if (!item) return;
+    auto const& id = stack.getTypeName();
+    if (!id.starts_with("alleviatedbackpacks:") || game::backpackTierOf(id)) return;
+    // Bedrock's description id already ends in ".name" (the lang key of the name).
+    auto key = item->getDescriptionId();
+    if (key.ends_with(".name")) key.resize(key.size() - 5);
+    key += ".tooltip";
+    auto text = packText(key);
+    static std::unordered_set<std::string> logged;
+    if (logged.size() < 64 && logged.insert(id).second) log().info("tooltip: {} -> {} ({})", id, key, text ? "found" : "missing");
+    if (!text) return;
+    // The game turns ~LINEBREAK~ into a line break; keep it working if it does not.
+    for (auto at = text->find("~LINEBREAK~"); at != std::string::npos; at = text->find("~LINEBREAK~")) text->replace(at, 11, "\n");
+    // SB ToolSwapperUpgradeItem: the advanced tooltip names the Tool Swap key.
+    if (auto at = text->find("%s"); at != std::string::npos) text->replace(at, 2, input::keyDisplayName(input::KeyAction::ToolSwap));
+    std::vector<std::string> lines;
+    std::size_t              start = 0;
+    while (start <= text->size()) {
+        auto nl  = text->find('\n', start);
+        auto esc = text->find("\\n", start);
+        auto end = std::min(nl, esc);
+        lines.push_back(text->substr(start, end == std::string::npos ? std::string::npos : end - start));
+        if (end == std::string::npos) break;
+        start = end + (end == esc ? 2 : 1);
+    }
+    if (lines.empty() || s.find(kDarkGray + lines.front()) != std::string::npos) return; // both hooks ran
+    for (auto const& l : lines) appendLine(s, kDarkGray + l);
+}
+
+void appendBackpackLines(::ItemStackBase const& stack, bool advanced, std::string& s) {
+    if (!game::backpackTierOf(stack.getTypeName())) return;
+    std::vector<std::string> lines;
+    if (advanced) {
+        ItemStack copy;
+        static_cast<ItemStackBase&>(copy) = stack;
+        if (auto role = linkedOf(copy)) {
+            lines.push_back(kDarkGray + ctr("abp.input.tooltip.linked_storage_group", "Linked Storage Group: {}", role->groupId));
+            lines.push_back(kDarkGray + ctr("abp.input.tooltip.linked_storage_endpoint", "Linked Storage Endpoint: {}", role->endpointId));
+        } else if (auto uuid = game::backpackUuid(copy)) {
+            lines.push_back(kDarkGray + ctr("abp.input.tooltip.uuid", "UUID: {}", *uuid));
+        }
+    }
+    if (!input::shiftDown()) lines.push_back(pressForContentsLine());
+    // Both hooks run for data-driven items (ComponentItem calls Item): add the lines once.
+    if (lines.empty() || s.find(lines.front()) != std::string::npos) return;
+    for (auto const& l : lines) appendLine(s, l);
+}
+
+void appendLines(::ItemStackBase const& stack, ::Level& level, ::Bedrock::Safety::RedactableString& hovertext, bool advanced) {
+    if (!level.isClientSide() || !net::serverReady() || stack.isNull()) return;
+    auto& s = hovertext.mUnredactedString;
+    appendUpgradeLines(stack, s);
+    if (game::backpackTierOf(stack.getTypeName())) stripDyedLine(s); // SB has no "Dyed" line
+    // Bedrock passes `true` for every inventory tooltip (it is the "show category" flag there), and
+    // has no advanced-tooltips toggle (F3+H): the UUID / linked endpoint lines follow
+    // `abp::client::tooltip::advancedTooltips` instead (off by default, like Java).
+    (void)advanced;
+    appendBackpackLines(stack, advancedTooltips(), s);
+}
 } // namespace
 
-// "Press <Left Shift> to View Contents" on backpack items (client side only). Backpacks are
-// data-driven (ComponentItem); the Item hook covers other item classes calling the base.
+// Item hover text (client side only). Backpacks and upgrades are data-driven (ComponentItem); the
+// Item hook covers other item classes calling the base. The last parameter is Bedrock's
+// "advanced tooltips" flag (named so in FireworksItem).
 LL_TYPE_INSTANCE_HOOK(
     AbpBackpackHoverTextHook,
     ll::memory::HookPriority::Normal,
@@ -225,10 +373,10 @@ LL_TYPE_INSTANCE_HOOK(
     ::ItemStackBase const&               stack,
     ::Level&                             level,
     ::Bedrock::Safety::RedactableString& hovertext,
-    bool                                 showCategory
+    bool                                 advanced
 ) {
-    origin(stack, level, hovertext, showCategory);
-    appendPressLine(stack, level, hovertext);
+    origin(stack, level, hovertext, advanced);
+    appendLines(stack, level, hovertext, advanced);
 }
 
 LL_TYPE_INSTANCE_HOOK(
@@ -240,14 +388,15 @@ LL_TYPE_INSTANCE_HOOK(
     ::ItemStackBase const&               stack,
     ::Level&                             level,
     ::Bedrock::Safety::RedactableString& hovertext,
-    bool                                 showCategory
+    bool                                 advanced
 ) {
-    origin(stack, level, hovertext, showCategory);
-    appendPressLine(stack, level, hovertext);
+    origin(stack, level, hovertext, advanced);
+    appendLines(stack, level, hovertext, advanced);
 }
 
-// Vanilla screens: with Shift (or a cursor item) the hover text over a backpack slot becomes the
-// contents tooltip.
+// Vanilla screens: the hover text over a backpack slot becomes SB's tooltip (contents image with
+// Shift, role header for linked endpoints); with an item on the cursor only the right-click
+// stashing tooltip is shown (drawn by the stash overlay layer).
 LL_TYPE_INSTANCE_HOOK(
     AbpBackpackHoverRenderHook,
     ll::memory::HookPriority::Normal,
@@ -259,9 +408,10 @@ LL_TYPE_INSTANCE_HOOK(
     ::UIControl&                owner,
     int                         pass
 ) {
-    if (net::serverReady() && input::hoveredVanillaSlot() && contentsWanted()) {
+    if (net::serverReady() && input::hoveredVanillaSlot()) {
+        if (input::stash::vanillaTooltipShown()) return;
         auto const& item = input::hoveredVanillaItem();
-        if (!item.isNull() && game::isBackpack(item)) {
+        if (!item.isNull() && game::isBackpack(item) && (contentsWanted() || linkedOf(item))) {
             try {
                 ui::Painter painter(ctx);
                 auto const& frame = ui::UiRoot::get().lastFrame();

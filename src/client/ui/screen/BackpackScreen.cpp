@@ -34,6 +34,7 @@
 #include "client/Client.h"
 #include "client/input/InputRouter.h"
 #include "client/input/Keys.h"
+#include "client/input/Stash.h"
 #include "client/net/ClientNet.h"
 #include "client/render/RenderHooks.h"
 #include "client/tooltip/ContentsTooltip.h"
@@ -227,8 +228,9 @@ public:
         // not reliable (ignored under synthetic input), and an uncaptured key also reaches vanilla's
         // key bindings.
         if (vk == VK_ESCAPE_ || vk == 'E') return true;
-        if (m->kind == "menu") return vk == 'Q' || (vk >= '1' && vk <= '9');
         using input::KeyAction;
+        // Open Backpack closes a menu screen; captured so vanilla (B = emote) never sees it.
+        if (m->kind == "menu") return vk == 'Q' || (vk >= '1' && vk <= '9') || input::keyMatches(KeyAction::OpenBackpack, vk);
         if (input::keyMatches(KeyAction::OpenBackpack, vk) || input::keyMatches(KeyAction::Sort, vk)
             || input::keyMatches(KeyAction::TransferToStorage, vk) || input::keyMatches(KeyAction::TransferToInventory, vk)) {
             return true;
@@ -242,6 +244,16 @@ public:
     bool onScroll(float x, float y, float delta) override;
     bool onKey(int vk, bool down) override;
     bool onChar(std::string const& utf8) override;
+    /// Open Backpack from a binding the layer didn't receive (input/Hotkeys.cpp).
+    void openBackpackFromBinding() {
+        auto const* m = net::screenModel();
+        if (!m || !active()) return;
+        if (m->kind == "menu" || mView == View::Settings) {
+            if (m->kind == "menu") requestClose();
+            return;
+        }
+        openBackpackKey(*m);
+    }
 
 private:
     // ---- model caches ---------------------------------------------------------------------------
@@ -375,6 +387,12 @@ private:
         float            x, y;
     };
     std::vector<PendingCount> mPendingCounts;
+    struct PendingSign {
+        input::stash::Result result;
+        ItemStack const*     item;
+        float                x, y;
+    };
+    std::vector<PendingSign> mPendingSigns; ///< right-click stashing signs (input/Stash.h), over the counts
 
     // shift + double click (vanilla quick move all)
     SlotRef mLastShiftClick;
@@ -747,6 +765,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     // Counts go above every item (SC renders them at z+200): collected, drawn after a flush.
     auto& counts = mPendingCounts;
     counts.clear();
+    mPendingSigns.clear();
     auto const* player  = currentPlayer();
     static ItemStack const kNone;
     // The cursor stack itself (copies of it render block icons squashed in the drag previews).
@@ -791,6 +810,10 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             render::decorateItemIcon(p, mSlotStacks[i], x, y);
             if (infinite) drawInfinite(p, x, y);
             else counts.push_back({cs::countOverlay(d.count), x, y});
+            // Right-click stashing sign (SC onContainerScreenForeground: not on the hovered slot),
+            // drawn above the counts.
+            auto sign = input::stash::result("storage", ps.index, mSlotStacks[i]);
+            if (!(mHover.area == SlotRef::Area::Storage && mHover.index == ps.index)) mPendingSigns.push_back({sign, &mSlotStacks[i], x, y});
         }
         if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index && !inaccessible) highlight(x, y);
     }
@@ -816,6 +839,8 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
                 p.item(s, x, y);
                 render::decorateItemIcon(p, s, x, y);
                 counts.push_back({cs::countOverlay(s.mCount), x, y});
+                auto sign = input::stash::result("inventory", i, s);
+                if (!(mHover.area == SlotRef::Area::Inventory && mHover.index == i)) mPendingSigns.push_back({sign, &s, x, y});
             }
             if (mHover.area == SlotRef::Area::Inventory && mHover.index == i) highlight(x, y);
         }
@@ -955,9 +980,11 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
     auto* player = currentPlayer();
     if (!player) return;
     if (!player->mPlayerUIContainer->getItem(0).isNull()) {
-        // Carrying something: SB only shows the contents tooltip of backpacks.
+        // Carrying something: no item tooltip (SC), only the right-click stashing tooltip.
         auto const* s = stackAt(mHover);
-        if (s && game::isBackpack(*s)) tooltip::drawBackpackTooltip(p, *s, mx, my);
+        if (s && !s->isNull() && (mHover.area == SlotRef::Area::Storage || mHover.area == SlotRef::Area::Inventory)) {
+            input::stash::drawTooltip(p, areaName(mHover.area), mHover.index, *s, mx, my);
+        }
         return;
     }
     auto const* s = stackAt(mHover);
@@ -1046,6 +1073,8 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
     // Counts (SC z+200): above the items and the controls.
 
     for (auto const& c : mPendingCounts) drawCountOverlay(p, c.overlay, c.x, c.y);
+    for (auto const& sg : mPendingSigns) input::stash::drawSign(p, sg.result, *sg.item, sg.x, sg.y);
+    mPendingSigns.clear();
     p.flush();
     drawErrorOverlay(p, *m);
 
@@ -1223,6 +1252,11 @@ ItemStack const* BackpackScreenLayer::stackAt(SlotRef const& s) const {
 bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, float y) {
     auto const* m = net::screenModel();
     if (!m || !active()) return false;
+    // Open Backpack bound to a mouse button (SB handleGuiMouseKeyPress).
+    if (down && button != MouseButton::Left && input::mouseMatches(input::KeyAction::OpenBackpack, button)) {
+        openBackpackFromBinding();
+        return true;
+    }
     if (m->kind == "menu") return down ? menuMouse(*m, button, x, y) : true;
     if (mView == View::Settings) return mSettingsScreen.mouseButton(*m, button, down, x, y);
     if (!down) {
@@ -1325,6 +1359,10 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         return true;
     }
     if (button == MouseButton::Middle) return true;
+    // Right click with the cursor: SB's stashing into / from a backpack (input/Stash.h).
+    if (button == MouseButton::Right && (slot.area == SlotRef::Area::Storage || slot.area == SlotRef::Area::Inventory)) {
+        if (auto const* s = stackAt(slot); s && input::stash::rightClick(areaName(slot.area), slot.index, *s)) return true;
+    }
     double t      = now();
     bool   shift  = input::shiftDown();
     bool   ctrl   = input::ctrlDown();
@@ -1848,6 +1886,8 @@ private:
 
 } // namespace
 bool nativeScreenActive() { return gLayer.active() && net::displayModel(); }
+
+void nativeScreenOpenBackpackKey() { gLayer.openBackpackFromBinding(); }
 
 } // namespace abp::client::ui
 

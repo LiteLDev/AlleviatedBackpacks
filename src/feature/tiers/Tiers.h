@@ -20,8 +20,8 @@
 //   accentColor`) so screens and renderers of carried / placed backpacks see them.
 // - Creative inventory (CreativeItems.cpp): after the plain Backpack (Leather), SB's 16 dye
 //   variants and the yellow+lime / blue+black one.
-// - TierLore.cpp keeps the item lore (tier, used/total slots, fill %, upgrades, colours) and the
-//   item tint (main colour, via the `minecraft:dyeable` item component) in sync.
+// - TierLore.cpp removes the phase-1 lore (SB backpacks have none; `buildLore` stays for that
+//   migration) and keeps the item tint (main colour, via the `minecraft:dyeable` item component) in sync.
 
 #include <cstdint>
 #include <memory>

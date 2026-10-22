@@ -1,5 +1,6 @@
 // Live backpack item lore + tint, refreshed while the backpack is carried and not open.
 
+#include <algorithm>
 #include <cmath>
 #include <unordered_map>
 
@@ -183,37 +184,7 @@ std::vector<std::string> buildLore(Player const& player, core::Tier tier, game::
     return lore;
 }
 
-namespace {
-/// Lore cache: rebuilding it (fill stats over every slot, translations) only when the backpack
-/// changed keeps the periodic refresh cheap.
-struct CachedLore {
-    std::uint64_t            revision = 0;
-    core::Tier               tier     = core::Tier::Leather;
-    std::string              locale;
-    std::vector<std::string> lore;
-};
-std::unordered_map<std::string, CachedLore> gLoreCache;
-constexpr std::size_t                       kLoreCacheMax = 4096;
-
-std::vector<std::string> const& loreFor(Player const& player, core::Tier tier, game::Backpack const* bp) {
-    static std::vector<std::string> scratch;
-    if (!bp) return scratch = buildLore(player, tier, nullptr);
-    auto locale = localeOf(player);
-    if (auto it = gLoreCache.find(bp->uuid()); it != gLoreCache.end()) {
-        auto& c = it->second;
-        if (c.revision == bp->revision() && c.tier == tier && c.locale == locale) return c.lore;
-    }
-    if (gLoreCache.size() >= kLoreCacheMax) gLoreCache.clear();
-    auto& c    = gLoreCache[bp->uuid()];
-    c.revision = bp->revision();
-    c.tier     = tier;
-    c.locale   = std::move(locale);
-    c.lore     = buildLore(player, tier, bp);
-    return c.lore;
-}
-} // namespace
-
-bool refreshItem(Player const& player, ItemStack& stack, std::shared_ptr<game::Backpack> const& bp) {
+bool refreshItem(Player const& /*player*/, ItemStack& stack, std::shared_ptr<game::Backpack> const& bp) {
     auto tier = game::backpackTierOf(stack);
     if (!tier) return false;
     bool changed = false;
@@ -226,9 +197,15 @@ bool refreshItem(Player const& player, ItemStack& stack, std::shared_ptr<game::B
     changed |= syncColors(stack, bp.get());
     // The storage tier is the truth once bound (a higher item tier is applied on next open).
     auto shownTier = bp && static_cast<int>(bp->tier()) > static_cast<int>(*tier) ? bp->tier() : *tier;
-    auto const& lore = loreFor(player, shownTier, bp.get());
-    if (stack.getCustomLore() != lore) {
-        stack.setCustomLore(lore);
+    // SB backpacks carry no lore (their tooltip is "Press <Left Shift> to View Contents" and the
+    // Shift contents image, client side): the phase-1 lore (tier / storage / upgrades / colours,
+    // every line starting with "§r") is removed from items that still have it.
+    (void)shownTier;
+    auto const& current = stack.getCustomLore();
+    bool        ours    = !current.empty()
+                  && std::all_of(current.begin(), current.end(), [](std::string const& l) { return l.starts_with("§r"); });
+    if (ours) {
+        stack.clearCustomLore();
         changed = true;
     }
     return changed;
@@ -284,7 +261,6 @@ public:
     }
     void uninstall() {
         ll::event::EventBus::getInstance().removeListener(mListener);
-        gLoreCache.clear();
     }
 
 private:
