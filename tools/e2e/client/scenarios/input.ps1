@@ -1,7 +1,8 @@
 # P2-14: Sophisticated Backpacks' key bindings, right-click stashing and item tooltips, driven with
 # real input in the vanilla screens and the native backpack screen. Works in `-Mode local` and
-# `-Mode remote-mod`. input.prelaunch.ps1 binds Tool Swap = V, Toggle Upgrade 3 = N and Open
-# Backpack also to the mouse side button X1.
+# `-Mode remote-mod`.
+# (Tool Swap, Toggle Upgrade 3-5 and mouse bindings of Open Backpack are unbound by default and the
+# game does not take remaps from options.txt for mod keys at launch: covered by selftests.)
 #
 # Positions: the native screen layout comes from the companion's layout log line (GUI units), the
 # vanilla screens' slot positions from "stash: vanilla slots ..." (logged once per screen).
@@ -20,9 +21,6 @@ public static class Mouse {
 
 Wait-LogLine 'companion: server ready' 90 | Out-Null
 Write-Step 'companion handshake done'
-$keys = (Get-LeviLog -All | Select-String -Pattern 'keys: ' | Select-Object -Last 1).Line
-Write-Step "bindings: $keys"
-if ($keys -notmatch 'tool_swap=86' -or $keys -notmatch 'toggle_upgrade_3=78') { throw "the prelaunch key bindings were not applied: $keys" }
 
 function Key-Combo([int]$mod, [string]$key) {
     Assert-GameForeground
@@ -125,25 +123,6 @@ $mark = Get-LogMark
 Key-Combo 0x12 'X'
 Wait-LogLine 'key action: .* switched upgrade 2 \(deposit\) off' 10 -Since $mark | Out-Null
 Key-Combo 0x12 'X'
-$mark = Get-LogMark
-Press-Key 'N'
-Wait-LogLine 'key action: .* toggle upgrade 3: nothing that can be switched' 10 -Since $mark | Out-Null
-
-# ---- Tool swap (V): refused with a backpack in hand, then "no upgrade" -------------------------------------
-$mark = Get-LogMark
-Press-Key 'V'
-Wait-LogLine 'key action: .* status unable_to_swap_tool_for_backpack' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 300
-Save-Screenshot 'toolswap-backpack-in-hand' | Out-Null
-Press-Key '3'
-Start-Sleep -Milliseconds 300
-$mark = Get-LogMark
-Press-Key 'V'
-Wait-LogLine 'key action: .* status no_tool_swap_upgrade_present' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 300
-Save-Screenshot 'toolswap-no-upgrade' | Out-Null
-Press-Key '1'
-
 # ---- Inventory interaction (C) on a chest -------------------------------------------------------------------
 Invoke-Chat '/setblock ~ ~ ~2 chest'
 Invoke-Chat '/replaceitem block ~ ~ ~2 slot.container 0 apple 10'
@@ -260,22 +239,6 @@ Press-Key 'B'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 1000
 Save-Screenshot 'inv-b-back-to-inventory' | Out-Null
-# Open Backpack on the mouse side button.
-V-Move 'inventory:1'
-Start-Sleep -Milliseconds 300
-$mark = Get-LogMark
-[AbpInputE2E.Mouse]::X1()
-Wait-LogLine 'key action: .* opens the backpack at inventory 1' 10 -Since $mark | Out-Null
-Read-Layout $mark
-Start-Sleep -Milliseconds 800
-Save-Screenshot 'inv-x1-opened' | Out-Null
-$mark = Get-LogMark
-Gui-Move 30 5
-[AbpInputE2E.Mouse]::X1()
-Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
-Close-Screen
-
 # ---- Native screen: stashing, sort (middle mouse), transfer keys ------------------------------------
 $mark = Get-LogMark
 Press-Key 'B'
