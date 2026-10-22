@@ -101,9 +101,14 @@ DynamicResult dynamicBeginFromTemplate(std::string const& name, std::string cons
 /// `slot` -1 = add at the end; `upgrade` = upgrade slots.
 DynamicResult dynamicAdd(std::string const& name, int slot, core::ItemStackData const& item, bool upgrade);
 /// Ends the template: returns the backpack item (+ messages for items that didn't fit).
+/// An item a dynamic template couldn't take (SB's `%d x %s` message arguments).
+struct DynamicLeftover {
+    int         count = 0;
+    std::string name; ///< "[Display Name]" (SB ItemStack.getDisplayName)
+};
 struct DynamicEnd {
-    DynamicResult            result;
-    std::vector<std::string> leftovers; ///< "<count> x <name>"
+    DynamicResult                result;
+    std::vector<DynamicLeftover> leftovers;
     std::optional<ItemStack> item;
 };
 DynamicEnd dynamicEnd(std::string const& name);

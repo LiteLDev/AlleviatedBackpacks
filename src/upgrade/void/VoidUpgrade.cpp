@@ -424,7 +424,7 @@ public:
             .nameFallback   = "Void Upgrade",
             .tier           = UpgradeTier::Basic,
             .group          = "void",
-            .maxPerBackpack = 9, // SB: no limit
+            .maxPerBackpack = kUnlimitedPerBackpack, // SB: no limit
             .hasSettings    = true,
         };
         return i;
@@ -441,7 +441,7 @@ public:
             .nameFallback   = "Advanced Void Upgrade",
             .tier           = UpgradeTier::Advanced,
             .group          = "void",
-            .maxPerBackpack = 9,
+            .maxPerBackpack = kUnlimitedPerBackpack,
             .hasSettings    = true,
         };
         return i;

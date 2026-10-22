@@ -55,7 +55,10 @@ struct FilterDefaults {
 /// SC keeps selected tags in a TreeSet of ResourceLocations: ordered by path, then namespace (a
 /// tag without ':' is in the `minecraft` namespace).
 [[nodiscard]] bool tagLess(std::string_view a, std::string_view b);
-/// Sorts and de-duplicates tags in that order.
+/// A tag as a ResourceLocation string: a tag without ':' is in the `minecraft` namespace, so
+/// "logs" and "minecraft:logs" are the same tag ("logs" -> "minecraft:logs").
+[[nodiscard]] std::string normalizeTag(std::string_view tag);
+/// Normalizes (`normalizeTag`), sorts and de-duplicates tags in that order.
 void sortTags(std::vector<std::string>& tags);
 
 /// A reusable item filter: a fixed-size list of filter slots plus SC's `FilterAttributes`.
@@ -137,7 +140,8 @@ struct Filter {
     [[nodiscard]] bool canSetGhost(ItemStackData const& item) const { return item.empty() || !hasGhost(item); }
 
     // ---- tags ---------------------------------------------------------------------------------
-    /// Adds a tag (kept sorted and unique). Returns false if it was already selected.
+    /// Adds a tag (normalized with `normalizeTag`, kept sorted and unique). Returns false if it was
+    /// already selected.
     bool addTag(std::string const& tag);
     /// Removes a tag. Returns false if it was not selected.
     bool removeTag(std::string const& tag);

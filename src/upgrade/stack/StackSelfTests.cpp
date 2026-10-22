@@ -66,7 +66,7 @@ ABP_REGISTER_SELFTEST("stack.items_registered", [](Context& ctx) {
         ctx.require(u != nullptr, "upgrade not registered: " + std::string(t.id));
         ctx.check(u->info().itemId == itemIdOf(t.id), "item id of " + std::string(t.id));
         ctx.check(u->info().groupOrId() == "stack", "group of " + std::string(t.id));
-        ctx.check(u->info().maxPerBackpack == 3, "max 3 per backpack");
+        ctx.check(u->info().maxPerBackpack == upgrade::kUnlimitedPerBackpack, "limit only through maxUpgradesPerStorage");
         ctx.check(!u->info().toggleable, "stack upgrades can't be turned off");
     }
     for (auto const& c : conversions()) {

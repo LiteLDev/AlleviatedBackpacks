@@ -179,28 +179,35 @@ bool tagLess(std::string_view a, std::string_view b) {
     return a < b; // "x" and "minecraft:x" name the same tag; keep a strict weak order anyway
 }
 
+std::string normalizeTag(std::string_view tag) {
+    if (tag.empty() || tag.find(':') != std::string_view::npos) return std::string(tag);
+    return "minecraft:" + std::string(tag);
+}
+
 void sortTags(std::vector<std::string>& tags) {
+    for (auto& t : tags) t = normalizeTag(t);
     std::sort(tags.begin(), tags.end(), [](std::string const& a, std::string const& b) { return tagLess(a, b); });
     tags.erase(std::unique(tags.begin(), tags.end()), tags.end());
 }
 
-bool Filter::addTag(std::string const& tag) {
-    if (tag.empty()) return false;
-    auto it = std::lower_bound(tags.begin(), tags.end(), tag, [](std::string const& a, std::string const& b) { return tagLess(a, b); });
+bool Filter::addTag(std::string const& raw) {
+    if (raw.empty()) return false;
+    auto tag = normalizeTag(raw);
+    auto it  = std::lower_bound(tags.begin(), tags.end(), tag, [](std::string const& a, std::string const& b) { return tagLess(a, b); });
     if (it != tags.end() && *it == tag) return false;
     tags.insert(it, tag);
     return true;
 }
 
-bool Filter::removeTag(std::string const& tag) {
-    auto it = std::find(tags.begin(), tags.end(), tag);
+bool Filter::removeTag(std::string const& raw) {
+    auto it = std::find(tags.begin(), tags.end(), normalizeTag(raw));
     if (it == tags.end()) return false;
     tags.erase(it);
     return true;
 }
 
 bool Filter::hasTag(std::string_view tag) const {
-    return std::find(tags.begin(), tags.end(), tag) != tags.end();
+    return std::find(tags.begin(), tags.end(), normalizeTag(tag)) != tags.end();
 }
 
 std::vector<std::string> Filter::tagsToAdd(std::vector<std::string> itemTags) const {

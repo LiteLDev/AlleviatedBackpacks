@@ -292,7 +292,7 @@ public:
             i.nameFallback   = Advanced ? "Advanced Feeding upgrade" : "Feeding Upgrade";
             i.tier           = Advanced ? UpgradeTier::Advanced : UpgradeTier::Basic;
             i.group          = "feeding";
-            i.maxPerBackpack = 9; // SB: no limit
+            i.maxPerBackpack = kUnlimitedPerBackpack; // SB: no limit
             i.hasSettings    = true;
             return i;
         }();

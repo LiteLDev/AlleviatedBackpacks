@@ -186,6 +186,7 @@ UpgradeInfo const& AnvilUpgrade::info() const {
         .itemId       = "alleviatedbackpacks:anvil_upgrade",
         .nameKey      = "abp.upgrade.anvil.name",
         .nameFallback = "Anvil Upgrade",
+        .maxPerBackpack = kUnlimitedPerBackpack, // SB: no limit
         .hasSettings  = true,
         .toggleable   = false,
     };

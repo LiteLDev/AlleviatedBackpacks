@@ -350,6 +350,35 @@ ABP_REGISTER_SELFTEST("crafting.grid_persists", [](Context& ctx) {
     ctx.check(gridAt(u2, 2).id == "minecraft:diamond" && gridAt(u2, 2).count == 7, "grid persisted with the backpack");
 });
 
+// SB has no limit on Crafting upgrades: two in one backpack keep separate grids, results and
+// open-tab state (everything is keyed by upgrade slot).
+ABP_REGISTER_SELFTEST("crafting.two_upgrades_independent", [](Context& ctx) {
+    auto& player = ctx.player();
+    clearPlayer(player);
+    auto bp = ctx.createBackpack(Tier::Gold);
+    int  s0 = ctx.installUpgrade(bp, std::string(kCraftingId), 0);
+    int  s1 = ctx.installUpgrade(bp, std::string(kCraftingId), 1);
+    ctx.require(s0 == 0 && s1 == 1, "two crafting upgrades installed");
+    UpgradeContext a(bp, s0), b(bp, s1);
+    setGrid(a, {});
+    planks2x2(b, 2);
+    ctx.check(resultId(a) == "<none>" && resultId(b) == "minecraft:crafting_table", "separate grids");
+    NativeScreen screen(ctx, player, bp);
+    ctx.check(screen.tabData(s0)["grid"][0].is_null() && screen.tabData(s1)["grid"][0].value("id", "") == "minecraft:oak_planks", "separate tab data");
+    screen.tab(s1, {{"result", true}, {"button", 0}});
+    ctx.check(idOf(cursor(player)) == "minecraft:crafting_table", "the second upgrade crafts");
+    ctx.check(gridAt(b, 0).count == 1 && gridAt(a, 0).empty(), "only the second grid was used");
+    setCursor(player, ItemStack::EMPTY_ITEM());
+    feature::gui::setPlayerOption(player, feature::gui::kOpenTabFirst, nlohmann::json(true));
+    screen.openTab(s0, *bp);
+    ctx.give(player, game::ItemConv::make("minecraft:stick", 7), 9);
+    screen.action({{"action", "click"}, {"area", "inventory"}, {"index", 9}, {"shift", true}});
+    ctx.check(gridAt(a, 0).id == "minecraft:stick" && gridAt(a, 0).count == 7, "shift-click goes into the open (first) tab");
+    ctx.check(gridAt(b, 2).empty() && gridAt(b, 0).id == "minecraft:oak_planks", "the second grid is untouched");
+    feature::gui::setPlayerOption(player, feature::gui::kOpenTabFirst, std::nullopt);
+    clearPlayer(player);
+});
+
 ABP_REGISTER_SELFTEST("crafting.shift_into_open_tab", [](Context& ctx) {
     auto& player = ctx.player();
     clearPlayer(player);

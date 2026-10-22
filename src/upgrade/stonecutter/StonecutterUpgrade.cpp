@@ -312,6 +312,7 @@ public:
             .itemId       = "alleviatedbackpacks:stonecutter_upgrade",
             .nameKey      = "abp.stonecutter.name",
             .nameFallback = "Stonecutter Upgrade",
+            .maxPerBackpack = kUnlimitedPerBackpack, // SB: no limit
             .hasSettings  = true,
             .toggleable   = false, // SC canBeDisabled() == false
         };

@@ -520,7 +520,7 @@ public:
             .nameFallback   = "Compacting Upgrade",
             .tier           = UpgradeTier::Basic,
             .group          = "compacting",
-            .maxPerBackpack = 9, // SB: no limit
+            .maxPerBackpack = kUnlimitedPerBackpack, // SB: no limit
             .hasSettings    = true,
         };
         return i;
@@ -538,7 +538,7 @@ public:
             .nameFallback   = "Advanced Compacting Upgrade",
             .tier           = UpgradeTier::Advanced,
             .group          = "compacting",
-            .maxPerBackpack = 9,
+            .maxPerBackpack = kUnlimitedPerBackpack,
             .hasSettings    = true,
         };
         return i;

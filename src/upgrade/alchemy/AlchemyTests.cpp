@@ -1,5 +1,8 @@
 // Selftests of the Alchemy upgrades: `/backpack selftest "alchemy.*"`.
 
+#include <filesystem>
+#include <fstream>
+
 #include "mc/server/SimulatedPlayer.h"
 #include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/player/Player.h"
@@ -10,6 +13,7 @@
 
 #include "feature/placed/TestSite.h"
 #include "game/ItemConv.h"
+#include "mod/Config.h"
 #include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "upgrade/UpgradeManager.h"
@@ -475,6 +479,32 @@ ABP_REGISTER_SELFTEST("alchemy.splash_falloff", [](Context& ctx) -> ll::coro::Co
     ctx.check(dt < dm && dt > dm / 4, "bystander gets a shorter effect (fall-off)");
     p.removeAllEffects();
     other.removeAllEffects();
+});
+
+// Config keys follow SB (`alchemy.json`); the old flat keys of the previous version migrate.
+ABP_REGISTER_SELFTEST("alchemy.config_keys_migrate", [](Context& ctx) {
+    auto saved = config::get<AlchemyConfig>();
+    auto path  = std::filesystem::temp_directory_path() / "abp_alchemy_migrate.json";
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << R"({"version":1,"alchemyFilterSlots":3,"advancedAlchemyFilterSlots":11})";
+    }
+    bool loaded = false;
+    for (auto const& e : config::ConfigRegistry::entries()) {
+        if (e.section == "alchemy") loaded = e.load(path);
+    }
+    ctx.require(loaded, "alchemy config section registered");
+    auto const& c = config::get<AlchemyConfig>();
+    ctx.check(c.alchemyUpgrade.filterSlots == 3 && c.advancedAlchemyUpgrade.filterSlots == 11, "old values moved");
+    std::ifstream in(path);
+    auto          written = nlohmann::json::parse(in, nullptr, false);
+    ctx.check(written.value("version", 0) == 2, "rewritten as version 2");
+    ctx.check(written.contains("alchemyUpgrade") && written.contains("advancedAlchemyUpgrade") && !written.contains("alchemyFilterSlots"),
+              "SB section names: " + written.dump());
+    in.close();
+    config::mut<AlchemyConfig>() = saved;
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 });
 
 } // namespace

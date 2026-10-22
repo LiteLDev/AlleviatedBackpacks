@@ -259,6 +259,37 @@ ABP_REGISTER_SELFTEST("admin.max_upgrades", [](Context& ctx) {
     ctx.check(upgrade::canInstall(bp, 2, data("minecraft:structure_void", 1), nullptr), "within the limit");
 });
 
+// SB's only per-backpack limits are `maxUpgradesPerStorage` (stack 3, furnace 1, jukebox 1) and the
+// conflict rules: crafting, stonecutter, anvil, smithing and refill have none, and the three
+// group limits follow the config.
+ABP_REGISTER_SELFTEST("admin.sb_upgrade_limits", [](Context& ctx) {
+    auto&   cfg = config::mut<SbServerConfig>();
+    Restore keep(cfg.maxUpgradesPerStorage);
+    for (auto const* id : {"crafting", "stonecutter", "anvil", "smithing", "refill"}) {
+        auto bp = ctx.createBackpack(Tier::Netherite);
+        ctx.check(ctx.installUpgrade(bp, id, 0) == 0 && ctx.installUpgrade(bp, id, 1) == 1, std::string(id) + ": two allowed");
+        ctx.check(ctx.installUpgrade(bp, id, 2) == 2, std::string(id) + ": three allowed");
+    }
+    auto bp = ctx.createBackpack(Tier::Netherite);
+    for (int i = 0; i < 3; ++i) ctx.check(ctx.installUpgrade(bp, "stack_starter", i) == i, "stack upgrade " + std::to_string(i));
+    auto starter = data("alleviatedbackpacks:stack_starter_upgrade", 1);
+    std::string reason;
+    ctx.check(!upgrade::canInstall(bp, 3, starter, nullptr, &reason), "a 4th stack upgrade is refused");
+    ctx.check(contains(reason, "Only 3x Stack Upgrades"), "SC group message: " + reason);
+    auto hit = maxUpgradesHit(*bp, "alleviatedbackpacks:stack_starter_upgrade", "stack");
+    ctx.check(hit && !hit->byItem && hit->slots == std::vector<int>{0, 1, 2}, "the three stack upgrades are the limiting slots");
+    cfg.maxUpgradesPerStorage = {"stack_upgrades|4", "furnace_upgrades|2", "jukebox_upgrades|2"};
+    ctx.check(upgrade::canInstall(bp, 3, starter, nullptr), "stack limit raised by config");
+    ctx.check(ctx.installUpgrade(bp, "smelting", 3) == 3 && ctx.installUpgrade(bp, "auto_blasting", 4) == 4, "two furnace upgrades with furnace_upgrades|2");
+    ctx.check(ctx.installUpgrade(bp, "jukebox", 5) == 5 && ctx.installUpgrade(bp, "advanced_jukebox", 6) == 6, "two jukeboxes with jukebox_upgrades|2");
+    cfg.maxUpgradesPerStorage = {"crafting_upgrade|0"};
+    auto other = ctx.createBackpack(Tier::Iron);
+    ctx.check(!upgrade::canInstall(other, 0, data("alleviatedbackpacks:crafting_upgrade", 1), nullptr, &reason), "|0 = not allowed");
+    ctx.check(contains(reason, "can't be used in"), "SC upgrade_not_allowed: " + reason);
+    cfg.maxUpgradesPerStorage = {};
+    for (int i = 0; i < 2; ++i) ctx.check(ctx.installUpgrade(other, "smoking", i) == i, "no entries = no limit");
+});
+
 ABP_REGISTER_SELFTEST("admin.enabled_items", [](Context& ctx) {
     auto&   cfg = config::mut<ScCommonConfig>();
     Restore keep(cfg.enabledItems);

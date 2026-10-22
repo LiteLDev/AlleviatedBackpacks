@@ -13,9 +13,10 @@
 namespace abp::upgrade::stack {
 
 /// `config/stack.json`. Multipliers per tier (Stack upgrades in one backpack multiply each
-/// other), the per-backpack limit of the "stack" group and the items stack upgrades never affect.
+/// other) and the items stack upgrades never affect. The per-backpack limit is SB's
+/// `maxUpgradesPerStorage` (`stack_upgrades|3`, admin unit).
 struct StackConfig {
-    int    version        = 2;
+    int    version        = 3;
     double starterTier    = 1.5;
     double tier1          = 2.0;
     double tier2          = 4.0;
@@ -25,8 +26,6 @@ struct StackConfig {
     double downgradeTier1 = 0.125;
     double downgradeTier2 = 0.0625;
     double downgradeTier3 = 0.03125;
-    /// How many Stack upgrades / downgrades one backpack can hold together.
-    int    maxPerBackpack = 3;
     /// Item ids (`*` / `?` wildcards) that keep their vanilla stack size in upgraded backpacks
     /// (SC `stackUpgrade.nonStackableItems`: the bundle and the 17 shulker boxes).
     std::vector<std::string> nonStackableItems = {

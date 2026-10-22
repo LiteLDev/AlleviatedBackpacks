@@ -60,6 +60,27 @@ struct AdminConfig {
     Player*               player,
     std::string*          reason
 );
+/// One SB `maxUpgradesPerStorage` limit reached by adding an upgrade (SC
+/// `checkUpgradePerStorageTypeLimit`): the limit (0 = not allowed in this storage), whether it is
+/// the item's own entry (else the group's) and the upgrade slots already counting against it
+/// (the slots SC highlights).
+struct UpgradeLimitHit {
+    int              max    = 0;
+    bool             byItem = false;
+    std::vector<int> slots;
+};
+/// The limit one more upgrade (`upgradeItemId`, `group`) would exceed, ignoring upgrade slot
+/// `excludeSlot`; nullopt when it fits.
+[[nodiscard]] std::optional<UpgradeLimitHit>
+maxUpgradesHit(game::Backpack const& backpack, std::string_view upgradeItemId, std::string_view group, int excludeSlot = -1);
+/// SC's message for `hit` ("Only 3x Stack Upgrades can be used in Backpack", "... can't be used in ...").
+[[nodiscard]] std::string maxUpgradesMessage(
+    UpgradeLimitHit const& hit,
+    game::Backpack const&  backpack,
+    std::string_view       upgradeItemId,
+    std::string_view       group,
+    Player*                player
+);
 /// "Iron Backpack" (the item name of a tier, in `player`'s language when given).
 [[nodiscard]] std::string backpackDisplayName(core::Tier tier, Player const* player = nullptr);
 /// How many levels of backpacks the backpack `uuid` contains (0 = none). Stops counting above `limit`.

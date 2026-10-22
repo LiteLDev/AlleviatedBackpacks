@@ -419,12 +419,16 @@ std::string backpackDisplayName(core::Tier tier, Player const* player) {
     return player ? trFor(*player, key, fb) : tr(key, fb);
 }
 
-bool withinMaxUpgrades(game::Backpack const& backpack, std::string_view itemId, std::string_view group, Player* player, std::string* reason) {
+std::optional<UpgradeLimitHit>
+maxUpgradesHit(game::Backpack const& backpack, std::string_view itemId, std::string_view group, int excludeSlot) {
     auto const& entries = sbServer().maxUpgradesPerStorage;
-    if (entries.empty()) return true;
+    if (entries.empty()) return std::nullopt;
     auto itemPath  = pathOf(itemId);
     auto groupName = lower(group);
     auto alias     = sbGroupAlias(groupName);
+    // SC getUpgradesPerStorage / getUpgradesInGroupPerStorage: the first matching entry wins,
+    // Integer.MAX_VALUE without one.
+    std::optional<int> itemMax, groupMax;
     for (auto const& e : entries) {
         auto bar = e.find('|');
         if (bar == std::string::npos) continue;
@@ -435,32 +439,52 @@ bool withinMaxUpgrades(game::Backpack const& backpack, std::string_view itemId, 
         } catch (...) {
             continue;
         }
-        bool byItem  = name == itemPath;
-        bool byGroup = !byItem && (name == groupName || (!alias.empty() && name == alias));
-        if (!byItem && !byGroup) continue;
-        int count = 0;
-        for (auto const& s : backpack.data().upgrades) {
-            if (s.empty()) continue;
-            if (byItem && pathOf(s.item.id) == itemPath) ++count;
-            if (byGroup) {
-                if (auto* u = upgrade::upgradeFor(s.item); u && lower(u->info().groupOrId()) == groupName) ++count;
-            }
-        }
-        if (count < max) continue;
-        if (reason) {
-            auto what = byItem ? std::string(itemId) : groupDisplayName(groupName, player);
-            if (byItem) {
-                if (auto* u = upgrade::upgradeFor(core::ItemStackData::of(std::string(itemId), 1))) {
-                    what = upgrade::displayName(*u, player);
-                }
-            }
-            auto storage = backpackDisplayName(backpack.tier(), player);
-            *reason      = player ? trFor(*player, "abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", max, what, storage)
-                                  : tr("abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", max, what, storage);
-        }
-        return false;
+        if (!itemMax && name == itemPath) itemMax = max;
+        else if (!groupMax && (name == groupName || (!alias.empty() && name == alias))) groupMax = max;
     }
-    return true;
+    if (!itemMax && !groupMax) return std::nullopt;
+    // SC checkUpgradePerStorageTypeLimit: 0 = not allowed at all; then the item's own limit
+    // (slots holding this item), then the group's (slots holding any upgrade of the group).
+    if (itemMax && *itemMax == 0) return UpgradeLimitHit{0, true, {}};
+    if (groupMax && *groupMax == 0) return UpgradeLimitHit{0, false, {}};
+    std::vector<int> sameItem, sameGroup;
+    auto const&      slots = backpack.data().upgrades;
+    for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
+        auto const& s = slots[static_cast<std::size_t>(i)];
+        if (s.empty() || i == excludeSlot) continue;
+        if (pathOf(s.item.id) == itemPath) sameItem.push_back(i);
+        if (auto* u = upgrade::upgradeFor(s.item); u && lower(u->info().groupOrId()) == groupName) sameGroup.push_back(i);
+    }
+    if (itemMax && static_cast<int>(sameItem.size()) >= *itemMax) return UpgradeLimitHit{*itemMax, true, std::move(sameItem)};
+    if (groupMax && static_cast<int>(sameGroup.size()) >= *groupMax) return UpgradeLimitHit{*groupMax, false, std::move(sameGroup)};
+    return std::nullopt;
+}
+
+std::string maxUpgradesMessage(
+    UpgradeLimitHit const& hit,
+    game::Backpack const&  backpack,
+    std::string_view       itemId,
+    std::string_view       group,
+    Player*                player
+) {
+    std::string what = hit.byItem ? std::string(itemId) : groupDisplayName(lower(group), player);
+    if (hit.byItem) {
+        if (auto* u = upgrade::upgradeFor(core::ItemStackData::of(std::string(itemId), 1))) what = upgrade::displayName(*u, player);
+    }
+    auto storage = backpackDisplayName(backpack.tier(), player);
+    if (hit.max == 0) {
+        return player ? trFor(*player, "abp.mainscreen.error.add.upgrade_not_allowed", "{0} can't be used in {1}", what, storage)
+                      : tr("abp.mainscreen.error.add.upgrade_not_allowed", "{0} can't be used in {1}", what, storage);
+    }
+    return player ? trFor(*player, "abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", hit.max, what, storage)
+                  : tr("abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", hit.max, what, storage);
+}
+
+bool withinMaxUpgrades(game::Backpack const& backpack, std::string_view itemId, std::string_view group, Player* player, std::string* reason) {
+    auto hit = maxUpgradesHit(backpack, itemId, group);
+    if (!hit) return true;
+    if (reason) *reason = maxUpgradesMessage(*hit, backpack, itemId, group, player);
+    return false;
 }
 
 int nestedDepth(std::string const& uuid, int limit) { return depthRec(uuid, limit, 0); }

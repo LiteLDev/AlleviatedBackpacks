@@ -58,7 +58,7 @@ namespace abp::upgrade::alchemy {
 
 int filterSlots(bool advanced) {
     auto const& c = config::get<AlchemyConfig>();
-    return std::clamp(advanced ? c.advancedAlchemyFilterSlots : c.alchemyFilterSlots, 1, 20);
+    return std::clamp(advanced ? c.advancedAlchemyUpgrade.filterSlots : c.alchemyUpgrade.filterSlots, 1, 20);
 }
 
 bool isAlchemy(IUpgrade const& type) { return type.info().group == kGroup; }
@@ -568,7 +568,7 @@ public:
             i.tier         = Advanced ? UpgradeTier::Advanced : UpgradeTier::Basic;
             i.group        = kGroup;
             // SB: no conflicts; the per-storage limit is the global one (several may be installed).
-            i.maxPerBackpack = 99;
+            i.maxPerBackpack = kUnlimitedPerBackpack;
             i.hasSettings    = true;
             i.toggleable     = true;
             return i;

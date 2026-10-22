@@ -1,12 +1,12 @@
 {
-  "abp.upgrade.deposit.name": "存放升级",
-  "abp.upgrade.advanced_deposit.name": "高级存放升级",
-  "abp.deposit.tab": "存放",
-  "abp.deposit.tab.tooltip": "存放设置",
-  "abp.deposit.tab.advanced": "高级存放",
-  "abp.deposit.tab.advanced.tooltip": "高级存放设置",
+  "abp.upgrade.deposit.name": "卸货升级",
+  "abp.upgrade.advanced_deposit.name": "高级卸货升级",
+  "abp.deposit.tab": "卸货",
+  "abp.deposit.tab.tooltip": "卸货设置",
+  "abp.deposit.tab.advanced": "高级卸货",
+  "abp.deposit.tab.advanced.tooltip": "高级卸货设置",
   "abp.deposit.contents": "匹配容器内容：{}",
-  "abp.deposit.describe.contents": "§7匹配容器内容",
-  "abp.deposit.status.stacks_deposited": "已向容器存放 {} 组物品",
-  "abp.deposit.status.nothing_to_deposit": "没有物品可以存放到容器中"
+  "abp.deposit.describe.contents": "§7匹配容器已有物品",
+  "abp.deposit.status.stacks_deposited": "已向容器内卸载{}堆物品",
+  "abp.deposit.status.nothing_to_deposit": "没有可以向容器卸载的物品"
 }

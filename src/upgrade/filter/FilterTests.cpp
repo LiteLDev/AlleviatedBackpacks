@@ -324,10 +324,10 @@ ABP_REGISTER_SELFTEST("filter.tab_actions", [](Context& ctx) {
     auto f = filtering::load(uctx, UpgradeTier::Advanced);
     ctx.check(f.matchBy == core::MatchBy::Tag && f.contentsType() == core::ContentsFilterType::Allow, "tags: storage -> allow");
     (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "addTag"}, {"tag", "minecraft:logs"}});
-    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "addTag"}, {"tag", "minecraft:logs"}});
+    (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "addTag"}, {"tag", "logs"}}); // = minecraft:logs
     (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "anyTag"}});
     f = filtering::load(uctx, UpgradeTier::Advanced);
-    ctx.check(f.tags == std::vector<std::string>{"minecraft:logs"} && !f.matchAnyTag, "tag added once, match all");
+    ctx.check(f.tags == std::vector<std::string>{"minecraft:logs"} && !f.matchAnyTag, "tag added once (\"logs\" = \"minecraft:logs\"), match all");
     ctx.check(inserted(*bp, "minecraft:birch_log", kAutomation) == 1, "tag filter applies to automation");
     ctx.check(inserted(*bp, "minecraft:dirt", kAutomation) == 0, "tag filter refuses dirt");
     (void)tabAction(p, uctx, {{"filter", "filter"}, {"op", "removeTag"}, {"tag", "minecraft:logs"}});

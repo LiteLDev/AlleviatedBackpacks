@@ -384,7 +384,7 @@ public:
         mInfo.nameFallback   = advanced ? "Advanced Magnet Upgrade" : "Magnet Upgrade";
         mInfo.tier           = advanced ? UpgradeTier::Advanced : UpgradeTier::Basic;
         mInfo.group          = "magnet";
-        mInfo.maxPerBackpack = 9; // SB: no limit
+        mInfo.maxPerBackpack = kUnlimitedPerBackpack; // SB: no limit
         mInfo.hasSettings    = true;
         mInfo.toggleable     = true;
     }

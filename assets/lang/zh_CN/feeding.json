@@ -5,9 +5,9 @@
   "abp.feeding.tab.advanced": "高级喂食",
   "abp.feeding.tab.tooltip": "喂食设置",
   "abp.feeding.tab.advanced.tooltip": "高级喂食设置",
-  "abp.feeding.button.hunger_level_any": "玩家稍有饥饿就立即喂食\n会浪费食物较多的饥饿值",
-  "abp.feeding.button.hunger_level_half": "仅在玩家足够饥饿时喂食\n最多浪费食物一半的饥饿值",
-  "abp.feeding.button.hunger_level_full": "仅在玩家足够饥饿时喂食\n完全不浪费食物的饥饿值",
-  "abp.feeding.button.feed_immediately_when_hurt": "玩家受伤时立即喂食\n生命值未满时忽略饥饿设置",
-  "abp.feeding.button.do_not_consider_health": "不考虑生命值\n忽略玩家生命值，仅按饥饿设置喂食"
+  "abp.feeding.button.hunger_level_any": "当玩家稍微饥饿时立即喂食\n浪费食物提供的大量饥饿值",
+  "abp.feeding.button.hunger_level_half": "仅在玩家足够饥饿时喂食\n最多浪费食物提供的一半饥饿值",
+  "abp.feeding.button.hunger_level_full": "仅在玩家足够饥饿时喂食\n不会浪费食物提供的任何饥饿值",
+  "abp.feeding.button.feed_immediately_when_hurt": "当玩家受伤时立即喂食\n在玩家未达到最大生命值前忽略饥饿值",
+  "abp.feeding.button.do_not_consider_health": "忽略生命值\n忽略玩家的生命值，仅基于饥饿值喂食玩家"
 }

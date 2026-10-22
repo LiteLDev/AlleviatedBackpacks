@@ -236,10 +236,12 @@ public:
         mInfo.group        = std::string(kGroup);
         mInfo.toggleable   = false; // like SB: stack upgrades can't be turned off
         mInfo.hasSettings  = false;
+        // SB group "stack_upgrades": its limit (3) is SB's configurable maxUpgradesPerStorage
+        // entry, checked by the admin unit.
+        mInfo.maxPerBackpack = kUnlimitedPerBackpack;
     }
 
     [[nodiscard]] UpgradeInfo const& info() const override {
-        mInfo.maxPerBackpack = std::max(1, config::get<StackConfig>().maxPerBackpack);
         return mInfo;
     }
 

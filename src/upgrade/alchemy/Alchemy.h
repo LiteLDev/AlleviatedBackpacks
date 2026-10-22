@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "mc/deps/core/math/Vec3.h"
@@ -24,11 +25,28 @@ class Actor;
 
 namespace abp::upgrade::alchemy {
 
-/// `config/alchemy.json` (SB `alchemyUpgrade.filterSlots` / `advancedAlchemyUpgrade.filterSlots`).
+/// SC `AlchemyUpgradeConfig`.
+struct AlchemyUpgradeConfig {
+    int filterSlots = 4; ///< 1..20
+};
+
+/// `config/alchemy.json`, keys as SB's `alchemyUpgrade.filterSlots` / `advancedAlchemyUpgrade.filterSlots`.
 struct AlchemyConfig {
-    int version                    = 1;
-    int alchemyFilterSlots         = 4; ///< 1..20
-    int advancedAlchemyFilterSlots = 8; ///< 1..20
+    int                  version = 2;
+    AlchemyUpgradeConfig alchemyUpgrade{4};
+    AlchemyUpgradeConfig advancedAlchemyUpgrade{8};
+
+    /// Version 1 had flat keys `alchemyFilterSlots` / `advancedAlchemyFilterSlots`.
+    template <class J>
+    static void migrate(J& data) {
+        if (!data.is_object()) return;
+        for (auto [from, to] : {std::pair{"alchemyFilterSlots", "alchemyUpgrade"}, std::pair{"advancedAlchemyFilterSlots", "advancedAlchemyUpgrade"}}) {
+            if (!data.contains(from)) continue;
+            if (!data[to].is_object()) data[to] = J::object();
+            data[to]["filterSlots"] = data[from];
+            data.erase(from);
+        }
+    }
 };
 
 inline constexpr char const* kBasicId      = "alchemy";

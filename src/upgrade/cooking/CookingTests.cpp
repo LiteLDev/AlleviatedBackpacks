@@ -57,7 +57,7 @@ ABP_REGISTER_SELFTEST("cooking.info", [](Context& ctx) {
     for (auto const* id : {"smelting", "smoking", "blasting", "auto_smelting", "auto_smoking", "auto_blasting"}) {
         auto* u = upgrade::byId(id);
         ctx.require(u != nullptr, std::string(id) + " registered");
-        ctx.check(u->info().groupOrId() == kGroup && u->info().maxPerBackpack == 1, std::string(id) + ": SB furnace upgrade group, max 1");
+        ctx.check(u->info().groupOrId() == kGroup && u->info().maxPerBackpack == upgrade::kUnlimitedPerBackpack, std::string(id) + ": SB furnace upgrade group, limited only by maxUpgradesPerStorage");
         ctx.check(u->info().toggleable && u->info().hasSettings, std::string(id) + ": switch and tab");
     }
     ctx.check(upgrade::byId("auto_smelting")->info().nameFallback == "Auto-smelting Upgrade", "SB item name");
