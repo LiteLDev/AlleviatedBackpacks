@@ -286,6 +286,8 @@ void appendUpgradeLines(::ItemStackBase const& stack, std::string& s) {
     static std::unordered_set<std::string> logged;
     if (logged.size() < 64 && logged.insert(id).second) log().info("tooltip: {} -> {} ({})", id, key, text ? "found" : "missing");
     if (!text) return;
+    // The game turns ~LINEBREAK~ into a line break; keep it working if it does not.
+    for (auto at = text->find("~LINEBREAK~"); at != std::string::npos; at = text->find("~LINEBREAK~")) text->replace(at, 11, "\n");
     // SB ToolSwapperUpgradeItem: the advanced tooltip names the Tool Swap key.
     if (auto at = text->find("%s"); at != std::string::npos) text->replace(at, 2, input::keyDisplayName(input::KeyAction::ToolSwap));
     std::vector<std::string> lines;

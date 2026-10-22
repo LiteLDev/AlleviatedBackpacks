@@ -19,6 +19,8 @@
 #include "mc/client/renderer/BaseActorRenderContext.h"
 #include "mc/client/renderer/actor/ItemRenderChunkType.h"
 #include "mc/client/renderer/actor/ItemRenderer.h"
+
+#include "client/render/BackpackIcons.h"
 #include "mc/client/renderer/screen/MinecraftUIRenderContext.h"
 #include "mc/deps/core/file/PathView.h"
 #include "mc/deps/core/math/Color.h"
@@ -204,6 +206,8 @@ void Painter::pixels(PixelArt const& art, float x, float y, float scale, Layer l
 
 void Painter::item(ItemStack const& stack, float x, float y, float scale, float alpha) {
     if (stack.isNull() || !stack.mItem) return;
+    // Backpacks: SB's 3D model icon (layered, tinted per backpack), see render/BackpackIcons.h.
+    if (render::drawBackpackIcon(*this, stack, x, y, scale, alpha)) return;
     mCmds->push_back({Layer::Items, ItemCmd{&stack, x, y, scale, alpha}});
 }
 

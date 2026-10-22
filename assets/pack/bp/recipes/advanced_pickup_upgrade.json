@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:advanced_pickup_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " D ",
-      "GPG",
+      "G#G",
       "RRR"
     ],
     "key": {
-      "D": { "item": "minecraft:diamond" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "P": { "item": "alleviatedbackpacks:pickup_upgrade" },
-      "R": { "item": "minecraft:redstone" }
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      },
+      "#": {
+        "item": "alleviatedbackpacks:pickup_upgrade"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:pickup_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:advanced_pickup_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:pickup_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:advanced_pickup_upgrade",
+      "count": 1
+    }
   }
 }

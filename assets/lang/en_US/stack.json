@@ -8,9 +8,7 @@
   "abp.stack.stack_downgrade_tier_1.name": "Stack Downgrade Tier 1",
   "abp.stack.stack_downgrade_tier_2.name": "Stack Downgrade Tier 2",
   "abp.stack.stack_downgrade_tier_3.name": "Stack Downgrade Tier 3",
-  "abp.stack.error.low_multiplier": "There's at least one slot that requires a stack limit higher than {}.",
-  "abp.stack.conversion.wrong": "§cThis conversion doesn't fit that upgrade.",
-  "abp.stack.conversion.done": "§aConverted to {}.",
+  "abp.stack.error.low_multiplier": "There's at least one slot or upgrade that requires stack limit higher than {}",
   "abp.stack.describe.multiplier": "§7Stack size multiplier: §f{}",
   "abp.stack.describe.total": "§7Slot limit (all stack upgrades): §f{}"
 }

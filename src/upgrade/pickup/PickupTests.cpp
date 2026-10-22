@@ -207,6 +207,7 @@ ABP_REGISTER_SELFTEST("pickup.with_void", [](Context& ctx) {
         }
         core::Filter pf(filtering::kBasicSlots);
         pf.setGhost(0, data("minecraft:apple", 1));
+        pf.setGhost(1, data("minecraft:dirt", 1)); // SB: the Void only sees what the Pickup upgrade takes
         setFilter(bp, ps, UpgradeTier::Basic, pf);
         int give = ctx.give(p, ctx.backpackItem(*bp), voidFirst ? 1 : 0);
         ctx.require(give >= 0, "give backpack");

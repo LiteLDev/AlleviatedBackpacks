@@ -1,0 +1,33 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shaped": {
+    "description": {
+      "identifier": "alleviatedbackpacks:iron_backpack_from_copper"
+    },
+    "tags": [
+      "crafting_table"
+    ],
+    "pattern": [
+      " M ",
+      "MBM",
+      " M "
+    ],
+    "key": {
+      "M": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:copper_backpack"
+      }
+    },
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:copper_backpack"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:iron_backpack",
+      "count": 1
+    }
+  }
+}

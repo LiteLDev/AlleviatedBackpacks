@@ -37,8 +37,8 @@ constexpr std::string_view kDyeFallbacks[]  = {
     "Light Gray", "Cyan", "Purple", "Blue", "Brown", "Green", "Red", "Black",
 };
 
-std::uint32_t const kDefaultMain   = core::BackpackData().mainColor;
-std::uint32_t const kDefaultAccent = core::BackpackData().accentColor;
+std::uint32_t const kDefaultMain   = core::kDefaultMainColor;
+std::uint32_t const kDefaultAccent = core::kDefaultAccentColor;
 
 std::string tierLabel(Player const& player, core::Tier tier) {
     auto i = static_cast<std::size_t>(tier);
@@ -46,7 +46,7 @@ std::string tierLabel(Player const& player, core::Tier tier) {
 }
 
 /// The item's current tint (0xRRGGBB), or -1.
-int currentTint(ItemStack const& stack) {
+int currentTint(ItemStackBase const& stack) {
     auto* item = stack.mItem.get();
     if (!item || !item->hasCustomColor(stack)) return -1;
     auto c  = stack.getColor();
@@ -54,46 +54,90 @@ int currentTint(ItemStack const& stack) {
     return (ch(c.r) << 16) | (ch(c.g) << 8) | ch(c.b);
 }
 
-std::optional<int> tintMarker(ItemStack const& stack) {
+std::optional<int> tintMarker(ItemStackBase const& stack) {
     if (!stack.mUserData || !stack.mUserData->contains(kTintKey, Tag::Type::Int)) return std::nullopt;
     int v = (*stack.mUserData)[kTintKey];
     return v;
 }
 
-void setTintMarker(ItemStack& stack, int value) {
+void setTintMarker(ItemStackBase& stack, int value) {
     auto tag = stack.mUserData ? stack.mUserData->clone() : std::make_unique<CompoundTag>();
     tag->putInt(std::string(kTintKey), value);
     stack.setUserData(std::move(tag));
 }
 
-/// Keeps the item tint equal to the stored main colour. Returns true if the stack changed.
-bool syncTint(ItemStack& stack, game::Backpack& bp) {
-    auto* item = stack.mItem.get();
-    if (!item) return false;
-    int  current = currentTint(stack);
-    auto marker  = tintMarker(stack);
-    auto& data   = bp.data();
-    // A tint that differs from what we last applied came from a cauldron: adopt it. Without a
-    // marker we never tinted this item: a tint on it is a cauldron dye unless we have a colour.
-    if ((marker && *marker != current) || (!marker && current >= 0 && data.mainColor == kDefaultMain)) {
-        data.mainColor = current < 0 ? kDefaultMain : (0xFF000000u | static_cast<std::uint32_t>(current));
-        bp.markDirty();
-    }
-    int expected = data.mainColor == kDefaultMain ? -1 : static_cast<int>(data.mainColor & 0xFFFFFFu);
-    bool changed = false;
-    if (expected != current) {
-        if (expected < 0) item->clearColor(stack);
-        else item->setColor(stack, mce::Color(static_cast<uint>(expected)));
+/// Keeps item colours, storage colours and the tint in sync. Returns true if the stack changed.
+bool syncColors(ItemStack& stack, game::Backpack* bp) {
+    bool changed  = false;
+    auto stored   = itemColors(stack);
+    auto defaults = defaultColors();
+    auto colors   = colorsOf(stack, bp);
+    int  current  = currentTint(stack);
+    auto marker   = tintMarker(stack);
+    // A tint that differs from what we last applied came from a cauldron: adopt it as the main
+    // colour. Without a marker we never tinted this item: a tint on it is a cauldron dye unless
+    // the backpack already has a main colour.
+    if ((marker && *marker != current) || (!marker && current >= 0 && colors.main == defaults.main)) {
+        colors.main = current < 0 ? defaults.main : (0xFF000000u | static_cast<std::uint32_t>(current));
+        setItemColors(stack, colors);
+        changed = true;
+    } else if (!stored && colors != defaults) {
+        setItemColors(stack, colors); // legacy item: its colours lived in the storage only
         changed = true;
     }
-    if (!marker || *marker != expected) {
+    if (bp && (bp->data().mainColor != colors.main || bp->data().accentColor != colors.accent)) {
+        bp->data().mainColor   = colors.main;
+        bp->data().accentColor = colors.accent;
+        bp->markDirty();
+    }
+    changed |= applyTint(stack, colors);
+    return changed;
+}
+} // namespace
+
+BackpackColors defaultColors() { return {kDefaultMain, kDefaultAccent}; }
+
+std::optional<BackpackColors> itemColors(ItemStackBase const& stack) {
+    auto const& tag = stack.mUserData;
+    if (!tag) return std::nullopt;
+    bool hasMain = tag->contains(kMainColorKey, Tag::Type::Int), hasAccent = tag->contains(kAccentColorKey, Tag::Type::Int);
+    if (!hasMain && !hasAccent) return std::nullopt;
+    auto colors = defaultColors();
+    if (hasMain) colors.main = 0xFF000000u | static_cast<std::uint32_t>(static_cast<int>((*tag)[kMainColorKey]));
+    if (hasAccent) colors.accent = 0xFF000000u | static_cast<std::uint32_t>(static_cast<int>((*tag)[kAccentColorKey]));
+    return colors;
+}
+
+BackpackColors colorsOf(ItemStackBase const& stack, game::Backpack const* backpack) {
+    if (auto c = itemColors(stack)) return *c;
+    if (backpack) return {backpack->data().mainColor, backpack->data().accentColor};
+    return defaultColors();
+}
+
+void setItemColors(ItemStackBase& stack, BackpackColors colors) {
+    auto tag = stack.mUserData ? stack.mUserData->clone() : std::make_unique<CompoundTag>();
+    tag->putInt(std::string(kMainColorKey), static_cast<int>(colors.main | 0xFF000000u));
+    tag->putInt(std::string(kAccentColorKey), static_cast<int>(colors.accent | 0xFF000000u));
+    stack.setUserData(std::move(tag));
+}
+
+bool applyTint(ItemStackBase& stack, BackpackColors colors) {
+    auto* item = stack.mItem.get();
+    if (!item) return false;
+    // Always tinted (also with the default colour): the item colour is the main colour the
+    // backpack model's cloth is drawn with (P2-11; vanilla clients get it this way too).
+    int  expected = static_cast<int>(colors.main & 0xFFFFFFu);
+    bool changed  = false;
+    if (expected != currentTint(stack)) {
+        item->setColor(stack, mce::Color(static_cast<uint>(expected)));
+        changed = true;
+    }
+    if (auto marker = tintMarker(stack); !marker || *marker != expected) {
         setTintMarker(stack, expected);
         changed = true;
     }
     return changed;
 }
-
-} // namespace
 
 std::string colorLabel(Player const& player, std::uint32_t argb) {
     if (auto dye = core::dyeFromColor(argb)) {
@@ -135,18 +179,8 @@ std::vector<std::string> buildLore(Player const& player, core::Tier tier, game::
     }
     lore.push_back("§r" + trFor(player, "abp.tiers.lore.upgrades", "§7Upgrades: §f{}/{}", installed, upgradeSlots));
     lore.insert(lore.end(), upgradeLines.begin(), upgradeLines.end());
-    if (bp && (bp->data().mainColor != kDefaultMain || bp->data().accentColor != kDefaultAccent)) {
-        lore.push_back(
-            "§r"
-            + trFor(
-                player,
-                "abp.tiers.lore.colors",
-                "§7Colors: §f{} §7/ §f{}",
-                colorLabel(player, bp->data().mainColor),
-                colorLabel(player, bp->data().accentColor)
-            )
-        );
-    }
+    // The colours show on the 3D model and icon (SB has no colour lore).
+
     return lore;
 }
 
@@ -160,7 +194,7 @@ bool refreshItem(Player const& /*player*/, ItemStack& stack, std::shared_ptr<gam
         stack.setDamageValue(0);
         changed = true;
     }
-    if (bp) changed |= syncTint(stack, *bp);
+    changed |= syncColors(stack, bp.get());
     // The storage tier is the truth once bound (a higher item tier is applied on next open).
     auto shownTier = bp && static_cast<int>(bp->tier()) > static_cast<int>(*tier) ? bp->tier() : *tier;
     // SB backpacks carry no lore (their tooltip is "Press <Left Shift> to View Contents" and the

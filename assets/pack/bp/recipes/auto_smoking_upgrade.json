@@ -4,19 +4,39 @@
     "description": {
       "identifier": "alleviatedbackpacks:auto_smoking_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "RHR",
-      "GUG",
-      "RHR"
+      "DHD",
+      "RSH",
+      "GHG"
     ],
     "key": {
-      "R": { "item": "minecraft:redstone" },
-      "H": { "item": "minecraft:hopper" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "U": { "item": "alleviatedbackpacks:smoking_upgrade" }
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "H": {
+        "item": "minecraft:hopper"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      },
+      "S": {
+        "item": "alleviatedbackpacks:smoking_upgrade"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:smoking_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:auto_smoking_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:smoking_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:auto_smoking_upgrade",
+      "count": 1
+    }
   }
 }

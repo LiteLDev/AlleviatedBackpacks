@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:void_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " E ",
       "OBO",
-      "LOL"
+      "ROR"
     ],
     "key": {
-      "E": { "item": "minecraft:ender_pearl" },
-      "O": { "item": "minecraft:obsidian" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "L": { "item": "minecraft:lava_bucket" }
+      "E": {
+        "item": "minecraft:ender_pearl"
+      },
+      "O": {
+        "item": "minecraft:obsidian"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:void_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:void_upgrade",
+      "count": 1
+    }
   }
 }

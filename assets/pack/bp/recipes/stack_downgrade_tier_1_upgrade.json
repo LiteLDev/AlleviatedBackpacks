@@ -4,18 +4,33 @@
     "description": {
       "identifier": "alleviatedbackpacks:stack_downgrade_tier_1_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       "SFS",
       "SBS",
       "FSF"
     ],
     "key": {
-      "S": { "item": "minecraft:stick" },
-      "F": { "item": "minecraft:flint" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" }
+      "S": {
+        "item": "minecraft:stick"
+      },
+      "F": {
+        "item": "minecraft:flint"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:stack_downgrade_tier_1_upgrade", "count": 1 }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:stack_downgrade_tier_1_upgrade",
+      "count": 1
+    }
   }
 }

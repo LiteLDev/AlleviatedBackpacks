@@ -4,18 +4,33 @@
     "description": {
       "identifier": "alleviatedbackpacks:leather_backpack"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       "SLS",
-      "LCL",
+      "SCS",
       "LLL"
     ],
     "key": {
-      "S": { "item": "minecraft:string" },
-      "L": { "item": "minecraft:leather" },
-      "C": { "item": "minecraft:chest" }
+      "S": {
+        "item": "minecraft:string"
+      },
+      "L": {
+        "item": "minecraft:leather"
+      },
+      "C": {
+        "item": "minecraft:chest"
+      }
     },
-    "unlock": [{ "item": "minecraft:leather" }],
-    "result": { "item": "alleviatedbackpacks:leather_backpack" }
+    "unlock": [
+      {
+        "item": "minecraft:leather"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:leather_backpack",
+      "count": 1
+    }
   }
 }

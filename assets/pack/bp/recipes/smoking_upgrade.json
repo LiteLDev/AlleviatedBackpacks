@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:smoking_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       "RIR",
       "IBI",
-      "RFR"
+      "RSR"
     ],
     "key": {
-      "R": { "item": "minecraft:redstone" },
-      "I": { "item": "minecraft:iron_ingot" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "F": { "item": "minecraft:smoker" }
+      "R": {
+        "item": "minecraft:redstone"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "S": {
+        "item": "minecraft:smoker"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:smoking_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:smoking_upgrade",
+      "count": 1
+    }
   }
 }

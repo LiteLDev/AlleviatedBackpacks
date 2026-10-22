@@ -1,208 +1,334 @@
-// Void upgrade (basic + advanced): destroys matching items instead of storing them.
+// Void upgrade (basic + advanced), as Sophisticated Core's VoidUpgradeWrapper:
 //
-// - Basic: 9 filter slots (allow/deny list, match by item).
-// - Advanced: 16 filter slots, match by item/namespace/tag, NBT, durability, and an "overflow"
-//   mode that only voids what doesn't fit next to the stack already stored.
-// - Both: "work in GUI" toggle (whether items a player puts in by hand are voided too).
-//
-// Voiding happens on every insert path (pickup, automation, other upgrades, and player inserts
-// when "work in GUI" is on) through an insert filter, and on item pickup from the ground through
-// `onPickup` (even without a Pickup upgrade, like the original mod).
+// - Modes ALWAYS / SLOT_OVERFLOW / STORAGE_OVERFLOW (VoidRules.h); `voidAlwaysEnabled` (config)
+//   turns ALWAYS into SLOT_OVERFLOW.
+// - Allow list by default: an empty allow list voids nothing, an empty block list everything.
+// - "Work in GUI" (default off): items put in by hand are voided too (ALWAYS: the slot is voided
+//   on the next tick, SLOT_OVERFLOW: what overflows the clicked slot).
+// - Fluids: tank fills are voided through the same filter; filled containers (buckets, bottles)
+//   in the filter stand for their fluid.
+// - Basic: 9 filter slots, allow/block list only. Advanced: 16 slots, item/mod/tag match,
+//   durability and NBT.
 
 #include "upgrade/void/VoidUpgrade.h"
 
 #include <algorithm>
+#include <memory>
+#include <set>
+#include <vector>
+
+#include "ll/api/event/EventBus.h"
+#include "ll/api/event/world/ServerLevelTickEvent.h"
 
 #include "mc/world/actor/player/Player.h"
+#include "mc/world/item/ItemStack.h"
 
-#include "game/BackpackItem.h"
+#include "api/BackpackCapabilities.h"
+#include "api/Service.h"
 #include "game/ItemConv.h"
+#include "mod/Config.h"
 #include "mod/I18n.h"
+#include "mod/Log.h"
+#include "mod/Module.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/FilterMenu.h"
+#include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/filter/FilterCommon.h"
+
+ABP_REGISTER_CONFIG("void", abp::upgrade::voiding::VoidConfig);
 
 namespace abp::upgrade::voiding {
 
-// ---- logic ------------------------------------------------------------------------------------
+// ---- settings -----------------------------------------------------------------------------------
+
+VoidTierConfig tierConfig(bool advanced) {
+    auto const& cfg = config::get<VoidConfig>();
+    auto        c   = advanced ? cfg.advancedVoidUpgrade : cfg.voidUpgrade;
+    c.filterSlots   = std::clamp(c.filterSlots, 1, 20);
+    c.slotsInRow    = std::clamp(c.slotsInRow, 1, 6);
+    return c;
+}
 
 VoidSettings VoidSettings::read(UpgradeContext const& ctx) {
     VoidSettings s;
-    auto const&  j = ctx.settings();
+    auto const&  j    = ctx.settings();
     auto*        type = upgradeFor(ctx.state().item);
     s.advanced        = type && type->info().id == kAdvancedId;
-    int slots         = s.advanced ? kAdvancedSlots : kBasicSlots;
-    auto filterJson   = j.is_object() ? j.value(std::string(kFilterKey), nlohmann::json::object()) : nlohmann::json::object();
-    s.filter          = core::Filter::fromJson(filterJson, slots);
-    if (!s.advanced) {
-        // The basic upgrade only matches by item.
-        s.filter.matchBy         = core::MatchBy::Item;
-        s.filter.matchNbt        = false;
-        s.filter.matchDurability = false;
+    auto tc           = tierConfig(s.advanced);
+    s.voidAlwaysEnabled = tc.voidAlwaysEnabled;
+    s.filter            = readFilter(j, s.advanced);
+    if (j.is_object()) {
+        if (auto it = j.find(kVoidTypeKey); it != j.end() && it->is_string()) {
+            s.storedType = voidTypeFromName(it->get<std::string>());
+        } else if (auto old = j.find("overflow"); old != j.end() && old->is_boolean()) {
+            // Phase-1 "overflow" flag (like SC's legacy migration).
+            s.storedType = old->get<bool>() ? VoidType::SlotOverflow : VoidType::Always;
+        }
+        if (auto it = j.find(kWorkInGuiKey); it != j.end() && it->is_boolean()) s.workInGui = it->get<bool>();
     }
-    // An empty filter voids nothing (see matches()).
-    s.filter.emptyAllowsAll = false;
-    auto flag               = [&](std::string_view key) {
-        if (!j.is_object()) return false;
-        auto it = j.find(std::string(key));
-        return it != j.end() && it->is_boolean() && it->get<bool>();
-    };
-    s.overflow  = s.advanced && flag(kOverflowKey);
-    s.workInGui = flag(kWorkInGuiKey);
     return s;
 }
 
-bool isProtected(core::ItemStackData const& item) { return game::isBackpack(item) || upgradeFor(item) != nullptr; }
-
-bool matches(VoidSettings const& s, core::ItemStackData const& item) {
-    if (item.empty() || isProtected(item)) return false;
-    // An empty filter never voids, in either mode: a fresh upgrade toggled to "deny" before any
-    // item was listed must not start destroying everything.
-    if (s.filter.isEmpty()) return false;
-    return s.filter.passes(item, &game::ItemConv::tags());
+core::Filter readFilter(nlohmann::json const& settings, bool advanced) {
+    int  slots  = tierConfig(advanced).filterSlots;
+    auto stored = settings.is_object() ? settings.value(std::string(kFilterKey), nlohmann::json()) : nlohmann::json();
+    auto f      = core::Filter::fromJson(stored, slots, core::FilterDefaults{.allowList = true});
+    if (stored.is_object() && !stored.empty() && !stored.contains("v") && f.mode == core::FilterMode::Deny && f.isEmpty()) {
+        f.mode = core::FilterMode::Allow; // phase 1: an empty list never voided anything
+    }
+    filtering::normalize(f, advanced ? UpgradeTier::Advanced : UpgradeTier::Basic, slots);
+    return f;
 }
 
-core::InsertVerdict verdict(VoidSettings const& s, core::InsertQuery const& q) {
-    using V = core::InsertVerdict;
-    switch (q.ctx.source) {
-    case core::Source::Internal:
-        return V::Allow;
-    case core::Source::Player:
-        if (!s.workInGui) return V::Allow;
-        break;
-    default:
-        break;
-    }
-    if (!matches(s, q.stack)) return V::Allow;
-    if (!s.overflow) return V::Void;
+filtering::FilterSpec filterSpec(bool advanced) {
+    auto tc = tierConfig(advanced);
+    return filtering::FilterSpec{tc.filterSlots, tc.slotsInRow, advanced, filtering::TypeButton::AllowList};
+}
 
-    // Overflow mode: keep one stack (slot) of each matching item; whatever doesn't fit there is
-    // voided instead of starting new stacks (or bouncing back when the backpack is full).
-    if (q.slot < 0) return V::VoidOverflow; // whole stack: insert what fits, void the rest
-    auto const& inv = q.inventory;
-    if (!inv.at(q.slot).empty()) return V::Allow; // merging into a stack (or a different item: no fit anyway)
-    for (int i = 0; i < inv.size(); ++i) {
-        if (i == q.slot) continue;
-        auto const& cur = inv.at(i);
-        if (!cur.empty() && cur.sameItem(q.stack)) return V::Void; // would start a second stack
+bool VoidSettings::matches(core::ItemStackData const& item) const {
+    return !item.empty() && filter.passes(item, &filtering::matcher());
+}
+
+api::FluidStack containedFluid(core::ItemStackData const& item) {
+    if (item.empty()) return {};
+    auto stack   = game::ItemConv::toStack(item, 1);
+    auto handler = api::service().itemFluid(stack);
+    return handler ? handler->drainAny(api::kBucketVolume, true) : api::FluidStack{};
+}
+
+bool VoidSettings::voidsFluid(api::FluidStack const& fluid) const {
+    if (fluid.empty()) return false;
+    bool matched = false;
+    for (auto const& g : filter.ghosts) {
+        if (!g.empty() && containedFluid(g).isSameFluid(fluid)) {
+            matched = true;
+            break;
+        }
     }
-    return V::Allow;
+    return (filter.mode == core::FilterMode::Allow) == matched;
+}
+
+VoidRules VoidSettings::rules() const {
+    VoidRules r;
+    r.type            = type();
+    r.workInGui       = workInGui;
+    r.matchDurability = filter.matchDurability;
+    r.matchNbt        = filter.matchNbt;
+    r.matches         = [s = *this](core::ItemStackData const& item) { return s.matches(item); };
+    return r;
 }
 
 namespace {
 
-/// True while `ctx` still points at the same kind of Void upgrade (a settings menu can outlive
-/// it, and another tier could be installed into the slot meanwhile).
-bool alive(UpgradeContext const& ctx, bool advanced) {
+/// True while `ctx` still points at a Void upgrade (a settings menu can outlive it).
+bool alive(UpgradeContext const& ctx) {
     auto const& slots = ctx.backpack().data().upgrades;
     if (ctx.slot() < 0 || ctx.slot() >= static_cast<int>(slots.size())) return false;
     auto* type = upgradeFor(slots[static_cast<std::size_t>(ctx.slot())].item);
-    return type && type->info().id == (advanced ? kAdvancedId : kBasicId);
+    return type && (type->info().id == kBasicId || type->info().id == kAdvancedId);
 }
 
-/// Settings parsed by the last `attach()` (hooks are rebuilt on every settings change).
-struct SettingsCache {
-    bool         valid = false;
-    VoidSettings settings;
+void writeSetting(UpgradeContext const& ctx, std::string_view key, nlohmann::json value) {
+    if (!alive(ctx)) return;
+    auto& j = ctx.settings();
+    if (!j.is_object()) j = nlohmann::json::object();
+    j[std::string(key)] = std::move(value);
+    ctx.saveSettings(true);
+}
+
+// ---- "work in GUI" with ALWAYS: void the slot on the next tick (SC onSlotChange + tick) -----------
+
+struct GuiVoider : std::enable_shared_from_this<GuiVoider> {
+    std::weak_ptr<game::Backpack> backpack;
+    VoidSettings                  settings;
+    std::set<int>                 slots;
+    bool                          scheduled = false;
+
+    void onSlotChange(core::BackpackInventory const& inv, int slot);
+    void drain();
 };
 
-/// How many of `item` the backpack can still take: free room in stacks of the same item, or
-/// (none stored yet) one empty slot. Respects every insert filter.
-int room(core::BackpackInventory const& inv, core::ItemStackData const& item, core::AccessContext const& ac) {
-    long long fits   = 0;
-    bool      stored = false;
-    int       empty  = -1;
-    for (int i = 0; i < inv.size(); ++i) {
-        auto const& cur = inv.at(i);
-        if (cur.empty()) {
-            if (empty < 0 && inv.checkInsert(i, item, ac) == core::InsertVerdict::Allow) empty = i;
-            continue;
-        }
-        if (!cur.sameItem(item)) continue;
-        stored = true;
-        if (inv.checkInsert(i, item, ac) == core::InsertVerdict::Allow) fits += std::max(0, inv.slotLimit(i, cur) - cur.count);
+std::vector<std::weak_ptr<GuiVoider>> gScheduled;
+
+void GuiVoider::onSlotChange(core::BackpackInventory const& inv, int slot) {
+    if (!settings.workInGui || settings.shouldVoidOverflow()) return;
+    if (slot < 0 || slot >= inv.size() || !settings.matches(inv.at(slot))) return;
+    slots.insert(slot);
+    if (!scheduled) {
+        scheduled = true;
+        gScheduled.push_back(weak_from_this());
     }
-    if (!stored && empty >= 0) fits = inv.slotLimit(empty, item);
-    return static_cast<int>(std::min<long long>(fits, item.count));
 }
 
-// ---- settings menu ------------------------------------------------------------------------------
+void GuiVoider::drain() {
+    scheduled = false;
+    auto bp   = backpack.lock();
+    if (!bp || slots.empty()) return;
+    auto& inv = bp->inventory();
+    for (int slot : slots) {
+        // Only what still matches (the slot may have changed since it was queued).
+        if (slot < inv.size() && settings.matches(inv.at(slot))) {
+            (void)inv.extract(slot, inv.at(slot).count, core::AccessContext{core::Source::Upgrade});
+        }
+    }
+    slots.clear();
+}
 
-/// The filter editor plus two toggles in the free control-row slots: overflow mode (advanced)
-/// and "work in GUI".
+class VoidScheduler {
+public:
+    void install() {
+        mTick = ll::event::EventBus::getInstance().emplaceListener<ll::event::ServerLevelTickEvent>([](auto&) {
+            if (gScheduled.empty()) return;
+            auto list = std::move(gScheduled);
+            gScheduled.clear();
+            for (auto const& w : list) {
+                if (auto v = w.lock()) v->drain();
+            }
+        });
+    }
+    void uninstall() {
+        ll::event::EventBus::getInstance().removeListener(mTick);
+        gScheduled.clear();
+    }
+
+private:
+    ll::event::ListenerPtr mTick;
+};
+
+// ---- fluids (SB BackpackFluidHandler.fill) -------------------------------------------------------
+
+bool shouldVoidFluid(std::shared_ptr<game::Backpack> const& bp, api::FluidStack const& fluid, VoidType type) {
+    bool voids = false;
+    forEachInstalled(bp, true, [&](IUpgrade& u, UpgradeContext const& ctx) {
+        if (voids || (u.info().id != kBasicId && u.info().id != kAdvancedId)) return;
+        auto s = VoidSettings::read(ctx);
+        voids  = s.type() == type && s.voidsFluid(fluid);
+    });
+    return voids;
+}
+
+class VoidFluidHandler final : public api::IFluidHandler {
+public:
+    VoidFluidHandler(std::shared_ptr<game::Backpack> bp, std::shared_ptr<api::IFluidHandler> inner)
+    : mBackpack(std::move(bp)),
+      mInner(std::move(inner)) {}
+
+    [[nodiscard]] int             tanks() const override { return mInner->tanks(); }
+    [[nodiscard]] api::FluidStack fluidInTank(int tank) const override { return mInner->fluidInTank(tank); }
+    [[nodiscard]] int             tankCapacity(int tank) const override { return mInner->tankCapacity(tank); }
+    [[nodiscard]] bool isFluidValid(int tank, api::FluidStack const& stack) const override { return mInner->isFluidValid(tank, stack); }
+
+    int fill(api::FluidStack const& resource, bool simulate) override {
+        if (resource.empty()) return 0;
+        if (shouldVoidFluid(mBackpack, resource, VoidType::Always)) return resource.amount;
+        if (shouldVoidFluid(mBackpack, resource, VoidType::SlotOverflow)) {
+            (void)mInner->fill(resource.copyWithAmount(std::min(resource.amount, oneTankSpace(resource))), simulate);
+            return resource.amount;
+        }
+        int filled = mInner->fill(resource, simulate);
+        if (filled == resource.amount || !shouldVoidFluid(mBackpack, resource, VoidType::StorageOverflow)) return filled;
+        return resource.amount;
+    }
+    api::FluidStack drain(api::FluidStack const& resource, bool simulate) override { return mInner->drain(resource, simulate); }
+    api::FluidStack drainAny(int maxDrain, bool simulate) override { return mInner->drainAny(maxDrain, simulate); }
+
+private:
+    /// SB `fillOneTank`: the first tank with this fluid, else the first empty one.
+    [[nodiscard]] int oneTankSpace(api::FluidStack const& resource) const {
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int t = 0; t < mInner->tanks(); ++t) {
+                auto f = mInner->fluidInTank(t);
+                if (pass == 0 ? f.isSameFluid(resource) : f.empty()) return std::max(0, mInner->tankCapacity(t) - (f.empty() ? 0 : f.amount));
+            }
+        }
+        return 0;
+    }
+
+    std::shared_ptr<game::Backpack>     mBackpack;
+    std::shared_ptr<api::IFluidHandler> mInner;
+};
+
+struct FluidWrapperRegistrar {
+    FluidWrapperRegistrar() {
+        api::backpack::addFluidWrapper([](std::shared_ptr<game::Backpack> const& bp, std::shared_ptr<api::IFluidHandler> inner)
+                                           -> std::shared_ptr<api::IFluidHandler> {
+            if (!inner || !bp || (!hasActive(*bp, kBasicId) && !hasActive(*bp, kAdvancedId))) return inner;
+            return std::make_shared<VoidFluidHandler>(bp, std::move(inner));
+        });
+    }
+};
+FluidWrapperRegistrar gFluidWrapper;
+
+// ---- settings menu (chest fallback) ---------------------------------------------------------------
+
+std::pair<std::string, std::vector<std::string>> typeText(Player& player, VoidType t, bool alwaysEnabled) {
+    std::vector<std::string> lore;
+    std::string              title;
+    switch (t) {
+    case VoidType::Always:
+        title = trFor(player, "abp.void.button.void_always", "Void Always");
+        break;
+    case VoidType::SlotOverflow:
+        title = trFor(player, "abp.void.button.void_slot_overflow", "Void Slot Overflow");
+        lore  = {"§7" + trFor(player, "abp.void.button.void_slot_overflow.detail", "Allows single slot to be filled with the item\nand voids anything that overflows")};
+        break;
+    case VoidType::StorageOverflow:
+        title = trFor(player, "abp.void.button.void_storage_overflow", "Void Storage Overflow");
+        lore  = {"§7" + trFor(player, "abp.void.button.void_storage_overflow.detail", "Allows whole storage to be filled with the item\n and voids anything that overflows")};
+        break;
+    }
+    if (!alwaysEnabled && t != VoidType::Always) {
+        lore.push_back("§c" + trFor(player, "abp.void.button.void_always_disabled", "Void Always option is disabled"));
+    }
+    return {title, lore};
+}
+
 class VoidMenu : public ui::FilterMenu {
 public:
     VoidMenu(std::string title, UpgradeContext ctx, bool advanced, Options options)
     : FilterMenu(
           std::move(title),
-          [ctx, advanced] {
-              int slots = advanced ? kAdvancedSlots : kBasicSlots;
-              if (!alive(ctx, advanced) || !ctx.settings().is_object()) return core::Filter(slots);
-              return core::Filter::fromJson(ctx.settings().value(std::string(kFilterKey), nlohmann::json::object()), slots);
-          },
-          [ctx, advanced](core::Filter const& f) {
-              if (!alive(ctx, advanced)) return;
-              if (!ctx.settings().is_object()) ctx.settings() = nlohmann::json::object();
-              ctx.settings()[std::string(kFilterKey)] = f.toJson();
-              ctx.saveSettings(true);
-          },
+          [ctx] { return alive(ctx) ? VoidSettings::read(ctx).filter : core::Filter(9, core::FilterDefaults{.allowList = true}); },
+          [ctx](core::Filter const& f) { writeSetting(ctx, kFilterKey, f.toJson()); },
           std::move(options)
       ),
-      mCtx(std::move(ctx)),
-      mAdvanced(advanced) {}
+      mCtx(std::move(ctx)) {
+        (void)advanced;
+    }
 
     void build(Player& player) override {
         FilterMenu::build(player);
+        if (!alive(mCtx)) return;
         int  control = size() - 9;
-        auto onOff   = [&](bool v) {
-            return v ? trFor(player, "abp.filter.on", "§aOn") : trFor(player, "abp.filter.off", "§cOff");
-        };
-        if (!alive(mCtx, mAdvanced)) return;
-        auto s = VoidSettings::read(mCtx);
-        if (mAdvanced) {
-            setSlot(
-                control + 5,
-                std::make_shared<ui::ButtonSlot>(
-                    ui::icon(
-                        s.overflow ? "minecraft:hopper" : "minecraft:lava_bucket",
-                        s.overflow ? trFor(player, "abp.void.mode.overflow", "Void: only overflow")
-                                   : trFor(player, "abp.void.mode.all", "Void: all matching items"),
-                        {s.overflow ? trFor(player, "abp.void.mode.overflow.desc", "§7Keeps one stack, voids what doesn't fit")
-                                    : trFor(player, "abp.void.mode.all.desc", "§7Every matching item is destroyed"),
-                         trFor(player, "abp.filter.click_to_toggle", "§7Click to toggle")}
-                    ),
-                    [this](ui::ClickContext const&) { toggle(kOverflowKey); }
-                )
-            );
-        }
+        auto s       = VoidSettings::read(mCtx);
         setSlot(
-            control + 6,
+            control + 5,
             std::make_shared<ui::ButtonSlot>(
                 ui::icon(
-                    "minecraft:chest",
-                    trFor(player, "abp.void.work_in_gui", "Work in GUI: {}", onOff(s.workInGui)),
-                    {trFor(player, "abp.void.work_in_gui.desc", "§7Also void items you put in by hand"),
-                     trFor(player, "abp.filter.click_to_toggle", "§7Click to toggle")}
+                    "minecraft:crafting_table",
+                    s.workInGui ? trFor(player, "abp.void.button.works_in_gui", "Works in GUI as well")
+                                : trFor(player, "abp.void.button.only_automatic", "Only works with other upgrades/automation")
                 ),
-                [this](ui::ClickContext const&) { toggle(kWorkInGuiKey); }
+                [this](ui::ClickContext const&) {
+                    writeSetting(mCtx, kWorkInGuiKey, !VoidSettings::read(mCtx).workInGui);
+                    invalidate();
+                }
             )
+        );
+        auto text = typeText(player, s.type(), s.voidAlwaysEnabled);
+        setSlot(
+            control + 6,
+            std::make_shared<ui::ButtonSlot>(ui::icon("minecraft:lava_bucket", text.first, text.second), [this](ui::ClickContext const&) {
+                auto cur = VoidSettings::read(mCtx);
+                writeSetting(mCtx, kVoidTypeKey, std::string(toString(next(cur.type(), cur.voidAlwaysEnabled))));
+                invalidate();
+            })
         );
     }
 
 private:
-    void toggle(std::string_view key) {
-        if (!alive(mCtx, mAdvanced)) return;
-        auto& j = mCtx.settings();
-        if (!j.is_object()) j = nlohmann::json::object();
-        auto it             = j.find(std::string(key));
-        bool on             = it != j.end() && it->is_boolean() && it->get<bool>();
-        j[std::string(key)] = !on;
-        mCtx.saveSettings(true);
-        invalidate();
-    }
-
     UpgradeContext mCtx;
-    bool           mAdvanced;
 };
 
 // ---- upgrades ---------------------------------------------------------------------------------
@@ -210,78 +336,96 @@ private:
 class VoidUpgradeBase : public IUpgrade {
 public:
     void attach(UpgradeContext const& ctx, core::BackpackInventory& inventory) override {
-        auto s                         = VoidSettings::read(ctx);
-        ctx.transient<SettingsCache>() = SettingsCache{true, s};
-        inventory.addInsertFilter(ctx.hookOwner(), kInsertPriority, [s = std::move(s)](core::InsertQuery const& q) {
-            return verdict(s, q);
+        auto s = VoidSettings::read(ctx);
+        inventory.addInsertFilter(ctx.hookOwner(), kInsertPriority, [r = s.rules()](core::InsertQuery const& q) { return verdict(r, q); });
+        auto gui      = std::make_shared<GuiVoider>();
+        gui->backpack = ctx.backpackPtr();
+        gui->settings = s;
+        inventory.addInsertListener(ctx.hookOwner(), [gui](int slot, core::AccessContext const& ac) {
+            if (ac.source != core::Source::Player) return;
+            if (auto bp = gui->backpack.lock()) gui->onSlotChange(bp->inventory(), slot);
+        });
+        inventory.addExtractListener(ctx.hookOwner(), [gui](int slot, core::ItemStackData const&, core::AccessContext const& ac) {
+            if (ac.source != core::Source::Player) return;
+            if (auto bp = gui->backpack.lock()) gui->onSlotChange(bp->inventory(), slot);
         });
     }
 
-    /// Items picked up from the ground are voided even without a Pickup upgrade. The decision
-    /// goes through the inventory's insert filters, so a Deny from the foundation rules (e.g.
-    /// shulker boxes) or another upgrade wins over voiding.
-    void onPickup(UpgradeContext const& ctx, core::ItemStackData& item) override {
-        auto&       cache = ctx.transient<SettingsCache>();
-        auto const& s     = cache.valid ? cache.settings : (cache = SettingsCache{true, VoidSettings::read(ctx)}).settings;
-        if (!matches(s, item)) return;
-        auto const&         inv = ctx.backpack().inventory();
-        core::AccessContext ac{core::Source::Pickup, ctx.player()};
-        switch (inv.checkInsert(-1, item, ac)) {
-        case core::InsertVerdict::Void:
-            item.count = 0;
-            return;
-        case core::InsertVerdict::VoidOverflow:
-            // Overflow: void only what the backpack couldn't take; what fits is left for a Pickup
-            // upgrade (or the player's inventory).
-            item.count = room(inv, item, ac);
-            return;
-        default:
-            return;
-        }
-    }
-
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
-        bool                     advanced = info().id == kAdvancedId;
-        ui::FilterMenu::Options  options;
+        bool                    advanced = info().id == kAdvancedId;
+        ui::FilterMenu::Options options;
         options.allowMatchBy    = advanced;
         options.allowNbt        = advanced;
         options.allowDurability = advanced;
         options.onBack          = [bp = ctx.backpackPtr()](Player& p) {
             ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
         };
-        options.slots = advanced ? kAdvancedSlots : kBasicSlots;
+        options.slots = tierConfig(advanced).filterSlots;
         return std::make_shared<VoidMenu>(displayName(*this, &player), ctx.withPlayer(nullptr), advanced, std::move(options));
     }
 
     [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
-        auto s     = VoidSettings::read(ctx);
-        int  count = static_cast<int>(std::count_if(s.filter.ghosts.begin(), s.filter.ghosts.end(), [](auto const& g) {
-            return !g.empty();
-        }));
-        if (s.filter.matchBy == core::MatchBy::Tag) count += static_cast<int>(s.filter.tags.size());
-        std::vector<std::string> lore;
-        lore.push_back(
-            s.filter.mode == core::FilterMode::Allow
-                ? trFor(player, "abp.void.describe.allow", "§7Voids {} listed item(s)", count)
-                : trFor(player, "abp.void.describe.deny", "§7Voids everything except {} listed item(s)", count)
-        );
-        if (s.overflow) lore.push_back(trFor(player, "abp.void.describe.overflow", "§7Only overflow"));
-        if (s.workInGui) lore.push_back(trFor(player, "abp.void.describe.gui", "§7Also in the GUI"));
-        return lore;
+        auto s = VoidSettings::read(ctx);
+        return {"§7" + typeText(player, s.type(), true).first};
     }
 };
+
+// ---- native tab (client: client/ui/tabs/void) --------------------------------------------------
+
+ABP_REGISTER_TAB_DATA(net::TabDataProvider{
+    "void",
+    [](Player& player, UpgradeContext const& ctx) {
+        auto s = VoidSettings::read(ctx);
+        return nlohmann::json{
+            {"title",             s.advanced ? trFor(player, "abp.void.tab.advanced", "Adv. Void") : trFor(player, "abp.void.tab", "Void")},
+            {"tooltip",           s.advanced ? trFor(player, "abp.void.tab.advanced.tooltip", "Advanced Void Settings")
+                                             : trFor(player, "abp.void.tab.tooltip", "Void Settings")},
+            {"workInGui",         s.workInGui},
+            {"voidType",          static_cast<int>(s.type())},
+            {"voidAlwaysEnabled", s.voidAlwaysEnabled},
+            {"filter",            filtering::tabJson(s.filter, filterSpec(s.advanced))},
+        };
+    },
+});
+
+ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
+    "void",
+    [](Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+        if (!data.is_object() || !alive(ctx)) return false;
+        auto s = VoidSettings::read(ctx);
+        if (data.value("filter", std::string{}) == "filter") {
+            auto spec = filterSpec(s.advanced);
+            if (filtering::applyAction(s.filter, spec, data, filtering::cursorOf(player))) {
+                filtering::normalize(s.filter, s.advanced ? UpgradeTier::Advanced : UpgradeTier::Basic, spec.slots);
+                writeSetting(ctx, kFilterKey, s.filter.toJson());
+            }
+            return true;
+        }
+        auto op = data.value("op", std::string{});
+        if (op == "workInGui") {
+            writeSetting(ctx, kWorkInGuiKey, !s.workInGui);
+            return true;
+        }
+        if (op == "voidType") {
+            writeSetting(ctx, kVoidTypeKey, std::string(toString(next(s.type(), s.voidAlwaysEnabled))));
+            return true;
+        }
+        return false;
+    },
+});
 
 class VoidUpgrade final : public VoidUpgradeBase {
 public:
     [[nodiscard]] UpgradeInfo const& info() const override {
         static UpgradeInfo const i{
-            .id           = std::string(kBasicId),
-            .itemId       = "alleviatedbackpacks:void_upgrade",
-            .nameKey      = "abp.void.name",
-            .nameFallback = "Void Upgrade",
-            .tier         = UpgradeTier::Basic,
-            .group        = "void",
-            .hasSettings  = true,
+            .id             = std::string(kBasicId),
+            .itemId         = "alleviatedbackpacks:void_upgrade",
+            .nameKey        = "abp.void.name",
+            .nameFallback   = "Void Upgrade",
+            .tier           = UpgradeTier::Basic,
+            .group          = "void",
+            .maxPerBackpack = 9, // SB: no limit
+            .hasSettings    = true,
         };
         return i;
     }
@@ -291,13 +435,14 @@ class AdvancedVoidUpgrade final : public VoidUpgradeBase {
 public:
     [[nodiscard]] UpgradeInfo const& info() const override {
         static UpgradeInfo const i{
-            .id           = std::string(kAdvancedId),
-            .itemId       = "alleviatedbackpacks:advanced_void_upgrade",
-            .nameKey      = "abp.void.advanced_name",
-            .nameFallback = "Advanced Void Upgrade",
-            .tier         = UpgradeTier::Advanced,
-            .group        = "void",
-            .hasSettings  = true,
+            .id             = std::string(kAdvancedId),
+            .itemId         = "alleviatedbackpacks:advanced_void_upgrade",
+            .nameKey        = "abp.void.advanced_name",
+            .nameFallback   = "Advanced Void Upgrade",
+            .tier           = UpgradeTier::Advanced,
+            .group          = "void",
+            .maxPerBackpack = 9,
+            .hasSettings    = true,
         };
         return i;
     }
@@ -308,3 +453,4 @@ public:
 
 ABP_REGISTER_UPGRADE(abp::upgrade::voiding::VoidUpgrade);
 ABP_REGISTER_UPGRADE(abp::upgrade::voiding::AdvancedVoidUpgrade);
+ABP_REGISTER_MODULE(abp::upgrade::voiding::VoidScheduler);

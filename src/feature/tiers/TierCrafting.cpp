@@ -1,5 +1,6 @@
 // Crafting result hooks: a crafted backpack (tier upgrade, dyeing, netherite smithing) becomes the
-// same backpack as the consumed one, so it keeps its contents, upgrades and settings.
+// same backpack as the consumed one, so it keeps its contents, upgrades, settings and colours;
+// a "next tier" upgrade keeps the consumed upgrade's settings (SC `upgrade_next_tier`).
 //
 // Flow of a vanilla craft request on the server (ItemStackRequestActionCraftHandler):
 //   CraftRecipe action  -> CraftHandlerBase::handleCraftAction (results computed)
@@ -35,6 +36,7 @@
 #include "game/Storage.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
+#include "upgrade/IUpgrade.h"
 
 namespace abp::tiers {
 
@@ -58,51 +60,97 @@ std::optional<BackpackCraft> analyse(std::vector<ConsumedInput> const& inputs) {
     }
     if (!backpack) return std::nullopt;
     BackpackCraft craft;
-    craft.source = backpack->item;
-    auto gridIndex = [](ConsumedInput const& in) { return in.inGrid ? craftGridIndex(in.slot) : -1; };
-    int  bpIndex   = gridIndex(*backpack);
-    std::vector<std::uint32_t> main, accent;
+    craft.source  = backpack->item;
+    auto column   = [](ConsumedInput const& in) {
+        int index = in.inGrid ? craftGridIndex(in.slot) : -1;
+        return index < 0 ? -1 : index % 3;
+    };
+    int bpColumn = column(*backpack);
     for (auto const& in : inputs) {
         if (!in.item || in.item->isNull()) continue;
         auto dye = core::dyeFromItemId(in.item->getTypeName());
         if (!dye) continue;
-        auto argb  = core::dyeInfo(*dye).argb;
-        int  index = gridIndex(in);
-        // Unknown position (consumed from outside the grid): colour the main fabric.
-        bool isMain = index < 0 || bpIndex < 0 || core::dyeTargetFor(index, bpIndex) == core::DyeTarget::Main;
-        (isMain ? main : accent).push_back(argb);
+        auto argb = core::dyeInfo(*dye).argb;
+        int  col  = column(in);
+        // Unknown position (consumed from outside the grid): as if in the backpack's column.
+        auto target = (col < 0 || bpColumn < 0) ? core::DyeColumnTarget{true, true} : core::dyeColumnTarget(col, bpColumn);
+        if (target.main) craft.mainDyes.push_back(argb);
+        if (target.accent) craft.accentDyes.push_back(argb);
     }
-    craft.mainColor   = core::mixColors(main);
-    craft.accentColor = core::mixColors(accent);
     return craft;
 }
 
-std::string carryOver(ItemStackBase& result, BackpackCraft& craft) {
-    if (!craft.source || craft.source->isNull()) return {};
-    auto uuid = game::backpackUuid(*craft.source);
-    if (!uuid && craft.dyes()) {
-        // Colours live in the storage: bind the never-opened source to a new storage entry.
-        bool changed = false;
-        if (auto bp = game::Storage::get().forItem(*craft.source, &changed)) {
-            uuid                 = bp->uuid();
-            craft.createdStorage = changed;
-        }
+BackpackColors craftedColors(BackpackCraft const& craft) {
+    std::shared_ptr<game::Backpack> bp;
+    if (craft.source) {
+        if (auto uuid = game::backpackUuid(*craft.source)) bp = game::Storage::get().find(*uuid);
     }
+    auto current  = craft.source ? colorsOf(*craft.source, bp.get()) : defaultColors();
+    auto defaults = defaultColors();
+    return {
+        core::calculateColor(current.main, defaults.main, craft.mainDyes),
+        core::calculateColor(current.accent, defaults.accent, craft.accentDyes),
+    };
+}
+
+std::string carryOver(ItemStackBase& result, BackpackCraft const& craft) {
+    if (!craft.source || craft.source->isNull()) return {};
     if (craft.source->mUserData) result.setUserData(craft.source->mUserData->clone());
-    return uuid.value_or(std::string{});
+    if (craft.dyes()) {
+        auto colors = craftedColors(craft);
+        setItemColors(result, colors);
+        applyTint(result, colors);
+    }
+    return game::backpackUuid(*craft.source).value_or(std::string{});
 }
 
 bool commitColors(std::string const& uuid, BackpackCraft const& craft) {
     if (uuid.empty() || !craft.dyes()) return false;
     auto bp = game::Storage::get().find(uuid);
     if (!bp) return false;
-    if (craft.mainColor) bp->data().mainColor = *craft.mainColor;
-    if (craft.accentColor) bp->data().accentColor = *craft.accentColor;
+    auto colors           = craftedColors(craft);
+    bp->data().mainColor   = colors.main;
+    bp->data().accentColor = colors.accent;
     bp->markDirty();
     game::Storage::get().save(*bp);
     return true;
 }
 
+bool isNextTierUpgrade(std::string_view sourceItemId, std::string_view resultItemId) {
+    // SophisticatedBackpacks' `sophisticatedcore:upgrade_next_tier` recipes that consume an upgrade.
+    static constexpr std::pair<std::string_view, std::string_view> kPairs[] = {
+        {"pickup_upgrade",       "advanced_pickup_upgrade"      },
+        {"filter_upgrade",       "advanced_filter_upgrade"      },
+        {"pickup_upgrade",       "magnet_upgrade"               },
+        {"advanced_pickup_upgrade", "advanced_magnet_upgrade"   },
+        {"magnet_upgrade",       "advanced_magnet_upgrade"      },
+        {"feeding_upgrade",      "advanced_feeding_upgrade"     },
+        {"compacting_upgrade",   "advanced_compacting_upgrade"  },
+        {"void_upgrade",         "advanced_void_upgrade"        },
+        {"restock_upgrade",      "advanced_restock_upgrade"     },
+        {"deposit_upgrade",      "advanced_deposit_upgrade"     },
+        {"refill_upgrade",       "advanced_refill_upgrade"      },
+        {"jukebox_upgrade",      "advanced_jukebox_upgrade"     },
+        {"tool_swapper_upgrade", "advanced_tool_swapper_upgrade"},
+        {"pump_upgrade",         "advanced_pump_upgrade"        },
+        {"smelting_upgrade",     "auto_smelting_upgrade"        },
+        {"smoking_upgrade",      "auto_smoking_upgrade"         },
+        {"blasting_upgrade",     "auto_blasting_upgrade"        },
+        {"alchemy_upgrade",      "advanced_alchemy_upgrade"     },
+    };
+    auto strip = [](std::string_view id) -> std::optional<std::string_view> {
+        if (!id.starts_with(game::kNamespace) || id.size() <= game::kNamespace.size() + 1 || id[game::kNamespace.size()] != ':') {
+            return std::nullopt;
+        }
+        return id.substr(game::kNamespace.size() + 1);
+    };
+    auto from = strip(sourceItemId), to = strip(resultItemId);
+    if (!from || !to) return false;
+    for (auto const& [a, b] : kPairs) {
+        if (a == *from && b == *to) return true;
+    }
+    return false;
+}
 namespace {
 
 /// A request is handled within one call; anything older belongs to an aborted request.
@@ -112,7 +160,6 @@ struct PendingCraft {
     std::vector<std::pair<int, ConsumedInput>> inputs; ///< (container, input)
     std::optional<BackpackCraft>               craft;
     std::string                                uuid;
-    std::string                                createdUuid; ///< storage entry made for this craft
     int                                        applied = 0; ///< results bound to the backpack
     std::chrono::steady_clock::time_point      started = std::chrono::steady_clock::now();
 };
@@ -120,6 +167,9 @@ struct PendingCraft {
 std::unordered_map<CraftHandlerBase const*, PendingCraft> gPending;
 
 bool isBackpackStack(ItemStackBase const& s) { return !s.isNull() && game::backpackTierOf(s.getTypeName()).has_value(); }
+bool isUpgradeStack(ItemStackBase const& s) {
+    return !s.isNull() && upgrade::byItemId(s.getTypeName()) != nullptr;
+}
 
 bool hasBackpackResult(CraftHandlerBase& handler) {
     auto& requests = handler.mCraftRequestHandler;
@@ -134,12 +184,33 @@ bool hasBackpackResult(CraftHandlerBase& handler) {
     return false;
 }
 
-/// Drops a pending craft; a storage entry created for it is removed unless the craft succeeded.
-void dropPending(CraftHandlerBase const* handler, bool keepCreated) {
-    auto it = gPending.find(handler);
-    if (it == gPending.end()) return;
-    if (!keepCreated && !it->second.createdUuid.empty()) game::Storage::get().erase(it->second.createdUuid);
-    gPending.erase(it);
+void dropPending(CraftHandlerBase const* handler) { gPending.erase(handler); }
+
+/// Every result stack of the craft (computed results and the created-output container).
+template <class Fn>
+void forEachResult(CraftHandlerBase& handler, Fn&& fn) {
+    auto& requests = handler.mCraftRequestHandler;
+    for (auto& [result, count] : *requests.mCraftResults) fn(result);
+    if (auto const& output = requests.mCreatedOutputSparseContainer) {
+        for (auto& [index, stack] : *output->mItems) fn(stack);
+    }
+}
+
+/// SC `upgrade_next_tier`: the single consumed upgrade's data goes to the crafted upgrade.
+void carryUpgradeData(CraftHandlerBase& handler, std::vector<ConsumedInput> const& inputs) {
+    ConsumedInput const* source = nullptr;
+    for (auto const& in : inputs) {
+        if (!in.item || !isUpgradeStack(*in.item)) continue;
+        if (source) return; // several upgrades consumed (e.g. Omega from Tier 4s): plain recipe
+        source = &in;
+    }
+    if (!source || !source->item->mUserData) return;
+    auto sourceId = source->item->getTypeName();
+    forEachResult(handler, [&](ItemStackBase& result) {
+        if (isUpgradeStack(result) && isNextTierUpgrade(sourceId, result.getTypeName())) {
+            result.setUserData(source->item->mUserData->clone());
+        }
+    });
 }
 
 /// Returns false to reject the craft.
@@ -147,12 +218,11 @@ bool onConsumed(CraftHandlerBase& handler, FullContainerName const& container, i
     if (item.isNull()) return true;
     if (auto it = gPending.find(&handler);
         it != gPending.end() && std::chrono::steady_clock::now() - it->second.started > kStaleAfter) {
-        dropPending(&handler, false);
+        dropPending(&handler);
     }
     auto& pending = gPending[&handler];
     auto  name    = static_cast<int>(container.mName);
-    // The same slot can be reported twice (derived + base handler): keep the first report, its
-    // stack may already have been bound to a storage entry by `carryOver`.
+    // The same slot can be reported twice (derived + base handler): keep the first report.
     if (std::any_of(pending.inputs.begin(), pending.inputs.end(), [&](auto const& in) {
             return in.first == name && in.second.slot == slot;
         })) {
@@ -170,23 +240,16 @@ bool onConsumed(CraftHandlerBase& handler, FullContainerName const& container, i
         return false;
     }
     pending.craft = analyse(inputs);
-    if (!pending.craft) return true;
-
-    auto& requests = handler.mCraftRequestHandler;
-    int   applied  = 0;
-    auto  apply    = [&](ItemStackBase& stack) {
+    if (!pending.craft) {
+        carryUpgradeData(handler, inputs);
+        return true;
+    }
+    int applied = 0;
+    forEachResult(handler, [&](ItemStackBase& stack) {
+        if (!isBackpackStack(stack)) return;
         pending.uuid = carryOver(stack, *pending.craft);
-        if (pending.craft->createdStorage) pending.createdUuid = pending.uuid;
         ++applied;
-    };
-    for (auto& [result, count] : *requests.mCraftResults) {
-        if (isBackpackStack(result)) apply(result);
-    }
-    if (auto const& output = requests.mCreatedOutputSparseContainer) {
-        for (auto& [index, stack] : *output->mItems) {
-            if (isBackpackStack(stack)) apply(stack);
-        }
-    }
+    });
     pending.applied = applied;
     return true;
 }
@@ -195,16 +258,16 @@ void onPostRequest(CraftHandlerBase& handler, bool success) {
     auto it = gPending.find(&handler);
     if (it == gPending.end()) return;
     auto pending = std::move(it->second);
-    dropPending(&handler, true);
-    if (!success) {
-        if (!pending.createdUuid.empty()) game::Storage::get().erase(pending.createdUuid);
-        return;
+    dropPending(&handler);
+    if (!success || !pending.craft || !pending.applied) return;
+    std::string dyed;
+    if (pending.craft->dyes()) {
+        auto colors = craftedColors(*pending.craft);
+        dyed        = " (dyed main=" + core::colorHex(colors.main) + " accent=" + core::colorHex(colors.accent) + ")";
     }
-    if (!pending.craft || !pending.applied) return;
-    bool dyed = commitColors(pending.uuid, *pending.craft);
-    log().info("backpack craft: {} carried into the crafted backpack{}", pending.uuid.empty() ? "(unopened)" : pending.uuid, dyed ? " (dyed)" : "");
-}
-} // namespace
+    commitColors(pending.uuid, *pending.craft);
+    log().info("backpack craft: {} carried into the crafted backpack{}", pending.uuid.empty() ? "(unopened)" : pending.uuid, dyed);
+}} // namespace
 
 LL_TYPE_INSTANCE_HOOK(
     TierCraftStartHook,
@@ -215,7 +278,7 @@ LL_TYPE_INSTANCE_HOOK(
     ItemStackRequestActionCraftBase const& requestAction,
     ItemStackNetResult                     currentResult
 ) {
-    dropPending(this, false); // a new craft starts: forget a previous unfinished one
+    dropPending(this); // a new craft starts: forget a previous unfinished one
     return origin(requestAction, currentResult);
 }
 

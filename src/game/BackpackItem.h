@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,7 +37,12 @@ inline constexpr std::string_view kUuidKey = "abp_uuid";
 /// Writes the uuid into the item's user data (keeps other user data).
 void setBackpackUuid(ItemStack& stack, std::string const& uuid);
 
-/// A new backpack item of `tier` (optionally bound to an existing uuid).
+/// Tints the item with a backpack's main colour (ARGB): the item colour is what the backpack
+/// model's cloth is drawn with (P2-11), so backpack items always carry one.
+void setBackpackTint(ItemStack& stack, std::uint32_t argb);
+
+/// A new backpack item of `tier` (optionally bound to an existing uuid), tinted with the default
+/// main colour.
 [[nodiscard]] ItemStack makeBackpackItem(core::Tier tier, std::string const& uuid = {});
 
 } // namespace abp::game
