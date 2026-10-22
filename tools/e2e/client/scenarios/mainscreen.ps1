@@ -202,19 +202,19 @@ $sortBy = @(($L.SortX + 12 + 6), ($L.SortY + 6)); $sort = @(($L.SortX + 6), ($L.
 Gui-Move $sort[0] $sort[1]
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'sort-tooltip' | Out-Null
-foreach ($mode in 'mod', 'count', 'tags', 'name') {
+foreach ($sortMode in 'mod', 'count', 'tags', 'name') {
     $mark = Get-LogMark
     Gui-Click $sortBy[0] $sortBy[1]
     Wait-LogLine 'native screen action: sortBy by' 10 -Since $mark | Out-Null
     Gui-Move $sortBy[0] ($sortBy[1] + 1)
     Start-Sleep -Milliseconds 400
-    Save-Screenshot "sort-by-$mode" | Out-Null
+    Save-Screenshot "sort-by-$sortMode" | Out-Null
     $mark = Get-LogMark
     Gui-Click $sort[0] $sort[1]
     Wait-LogLine 'native screen action: sort by' 10 -Since $mark | Out-Null
     Gui-Move ($L.Width / 2) -12
     Start-Sleep -Milliseconds 500
-    Save-Screenshot "sorted-$mode" | Out-Null
+    Save-Screenshot "sorted-$sortMode" | Out-Null
 }
 
 # Search: hover tooltip, focus (animation), name + @mod AND terms, no results, right-click clear.
