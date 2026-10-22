@@ -12,6 +12,7 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
+#include "mod/Log.h"
 #include "net/NativeScreens.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/anvil/AnvilUpgrade.h"
@@ -44,7 +45,10 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
 
 bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
     if (!data.is_object()) return false;
-    if (crafting::handleTabOpen(player, ctx, data)) return true;
+    if (crafting::handleTabOpen(player, ctx, data)) {
+        log().info("station tab: anvil {} by {}", data.value("tabOpen", false) ? "open" : "closed", player.getRealName());
+        return true;
+    }
     auto ref = refFor(ctx);
     if (!ref.valid()) return false;
     if (auto it = data.find("name"); it != data.end()) {

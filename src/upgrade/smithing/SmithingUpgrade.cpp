@@ -16,6 +16,7 @@
 #include "mc/world/level/Level.h"
 
 #include "mod/I18n.h"
+#include "mod/Log.h"
 #include "net/NativeScreens.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
@@ -150,7 +151,10 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
 
 bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
     if (!data.is_object()) return false;
-    if (crafting::handleTabOpen(player, ctx, data)) return true;
+    if (crafting::handleTabOpen(player, ctx, data)) {
+        log().info("station tab: smithing {} by {}", data.value("tabOpen", false) ? "open" : "closed", player.getRealName());
+        return true;
+    }
     auto ref = refFor(ctx);
     if (!ref.valid()) return false;
     auto which = data.value("click", std::string{});

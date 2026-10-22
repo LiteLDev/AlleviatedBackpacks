@@ -31,7 +31,11 @@ function Read-Layout($mark) {
     Write-Step ("layout: {0}x{1} at {2},{3} guiScale=1/{4} tabs={5}" -f $L.Width, $L.Height, $L.Left, $L.Top, $L.Inv, $L.Tabs)
 }
 function Gui-Move([double]$gx, [double]$gy) { Move-Mouse (($L.Left + $gx) / $L.Inv) (($L.Top + $gy) / $L.Inv) }
-function Gui-Click([double]$gx, [double]$gy, [switch]$Right) { Click (($L.Left + $gx) / $L.Inv) (($L.Top + $gy) / $L.Inv) -Right:$Right; Start-Sleep -Milliseconds 450 }
+# Hover first, then click (the UI sees the pointer at the target before the button goes down).
+function Gui-Click([double]$gx, [double]$gy, [switch]$Right) {
+    Gui-Move $gx $gy; Start-Sleep -Milliseconds 200
+    Click (($L.Left + $gx) / $L.Inv) (($L.Top + $gy) / $L.Inv) -Right:$Right; Start-Sleep -Milliseconds 450
+}
 function Shift-Click([double]$gx, [double]$gy) {
     Assert-GameForeground
     [AbpE2E.Native]::Key(0x10, $false); Start-Sleep -Milliseconds 80
@@ -53,6 +57,19 @@ function Inv-Pos([int]$i) {
 function Storage-Pos([int]$i) { $cols = if ($L.Width -ge 230) { 12 } else { 9 }; @((8 + ($i % $cols) * 18 + 8), (18 + [math]::Floor($i / $cols) * 18 + 8)) }
 # Upgrade tab n (0 = backpack settings): the tab's top-left and its icon centre.
 function Tab-Origin([int]$n) { @($L.Width, (4 + 25 * $n)) }
+# Clicks tab n's icon until the station tab reports `$state` ("open" / "closed"); returns its origin.
+function Set-Tab([int]$n, [string]$name, [string]$state) {
+    $t = Tab-Origin $n
+    for ($try = 1; $try -le 3; $try++) {
+        $m = Get-LogMark
+        Gui-Click ($t[0] + 1 + 8) ($t[1] + 4 + 8)
+        Start-Sleep -Milliseconds 900
+        $lines = @(Get-LeviLog -Since $m | Where-Object { $_ -match "station tab: $name (open|closed)" })
+        if ($lines.Count -gt 0 -and $lines[-1] -match "station tab: $name $state") { return $t }
+        Write-Step "the $name tab is not $state after a click ($try, saw $($lines.Count) reports); retrying"
+    }
+    throw "could not make the $name tab $state"
+}
 function Wait-TabAction($mark) { Wait-LogLine 'native screen action: tab by' 10 -Since $mark | Out-Null; Start-Sleep -Milliseconds 400 }
 function Close-Backpack {
     $m = Get-LogMark
@@ -95,9 +112,7 @@ if ($L.Tabs -lt 3) { throw "expected the settings, anvil and smithing tabs, got 
 if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
 
 # ---- 1. anvil tab ------------------------------------------------------------------------------------
-$t = Tab-Origin 1
-Gui-Click ($t[0] + 1 + 8) ($t[1] + 4 + 8)
-Start-Sleep -Milliseconds 600
+$t = Set-Tab 1 'anvil' 'open'
 Save-Screenshot 'anvil-tab' | Out-Null
 
 $left = @(($t[0] + 4 + 8), ($t[1] + 43 + 8)); $right = @(($t[0] + 42 + 8), ($t[1] + 43 + 8)); $result = @(($t[0] + 80 + 8), ($t[1] + 43 + 8))
@@ -129,31 +144,37 @@ Wait-TabAction $mark
 $p = Inv-Pos 14; Gui-Click $p[0] $p[1]                 # put it down
 Start-Sleep -Milliseconds 500
 Save-Screenshot 'anvil-taken' | Out-Null
-Gui-Click ($t[0] + 1 + 8) ($t[1] + 4 + 8)              # close the anvil tab
+Set-Tab 1 'anvil' 'closed' | Out-Null
 $probe = Probe
 if ($probe -notmatch "inv 14 minecraft:diamond_sword x1 name='Excalibur'") { throw "the renamed sword is not in inventory slot 14:`n$probe" }
 if ($probe -notmatch 'station probe: level 26') { throw "4 levels (repair 3 + rename 1) should have been paid:`n$probe" }
 Write-Step 'anvil: repaired and renamed inline'
 
 # ---- 2. smithing tab -----------------------------------------------------------------------------------
+# SB's "Shift Click Into Open Tab First" (off by default, like SB): with it on, shift-clicks from
+# the player inventory fill the open smithing tab.
+$m = Get-LogMark
+Invoke-Chat '/backpack station opentab on'
+Wait-LogLine 'station opentab: on' 15 -Since $m | Out-Null
 Open-Backpack
-$t = Tab-Origin 2
-Gui-Click ($t[0] + 1 + 8) ($t[1] + 4 + 8)
+$t = Set-Tab 2 'smithing' 'open'                         # the tab reports itself open
+Gui-Move ($t[0] + 30) ($t[1] + 120)
 Start-Sleep -Milliseconds 600
-Save-Screenshot 'smithing-tab' | Out-Null
+Save-Screenshot 'smithing-tab' | Out-Null               # empty: template silhouettes
 $templ = @(($t[0] + 4 + 8), ($t[1] + 25 + 8)); $base = @(($t[0] + 22 + 8), ($t[1] + 25 + 8)); $add = @(($t[0] + 40 + 8), ($t[1] + 25 + 8)); $res = @(($t[0] + 80 + 8), ($t[1] + 25 + 8))
-$p = Inv-Pos 11; Gui-Click $p[0] $p[1]
-$mark = Get-LogMark; Gui-Click $templ[0] $templ[1]; Wait-TabAction $mark
-$p = Inv-Pos 13; Gui-Click $p[0] $p[1]
-$mark = Get-LogMark; Gui-Click $base[0] $base[1]; Wait-TabAction $mark
+$p = Inv-Pos 11; Shift-Click $p[0] $p[1]                 # template: shift-click into the open tab
+Gui-Move ($t[0] + 30) ($t[1] + 120)
+Start-Sleep -Milliseconds 800
+Save-Screenshot 'smithing-template-silhouettes' | Out-Null  # base / addition silhouettes
+$p = Inv-Pos 13; Shift-Click $p[0] $p[1]                 # chestplate
 Gui-Move ($t[0] + 30) ($t[1] + 120)
 Start-Sleep -Milliseconds 600
 Save-Screenshot 'smithing-two-inputs' | Out-Null
-$p = Inv-Pos 12; Gui-Click $p[0] $p[1]
-$mark = Get-LogMark; Gui-Click $add[0] $add[1]; Wait-TabAction $mark
+$p = Inv-Pos 12; Shift-Click $p[0] $p[1]                 # netherite ingot
 Gui-Move ($t[0] + 30) ($t[1] + 120)
 Start-Sleep -Milliseconds 800
-Save-Screenshot 'smithing-preview' | Out-NullGui-Move $res[0] $res[1]
+Save-Screenshot 'smithing-preview' | Out-Null
+Gui-Move $res[0] $res[1]
 Start-Sleep -Milliseconds 700
 Save-Screenshot 'smithing-result-hover' | Out-Null
 $mark = Get-LogMark
