@@ -52,6 +52,7 @@ param(
     [int]$LockTimeoutMinutes = 120,  # give up (exit 2, "NOT RUN") if the game lock is not free by then; 0 = wait forever
     [int]$SlotWaitMinutes = 3,       # remote modes: no server slot by then -> release the game lock and queue again
     [int]$HostTimeoutMinutes = 15,   # remote modes: max wait for the BDS host (slot + boot), game lock held
+    [switch]$HeadlessTrace,          # LeviHeadlessInput trace mode: log every key/mouse event reaching the game's input layer
     [switch]$Foreground,             # real SendInput, game in the foreground (takes over the PC); slot 1 only
     # Game instances this run may use (headless only); the first free one is taken. Default:
     # $env:LEVI_E2E_SLOTS ("1,2,3") or 1. Slots 2.. are clones (versions\<base>-hi<N>) made on first
@@ -181,7 +182,7 @@ try {
         }
         if (-not $KeepOtherMods) { Move-OtherModsAside }
         Remove-HeadlessInputLeftover   # of a killed run
-        if ($script:Headless) { Install-HeadlessInputMod -ModsDir $script:ModsDir -PipeName $script:HeadlessPipe }
+        if ($script:Headless) { Install-HeadlessInputMod -ModsDir $script:ModsDir -PipeName $script:HeadlessPipe -Trace:$HeadlessTrace }
         if ($remote) { Set-ExternalServer $hostInfo.port } else {
             Restore-TestWorld
             # Single-player test world: games of all slots share one signaling-service ID, and

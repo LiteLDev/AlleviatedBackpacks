@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/player/PlayerDieEvent.h"
 #include "ll/api/event/player/PlayerDisconnectEvent.h"
+#include "ll/api/event/player/PlayerJoinEvent.h"
 #include "ll/api/event/server/ServerStoppingEvent.h"
 #include "ll/api/event/world/ServerLevelTickEvent.h"
 #include "ll/api/memory/Hook.h"
@@ -47,6 +49,8 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/containers/ContainerEnumName.h"
+#include "mc/world/item/registry/ItemRegistryManager.h"
+#include "mc/world/item/registry/ItemRegistryRef.h"
 #include "mc/world/containers/FullContainerName.h"
 #include "mc/world/inventory/network/ItemStackNetResult.h"
 #include "mc/world/inventory/network/TypedClientNetId.h"
@@ -95,6 +99,73 @@ constexpr int kDiffEvery   = 2; ///< ticks between display diffs
 constexpr float kMaxDistance = 8.0f;
 
 std::int64_t keyOf(Player const& p) { return p.getOrCreateUniqueID().rawID; }
+
+/// Puts up to `count` of `stack` into the player's inventory slots (vanilla Inventory.add order:
+/// matching stacks first, then empty slots) through the container only: no entity, no events.
+/// Returns how many did not fit.
+int addToInventorySlots(Player& player, ItemStack const& stack, int count) {
+    if (stack.isNull() || count <= 0) return count;
+    int   max = std::max<int>(stack.getMaxStackSize(), 1);
+    auto& inv = player.getInventory();
+    int   n   = std::min(inv.getContainerSize(), 36);
+    for (int pass = 0; pass < 2 && count > 0; ++pass) {
+        for (int i = 0; i < n && count > 0; ++i) {
+            auto const& it    = inv.getItem(i);
+            bool        empty = it.isNull() || it.mCount == 0;
+            if (pass == 0 ? (empty || !it.isStackable(stack) || it.mCount >= max) : !empty) continue;
+            int       have = pass == 0 ? static_cast<int>(it.mCount) : 0;
+            int       add  = std::min(count, max - have);
+            ItemStack copy = pass == 0 ? it : stack;
+            copy.set(have + add);
+            inv.setItem(i, copy);
+            count -= add;
+        }
+    }
+    return count;
+}
+
+/// Gives back whatever is on the cursor: inventory, else dropped at the player's feet.
+void returnCursor(Player& player) {
+    ItemStack cursor = player.mPlayerUIContainer->getItem(0);
+    if (cursor.isNull()) return;
+    player.setPlayerUIItem(PlayerUISlot::CursorSelected, ItemStack::EMPTY_ITEM(), false);
+    if (!player.add(cursor) && !cursor.isNull() && cursor.mCount > 0) player.drop(cursor, false);
+}
+
+/// The world is stopping: the cursor item goes into the inventory, else into the menu (the
+/// backpack's storage), and whatever still does not fit stays on the cursor, which is saved with the
+/// player (PlayerUIItems) and given back by `returnCursor` on the next join. Never dropped: there is
+/// no world left to drop it into. Needs the level's item registry on this thread (see closeAll).
+void returnCursorOnShutdown(Player& player, Menu& menu) {
+    ItemStack cursor = player.mPlayerUIContainer->getItem(0);
+    if (cursor.isNull() || cursor.mCount == 0) return;
+    int total = cursor.mCount;
+    int left  = addToInventorySlots(player, cursor, total);
+    int toInv = total - left;
+    int toBp  = 0;
+    if (left > 0) {
+        ItemStack rest = cursor;
+        rest.set(left);
+        try {
+            toBp = std::clamp(menu.quickMoveIn(player, rest), 0, left);
+        } catch (std::exception const& e) {
+            log().error("menu shutdown: moving the cursor item into the menu failed: {}", e.what());
+        }
+        left -= toBp;
+    }
+    ItemStack keep = cursor;
+    keep.set(left);
+    player.setPlayerUIItem(PlayerUISlot::CursorSelected, left > 0 ? keep : ItemStack::EMPTY_ITEM(), false);
+    log().info(
+        "menu shutdown: cursor {} x{} of {}: inventory={} menu={} cursor={}",
+        cursor.getTypeName(),
+        total,
+        player.getRealName(),
+        toInv,
+        toBp,
+        left
+    );
+}
 
 Player* findPlayer(std::int64_t key) {
     auto level = ll::service::getLevel();
@@ -420,14 +491,18 @@ bool MenuManager::isShown(Player const& player) const {
 
 void MenuManager::after(int ticks, std::function<void()> fn) { mDelayed.push_back({ticks, std::move(fn)}); }
 
-void MenuManager::finish(Player* player, std::int64_t key, bool sendClose) {
+void MenuManager::finish(Player* player, std::int64_t key, bool sendClose, bool shutdown) {
     auto it = mSessions.find(key);
     if (it == mSessions.end()) return;
     auto s = std::move(it->second);
     mSessions.erase(it);
     if (player) {
         bool awaitAnswer = false;
-        if (sendClose && s->shown() && !s->virtualScreen) {
+        if (shutdown) {
+            // The world is stopping (or the mod going away): no packets, no block reads, no
+            // entities; the players are about to be saved and disconnected.
+            returnCursorOnShutdown(*player, *s->menu);
+        } else if (sendClose && s->shown() && !s->virtualScreen) {
             auto  pkt                = MinecraftPackets::createPacket(MinecraftPacketIds::ContainerClose);
             auto& c                  = static_cast<ContainerClosePacket&>(*pkt);
             c.mContainerId           = static_cast<ContainerID>(s->id);
@@ -443,22 +518,19 @@ void MenuManager::finish(Player* player, std::int64_t key, bool sendClose) {
                 awaitAnswer = true;
             }
         }
-        // Restore what the client should see at the fake positions.
-        auto& region = player->getDimensionBlockSource();
-        for (auto const& pos : s->fake) {
-            sendBlock(*player, pos, region.getBlock(pos));
-            if (auto* be = region.getBlockEntity(pos)) {
-                if (auto pkt = be->_getUpdatePacket(region)) pkt->sendTo(*player);
+        if (!shutdown) {
+            // Restore what the client should see at the fake positions.
+            auto& region = player->getDimensionBlockSource();
+            for (auto const& pos : s->fake) {
+                sendBlock(*player, pos, region.getBlock(pos));
+                if (auto* be = region.getBlockEntity(pos)) {
+                    if (auto pkt = be->_getUpdatePacket(region)) pkt->sendTo(*player);
+                }
+                mRecentFake[key].push_back(RecentFake{pos, mTick + kFakeReuseCooldown});
             }
-            mRecentFake[key].push_back(RecentFake{pos, mTick + kFakeReuseCooldown});
+            returnCursor(*player);
+            player->sendInventory(false);
         }
-        // Give back whatever is still on the cursor.
-        ItemStack cursor = player->mPlayerUIContainer->getItem(0);
-        if (!cursor.isNull()) {
-            player->setPlayerUIItem(PlayerUISlot::CursorSelected, ItemStack::EMPTY_ITEM(), false);
-            if (!player->add(cursor) && !cursor.isNull() && cursor.mCount > 0) player->drop(cursor, false);
-        }
-        player->sendInventory(false);
         try {
             s->menu->onClose(*player);
         } catch (std::exception const& e) {
@@ -1326,13 +1398,32 @@ void MenuManager::install() {
         close(ev.self());
     }));
     // Client: local worlds come and go (and reuse player ids); never carry sessions over.
-    mListeners.push_back(bus.emplaceListener<ll::event::ServerStoppingEvent>([this](auto&) { closeAll(); }));
+    mListeners.push_back(bus.emplaceListener<ll::event::ServerStoppingEvent>([this](auto&) { closeAll(true); }));
+    // A cursor item kept through a shutdown (see returnCursorOnShutdown) comes back on the next join.
+    mListeners.push_back(bus.emplaceListener<ll::event::PlayerJoinEvent>([this](ll::event::PlayerJoinEvent& ev) {
+        auto& player = ev.self();
+        if (player.isSimulatedPlayer() || mSessions.contains(keyOf(player))) return;
+        if (player.mPlayerUIContainer->getItem(0).isNull()) return;
+        log().info("menu: giving {} back the cursor item kept at the last shutdown", player.getRealName());
+        returnCursor(player);
+        player.sendInventory(false);
+    }));
 }
 
-void MenuManager::closeAll() {
+void MenuManager::closeAll() { closeAll(false); }
+
+void MenuManager::closeAll(bool shutdown) {
     std::vector<std::int64_t> keys;
     for (auto& [k, _] : mSessions) keys.push_back(k);
-    for (auto k : keys) finish(findPlayer(k), k, true);
+    // Shutdown runs on whatever thread stops the world (BDS: the main thread, in
+    // ServerInstance::leaveGameSync). The item registry is thread-local and only set on the server
+    // thread: copying an ItemStack without it hits the game's 0xDEADC0DE assertion. Lend this thread
+    // the level's registry while the sessions close (restored by the scope's destructor).
+    std::optional<ItemRegistryManager::ScopedItemRegistry> registryScope;
+    if (shutdown && !keys.empty()) {
+        if (auto level = ll::service::getLevel()) registryScope.emplace(std::weak_ptr<ItemRegistry>(level->getItemRegistry().mWeakRegistry));
+    }
+    for (auto k : keys) finish(findPlayer(k), k, !shutdown, shutdown);
     mPendingCloses.clear();
     mRecentFake.clear();
     mDelayed.clear();
@@ -1340,7 +1431,7 @@ void MenuManager::closeAll() {
 }
 
 void MenuManager::uninstall() {
-    closeAll();
+    closeAll(true);
     mRefused.clear();
     auto& bus = ll::event::EventBus::getInstance();
     for (auto& l : mListeners) bus.removeListener(l);

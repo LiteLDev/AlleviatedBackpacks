@@ -4,6 +4,7 @@
 #include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/player/Inventory.h"
 #include "mc/world/actor/player/Player.h"
+#include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "game/BackpackItem.h"
@@ -282,6 +283,55 @@ ABP_REGISTER_SELFTEST("menu.buttons_and_pages", [](Context& ctx) -> ll::coro::Co
     ctx.check(menu->view() == ui::BackpackMenu::View::Upgrades, "upgrades view");
     ctx.check(cursorOf(player).isNull(), "buttons never give items");
     mm.close(player);
+});
+
+// World stopping with an open menu and an item on the cursor (MenuManager::closeAll(true), what
+// ServerStoppingEvent runs): the item goes to the inventory, else the backpack, else stays on the
+// cursor (saved with the player); never dropped, never duplicated.
+ABP_REGISTER_SELFTEST("menu.shutdown_keeps_cursor", [](Context& ctx) {
+    auto& mm     = ui::MenuManager::get();
+    auto& player = ctx.player();
+    auto& inv    = player.getInventory();
+    auto  bp     = ctx.createBackpack(Tier::Leather);
+    auto  open   = [&] {
+        ctx.require(ui::BackpackMenu::openFor(player, {game::ItemLocation::Kind::Inventory, 0}), "open menu");
+        mm.forceShown(player);
+        player.setPlayerUIItem(PlayerUISlot::CursorSelected, game::ItemConv::make("minecraft:diamond", 5), false);
+    };
+    auto diamondsInInventory = [&] {
+        int n = 0;
+        for (int i = 0; i < 36; ++i) {
+            auto const& it = inv.getItem(i);
+            if (!it.isNull() && it.getTypeName() == "minecraft:diamond") n += it.mCount;
+        }
+        return n;
+    };
+    ctx.require(ctx.give(player, ctx.backpackItem(*bp), 0) == 0, "give backpack");
+
+    // 1. Room in the inventory.
+    open();
+    mm.closeAll(true);
+    ctx.check(mm.current(player) == nullptr, "session closed");
+    ctx.check(cursorOf(player).isNull(), "cursor emptied");
+    ctx.check(diamondsInInventory() == 5, "5 diamonds in the inventory, got " + std::to_string(diamondsInInventory()));
+    for (int i = 1; i < 36; ++i) inv.setItem(i, ItemStack::EMPTY_ITEM());
+
+    // 2. Full inventory: into the backpack.
+    for (int i = 1; i < 36; ++i) inv.setItem(i, game::ItemConv::make("minecraft:dirt", 64));
+    open();
+    mm.closeAll(true);
+    ctx.check(cursorOf(player).isNull(), "cursor emptied (backpack)");
+    ctx.check(countOf(*bp, "minecraft:diamond") == 5, "5 diamonds in the backpack, got " + std::to_string(countOf(*bp, "minecraft:diamond")));
+    ctx.check(diamondsInInventory() == 0, "none in the inventory");
+
+    // 3. Inventory and backpack full: stays on the cursor (saved with the player).
+    for (int i = 0; i < bp->inventory().size(); ++i) bp->inventory().set(i, data("minecraft:dirt", 64));
+    open();
+    mm.closeAll(true);
+    ctx.check(mm.current(player) == nullptr, "session closed (full)");
+    ctx.check(cursorOf(player).mCount == 5 && cursorOf(player).getTypeName() == "minecraft:diamond", "5 diamonds kept on the cursor");
+    ctx.check(countOf(*bp, "minecraft:diamond") == 0, "nothing duplicated into the backpack");
+    player.setPlayerUIItem(PlayerUISlot::CursorSelected, ItemStack::EMPTY_ITEM(), false);
 });
 
 ABP_REGISTER_SELFTEST("menu.filter_ghosts", [](Context& ctx) {
