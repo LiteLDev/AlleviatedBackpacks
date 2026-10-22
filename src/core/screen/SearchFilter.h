@@ -44,5 +44,7 @@ private:
 
 /// Lowercase (ASCII) copy without `§x` formatting codes.
 [[nodiscard]] std::string searchFold(std::string_view text);
+/// Copy without `§x` formatting codes (the code character may be any UTF-8 code point).
+[[nodiscard]] std::string stripFormatCodes(std::string_view text);
 
 } // namespace abp::core::screen

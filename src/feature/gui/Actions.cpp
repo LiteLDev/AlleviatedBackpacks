@@ -16,6 +16,7 @@
 #include "mc/world/level/block/Block.h"
 #include "mc/world/level/block/BlockType.h"
 
+#include "core/screen/SearchFilter.h"
 #include "feature/gui/Gui.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
@@ -36,8 +37,11 @@ constexpr int kHotbarSlots    = 9;
 /// Player inventory slots in fill order: main inventory first, then the hotbar.
 std::vector<int> playerSlots(TransferOptions const& opt) {
     std::vector<int> out;
+    if (opt.slotOrder && !opt.keepHotbar) {
+        for (int i = 0; i < kHotbarSlots; ++i) out.push_back(i);
+    }
     for (int i = kHotbarSlots; i < kInventorySlots; ++i) out.push_back(i);
-    if (!opt.keepHotbar) {
+    if (!opt.keepHotbar && !opt.slotOrder) {
         for (int i = 0; i < kHotbarSlots; ++i) out.push_back(i);
     }
     if (opt.lockedSlot) std::erase(out, *opt.lockedSlot);
@@ -78,19 +82,21 @@ int giveToPlayer(Player& player, core::ItemStackData const& item, int count, std
     return count - left;
 }
 
-bool playerHas(Player& player, core::ItemStackData const& item) {
+bool playerHas(Player& player, core::ItemStackData const& item, bool exact = false) {
     auto& inv = player.getInventory();
     for (int i = 0; i < kInventorySlots; ++i) {
         auto const& s = inv.getItem(i);
-        if (!s.isNull() && core::memoryMatches(game::ItemConv::toData(s), item)) return true;
+        if (s.isNull()) continue;
+        auto d = game::ItemConv::toData(s);
+        if (exact ? d.sameItem(item) : core::memoryMatches(d, item)) return true;
     }
     return false;
 }
 
-bool backpackHas(game::Backpack& bp, core::ItemStackData const& item) {
+bool backpackHas(game::Backpack& bp, core::ItemStackData const& item, bool exact = false) {
     auto& inv = bp.inventory();
     for (int i = 0; i < inv.size(); ++i) {
-        if (core::memoryMatches(inv.at(i), item)) return true;
+        if (exact ? (!inv.at(i).empty() && inv.at(i).sameItem(item)) : core::memoryMatches(inv.at(i), item)) return true;
     }
     auto const& mem = memory(bp);
     return std::any_of(mem.begin(), mem.end(), [&](core::ItemStackData const& m) { return core::memoryMatches(m, item); });
@@ -111,7 +117,51 @@ bool sortBackpack(game::Backpack& backpack, core::SortBy by) {
     core::SortLayout layout;
     layout.locked = noSort(backpack);
     layout.memory = memory(backpack);
-    return core::sortInventory(backpack.inventory(), core::comparatorFor(by, &game::ItemConv::tags()), layout);
+    return core::sortInventory(
+        backpack.inventory(),
+        core::comparatorFor(by, &game::ItemConv::tags(), [](core::ItemStackData const& d) { return itemDisplayName(d); }),
+        layout
+    );
+}
+
+std::string itemDisplayName(core::ItemStackData const& item) {
+    static std::unordered_map<std::string, std::string> cache; // server thread only
+    auto key = item.id + "#" + std::to_string(item.aux);
+    if (auto it = cache.find(key); it != cache.end() && item.nbt().empty()) return it->second;
+    std::string name;
+    try {
+        name = game::ItemConv::toStack(item, 1).getName(); // getHoverName is client-only
+    } catch (...) {
+        name.clear();
+    }
+    std::string plain = core::screen::stripFormatCodes(name);
+    // Without translations the server only knows lang keys ("item.apple.name"): use the id path.
+    bool untranslated = plain.empty() || ((plain.starts_with("item.") || plain.starts_with("tile.")) && plain.ends_with(".name"));
+    if (untranslated) {
+        auto p = item.id.find(':');
+        plain  = p == std::string::npos ? item.id : item.id.substr(p + 1);
+    }
+    if (item.nbt().empty()) cache[key] = plain;
+    return plain;
+}
+
+int transferToBackpackSB(Player& player, game::Backpack& backpack, bool matching, std::optional<int> lockedSlot) {
+    TransferOptions o;
+    o.matchingOnly = matching;
+    o.keepHotbar   = true; // PlayerMainInvWithoutHotbarWrapper
+    o.lockedSlot   = lockedSlot;
+    o.exactMatch   = true;
+    return transferToBackpack(player, backpack, o);
+}
+
+int transferToPlayerSB(Player& player, game::Backpack& backpack, bool matching, std::optional<int> lockedSlot) {
+    TransferOptions o;
+    o.matchingOnly = matching;
+    o.keepHotbar   = !matching; // everything: from slot 9; matching: from slot 0
+    o.slotOrder    = true;
+    o.lockedSlot   = lockedSlot;
+    o.exactMatch   = true;
+    return transferToPlayer(player, backpack, o);
 }
 
 int transferToBackpack(Player& player, game::Backpack& backpack, TransferOptions const& opt) {
@@ -121,7 +171,7 @@ int transferToBackpack(Player& player, game::Backpack& backpack, TransferOptions
         auto const& st = inv.getItem(i);
         if (st.isNull()) continue;
         auto data = game::ItemConv::toData(st);
-        if (opt.matchingOnly && !backpackHas(backpack, data)) continue;
+        if (opt.matchingOnly && !backpackHas(backpack, data, opt.exactMatch)) continue;
         auto r    = backpack.inventory().insert(data, core::AccessContext{core::Source::Player, &player});
         int  used = std::min(r.inserted + r.voided, static_cast<int>(st.mCount));
         if (used <= 0) continue;
@@ -146,7 +196,7 @@ int transferToPlayer(Player& player, game::Backpack& backpack, TransferOptions c
     for (int s = 0; s < inv.size(); ++s) {
         while (!inv.at(s).empty()) {
             auto const cur = inv.at(s);
-            if (opt.matchingOnly && !playerHas(player, cur)) break;
+            if (opt.matchingOnly && !playerHas(player, cur, opt.exactMatch)) break;
             int fits = giveToPlayer(player, cur, cur.count, slots, true);
             if (fits <= 0) break;
             auto got = inv.extract(s, fits, ctx);

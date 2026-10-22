@@ -14,7 +14,9 @@
 //
 // Screen actions (`ScreenActionPacket` body, all carry "session"):
 //   {"action":"click","area":"storage|inventory|upgrade","index":n,"button":0|1,"shift":b,"ctrl":b}
-//   {"action":"double","area":"storage|inventory","index":n}        collect matching items on the cursor
+//   {"action":"double","area":"storage|inventory|upgrade","index":n}  SC PICKUP_ALL onto the cursor
+//   {"action":"quickMoveAll","area":"storage|inventory|upgrade","index":n}  Shift + double-click
+//   {"action":"searchPhrase","phrase":"..."} | {"action":"openTab","slot":n|-1}  kept per SC settings
 //   {"action":"drop","area":"storage|inventory","index":n,"all":b}  Q / Ctrl+Q over a slot
 //   {"action":"hotbar","area":"storage|inventory","index":n,"hotbar":0..8}  number keys
 //   {"action":"dropCursor","all":b}                           click outside the screen with an item

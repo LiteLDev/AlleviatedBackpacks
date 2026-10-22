@@ -147,7 +147,9 @@ ABP_REGISTER_SELFTEST("companion.click_take_place", [](Context& ctx) -> ll::coro
     ctx.check(cursor(p).isNull() && bp->inventory().at(7).count == 63, "cursor emptied into slot 7");
     ctx.check(handleScreenAction(p, action(s, "click", {{"area", "storage"}, {"index", 50}, {"button", 1}})), "right click takes half");
     ctx.check(cursor(p).mCount == 18 && bp->inventory().at(50).count == 18, "half of 36");
-    ctx.check(handleScreenAction(p, action(s, "double", {{"area", "storage"}, {"index", 50}})), "double click collects");
+    // SC PICKUP_ALL only gathers when the double-clicked slot is empty.
+    ctx.check(!handleScreenAction(p, action(s, "double", {{"area", "storage"}, {"index", 50}})), "double click on a filled slot does nothing");
+    ctx.check(handleScreenAction(p, action(s, "double", {{"area", "storage"}, {"index", 3}})), "double click collects");
     ctx.check(cursor(p).mCount == 64, "cursor filled to a stack");
     co_await ctx.ticks(2);
     auto updates = scope.named("ScreenUpdatePacket");
@@ -212,7 +214,8 @@ ABP_REGISTER_SELFTEST("companion.upgrade_slots", [](Context& ctx) -> ll::coro::C
     co_await ctx.ticks(1);
     auto const* m = sentModel(p);
     ctx.require(m != nullptr, "model");
-    ctx.check(!m->errorMessage.empty() && m->errorUpgradeSlots == std::vector<int>{1}, "error overlay: " + m->errorMessage);
+    // SC only_x_upgrades_allowed: the slot holding the existing magnet is highlighted.
+    ctx.check(m->errorMessage.starts_with("Only 1x ") && m->errorUpgradeSlots == std::vector<int>{0}, "error overlay: " + m->errorMessage);
     ctx.check(handleScreenAction(p, action(s, "toggleUpgrade", {{"slot", 0}})), "switch off");
     ctx.check(!bp->data().upgrades[0].enabled, "disabled");
     p.setPlayerUIItem(PlayerUISlot::CursorSelected, ItemStack::EMPTY_ITEM(), false);
@@ -339,7 +342,7 @@ ABP_REGISTER_SELFTEST("companion.settings_screen", [](Context& ctx) {
     auto const* m = sentModel(p);
     ctx.require(m != nullptr, "model");
     auto settings = m->extra.value("settings", nlohmann::json::object());
-    ctx.check(settings.value("keepSearchPhrase", false), "keepSearchPhrase on for the backpack");
+    ctx.check(!settings.value("keepSearchPhrase", true), "keepSearchPhrase (SC default on) off for the backpack");
     ctx.check(settings.value("noSortColor", -1) == static_cast<int>(core::DyeColor::Pink), "lime -> pink (dye order)");
     ctx.check(handleScreenAction(p, action(s, "setting", {{"what", "memory"}, {"op", "unselectAll"}})), "forget all");
     ctx.check(feature::gui::memoryCount(*bp) == 0, "memory cleared");

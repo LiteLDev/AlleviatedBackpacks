@@ -13,6 +13,15 @@ int storageRows(int storageSlots) {
     return (storageSlots + columns - 1) / columns;
 }
 
+int storageRows(int storageSlots, int columnsTaken) {
+    if (columnsTaken <= 0) return storageRows(storageSlots);
+    // rows = rows(storageSlots + columnsTaken * rows): the smallest fixed point.
+    for (int rows = 1; rows <= 1024; ++rows) {
+        if (storageRows(storageSlots + columnsTaken * rows) == rows) return rows;
+    }
+    return storageRows(storageSlots);
+}
+
 int StorageLayout::upgradeHeightWithoutBottom() const {
     return kUpgradeBottomHeight + static_cast<int>(upgradeSlots.size()) * kUpgradeSlotHeight;
 }
@@ -28,7 +37,7 @@ Rect StorageLayout::scrollBar() const {
 
 StorageLayout computeLayout(LayoutInput const& in) {
     StorageLayout l;
-    l.rows = storageRows(in.storageSlots);
+    l.rows = storageRows(in.storageSlots, in.columnsTaken);
 
     // updateDimensionsAndSlotPositions(height)
     int displayable = std::min((in.screenHeight - kHeightWithoutStorageSlots) / kSlotSize, l.rows);
@@ -73,8 +82,11 @@ StorageLayout computeLayout(LayoutInput const& in) {
     // addSortButtons()
     switch (in.sortButtons) {
     case SortButtonsPosition::TitleLineRight:
-    case SortButtonsPosition::BelowUpgradeTabs: // needs the tab control; the client moves it
         l.sortButton = {l.imageWidth - 31, 4, kSmallButton, kSmallButton};
+        break;
+    case SortButtonsPosition::BelowUpgradeTabs:
+        // (settingsTabControl.x + 2, settingsTabControl.y + max(0, height + 2))
+        l.sortButton = {l.imageWidth + 2, kTabsY + std::max(0, in.tabsHeight + 2), kSmallButton, kSmallButton};
         break;
     case SortButtonsPosition::BelowUpgrades:
         l.sortButton = {
@@ -101,6 +113,10 @@ StorageLayout computeLayout(LayoutInput const& in) {
     l.tabsOrigin  = {l.imageWidth, kTabsY};
     l.storageArea = {kSlotsXOffset, kSlotsYOffset, l.storageColumns * kSlotSize, l.visibleRows * kSlotSize};
     l.scrollPanel = {kSlotsXOffset, kSlotsYOffset, l.storageColumns * kSlotSize + kScrollBarWidth, l.visibleRows * kSlotSize};
+    if (in.columnsTaken > 0) {
+        int x            = kSlotsXOffset + l.storageColumns * kSlotSize + (l.scroll ? kScrollBarWidth : 0);
+        l.inventoryParts = {x, kSlotsYOffset, in.columnsTaken * kSlotSize, l.visibleRows * kSlotSize};
+    }
     return l;
 }
 

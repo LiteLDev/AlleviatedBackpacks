@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -37,11 +38,14 @@
 #include "client/render/RenderHooks.h"
 #include "client/tooltip/ContentsTooltip.h"
 #include "client/ui/UiRoot.h"
+#include "client/ui/screen/InventoryParts.h"
+#include "client/ui/screen/ScreenConfig.h"
 #include "client/ui/screen/Tabs.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "client/ui/widgets/TextInput.h"
 #include "client/ui/widgets/Widgets.h"
 #include "core/screen/CountFormat.h"
+#include "core/screen/MainScreen.h"
 #include "core/screen/SearchFilter.h"
 #include "core/screen/StorageLayout.h"
 #include "game/BackpackItem.h"
@@ -99,21 +103,39 @@ std::string truncated(Painter& p, std::string const& text, float maxWidth) {
     return out + "...";
 }
 
-/// SB count overlay: vanilla style up to 99, abbreviated and scaled to 16 units above.
-void drawCount(Painter& p, long long count, float x, float y, Color c = Color::rgb(0xFFFFFF)) {
-    if (count <= 1) return;
-    if (count <= 99) {
-        auto s = std::to_string(count);
-        p.text(s, x + 19 - 2 - p.textWidth(s), y + 6 + 3, c, true);
+/// SC count overlay (`renderStack`): vanilla style up to 99; above, `CountAbbreviator` text scaled
+/// by `min(1, 16 / width)` and right-aligned at x + 17 (`renderStackCount`). Yellow for a capped drag
+/// preview. Counts are drawn above items (SC z+200): call between flushes, after the items.
+void drawCountOverlay(Painter& p, cs::CountOverlay const& o, float x, float y) {
+    if (o.text.empty()) return;
+    Color c = o.yellow ? Color::rgb(0xFFFF55) : Color::rgb(0xFFFFFF); // ChatFormatting.YELLOW
+    if (!o.special) {
+        p.text(o.text, x + 19 - 2 - p.textWidth(o.text), y + 6 + 3, c, true);
         return;
     }
-    auto  s     = cs::abbreviateCount(count);
-    float w     = p.textWidth(s);
-    float scale = std::min(1.f, 16.f / std::max(1.f, w));
-    p.text(s, x + 19 - 2 - w * scale, y + 6 + 3 + (1 / (scale * scale) - 1), c, true, scale);
+    float w = p.textWidth(o.text);
+    float s = cs::countScale(w);
+    p.text(o.text, x + 19 - 2 - w * s, y + 6 + 3 + (1 / (s * s) - 1), c, true, s);
+}
+
+void drawCount(Painter& p, long long count, float x, float y) { drawCountOverlay(p, cs::countOverlay(count), x, y); }
+
+/// SC INACCESSIBLE_SLOT_BACKGROUND (original art): a dark red cross over the empty slot.
+void drawInaccessible(Painter& p, float x, float y) {
+    Color dark = Color::rgb(0x6B1A14);
+    Color red  = Color::rgb(0xA8322A);
+    for (int i = 0; i < 10; ++i) {
+        p.fillRect({x + 3 + static_cast<float>(i), y + 3 + static_cast<float>(i), 1, 1}, i % 3 == 0 ? dark : red, Painter::Layer::Foreground);
+        p.fillRect({x + 12 - static_cast<float>(i), y + 3 + static_cast<float>(i), 1, 1}, i % 3 == 0 ? dark : red, Painter::Layer::Foreground);
+    }
 }
 
 void requestClose(); // host: close the screen now (and tell the server)
+
+/// SC upgrade tab label (`translUpgrade(id)`, e.g. "Magnet") and closed tab tooltip
+/// (`translUpgradeTooltip(id)`, e.g. "Magnet Settings"); the upgrade name when SC has none.
+std::string tabLabel(cs::UpgradeView const& u) { return u.id.empty() ? u.name : ctr("abp.mainscreen.tab." + u.id, u.name); }
+std::string tabTooltip(cs::UpgradeView const& u) { return u.id.empty() ? u.name : ctr("abp.mainscreen.tab." + u.id + ".tooltip", tabLabel(u)); }
 
 bool isFillerItem(core::ItemStackData const& d) { return d.id == cs::kFillerId; }
 
@@ -257,15 +279,49 @@ private:
         return it != m.extra.end() && it->is_object() ? *it : nlohmann::json::object();
     }
 
-    // SC "keep search phrase" / "keep tab open" (per backpack, this game session)
-    std::unordered_map<std::string, std::string> mKeptSearch;
-    std::unordered_map<std::string, int>         mKeptTab;
-    int                                          mPendingTab = -1;
+    // SC "keep search phrase" / "keep tab open" (kept by the server, see NativeScreens.cpp)
+    std::string mSentPhrase;
+    double      mSearchEditedAt    = -10;
+    int         mPendingTab        = -1;
+
+public:
+    /// SC onSearchPhraseChange -> menu.setSearchPhrase: the server keeps the phrase. Sent when
+    /// typing pauses (`force`: now, e.g. before the screen closes).
+    void flushSearchPhrase(bool force) {
+        if (mSession == 0 || mSearch.text() == mSentPhrase) return;
+        if (!force && now() - mSearchEditedAt < 0.4) return;
+        mSentPhrase = mSearch.text();
+        net::sendScreenAction({{"action", "searchPhrase"}, {"phrase", mSentPhrase}});
+    }
+
+private:
+    int         mSessionTabsHeight = -1; ///< tab column height when the screen opened (sort buttons below tabs)
 
     // vanilla quick craft (drag the cursor stack over slots)
     int                  mDistButton = -1;
     std::vector<SlotRef> mDistSlots;
     void                 finishDistribution();
+    /// SC mouseDragged: a slot joins the drag when the cursor stack can go there.
+    [[nodiscard]] bool canDragTo(cs::BackpackScreenModel const& m, SlotRef const& s) const;
+    /// Per dragged-over slot preview (SC renderSlot while quick crafting); nullopt = not dragged.
+    [[nodiscard]] std::optional<cs::DragPreview> dragPreviewFor(cs::BackpackScreenModel const& m, SlotRef const& s) const;
+    [[nodiscard]] int dragSlotMax(cs::BackpackScreenModel const& m, SlotRef const& s, ItemStack const& carried) const;
+
+    // upgrade inventory parts (columns taken)
+    struct PartState {
+        int                            slot = -1;
+        std::unique_ptr<InventoryPart> part;
+        Rect                           area;
+    };
+    std::vector<PartState> mParts;
+    std::string            mPartsSig;
+    void                   layoutParts(cs::BackpackScreenModel const& m);
+    [[nodiscard]] int      columnsTaken(cs::BackpackScreenModel const& m) const;
+    [[nodiscard]] InventoryPartContext partContext(cs::BackpackScreenModel const& m, PartState const& ps) const;
+
+    // shift + double click (vanilla quick move all)
+    SlotRef mLastShiftClick;
+    double  mLastShiftClickAt = -10;
 };
 
 BackpackScreenLayer gLayer;
@@ -294,18 +350,20 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         mSearch.padding        = 1;
         mSearch.backgroundArgb = 0x00000000;
         mSearch.maxLength      = 50;
-        mSearch.onChange       = [this](std::string const& text) {
-            mMatchesDirty = true;
-            if (auto const* cur = net::screenModel(); cur && !cur->uuid.empty()) mKeptSearch[cur->uuid] = text;
+        mSearch.onChange       = [this](std::string const&) {
+            mMatchesDirty   = true;
+            mSearchEditedAt = now(); // sent to the server once typing pauses (flushSearchPhrase)
         };
+        // SC addSearchBox: `if (shouldKeepSearchPhrase()) setValue(getSearchPhrase())`; the open tab
+        // comes back with "keep tab open" (StorageContainerMenuBase reopens `getOpenTabId`).
         auto settings = settingsValues(m);
-        if (!m.uuid.empty() && settings.value("keepSearchPhrase", false)) {
-            if (auto it = mKeptSearch.find(m.uuid); it != mKeptSearch.end()) mSearch.setText(it->second);
-        }
-        mPendingTab = -1;
-        if (!m.uuid.empty() && settings.value("keepTabOpen", true)) {
-            if (auto it = mKeptTab.find(m.uuid); it != mKeptTab.end()) mPendingTab = it->second;
-        }
+        mSentPhrase     = settings.value("searchPhrase", std::string{});
+        mSearchEditedAt = -10;
+        if (settings.value("effectiveKeepSearchPhrase", true)) mSearch.setText(mSentPhrase);
+        mPendingTab = settings.value("effectiveKeepTabOpen", true) ? settings.value("openTab", -1) : -1;
+        mSessionTabsHeight = -1;
+        mParts.clear();
+        mPartsSig.clear();
     }
     auto rev = net::screenRevision();
     if (rev == mRevision) return;
@@ -393,11 +451,57 @@ bool BackpackScreenLayer::openTabWantsText() const {
 
 // ---- layout -----------------------------------------------------------------------------------------
 
+int BackpackScreenLayer::columnsTaken(cs::BackpackScreenModel const& m) const {
+    int n = 0;
+    for (auto const& u : m.upgrades) n += u.item.empty() ? 0 : u.columnsTaken;
+    return n;
+}
+
+InventoryPartContext BackpackScreenLayer::partContext(cs::BackpackScreenModel const& m, PartState const& ps) const {
+    return InventoryPartContext{m, ps.slot, m.upgrades[static_cast<std::size_t>(ps.slot)], [slot = ps.slot](nlohmann::json d) {
+                                    net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(d)}});
+                                }};
+}
+
+void BackpackScreenLayer::layoutParts(cs::BackpackScreenModel const& m) {
+    // SC initUpgradeInventoryControls: one control per upgrade with columns, left to right.
+    std::string sig;
+    for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
+        auto const& u = m.upgrades[i];
+        if (!u.item.empty() && u.columnsTaken > 0) sig += std::to_string(i) + ":" + u.id + ":" + std::to_string(u.columnsTaken) + ";";
+    }
+    if (sig != mPartsSig) {
+        mPartsSig = sig;
+        mParts.clear();
+        for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
+            auto const& u = m.upgrades[i];
+            if (u.item.empty() || u.columnsTaken <= 0) continue;
+            PartState ps;
+            ps.slot = static_cast<int>(i);
+            ps.part = createInventoryPart(u.id); // may be null: the columns stay empty
+            mParts.push_back(std::move(ps));
+        }
+    }
+    float x = mLeft + static_cast<float>(mLayout.inventoryParts.x);
+    for (auto& ps : mParts) {
+        float w = static_cast<float>(m.upgrades[static_cast<std::size_t>(ps.slot)].columnsTaken * cs::geometry::kSlotSize);
+        ps.area = {x, mTop + static_cast<float>(mLayout.inventoryParts.y), w, static_cast<float>(mLayout.inventoryParts.h)};
+        x += w;
+    }
+}
+
 void BackpackScreenLayer::layout(cs::BackpackScreenModel const& m, FrameInfo const& f) {
     cs::LayoutInput in;
     in.storageSlots = m.storageSlots;
     in.upgradeSlots = static_cast<int>(m.upgrades.size());
     in.screenHeight = static_cast<int>(f.screen.h);
+    in.columnsTaken = columnsTaken(m);
+    in.sortButtons  = sortButtonsPosition();
+    // SettingsTabControl.getHeight() when the sort buttons were added (screen init, after the kept
+    // tab reopened); closed tabs are 24 high, 25 apart.
+    in.tabsHeight = mSessionTabsHeight >= 0 ? mSessionTabsHeight
+                  : mTabs.empty()           ? 0
+                                            : static_cast<int>(mTabs.size()) * (cs::geometry::kTabHeight + cs::geometry::kTabSpacing) - cs::geometry::kTabSpacing;
     for (auto const& u : m.upgrades) in.upgradeSwitches.push_back(!u.item.empty() && u.toggleable);
     mLayout = cs::computeLayout(in);
     mLeft   = std::floor((f.screen.w - static_cast<float>(mLayout.imageWidth)) / 2);
@@ -405,15 +509,17 @@ void BackpackScreenLayer::layout(cs::BackpackScreenModel const& m, FrameInfo con
     // Keep the scroll position valid after resizes / model changes.
     cs::scrollBy(mScroll, mLayout, m.storageSlots, 0);
     mPlaced = cs::placeStorageSlots(mLayout, m.storageSlots, mMatches, mScroll, &mVisibleCount);
+    layoutParts(m);
     if (m.session != mLoggedLayout) {
         mLoggedLayout = m.session;
         float inv     = 1;
         if (auto* c = currentClient()) inv = c->getGuiData()->mInvGuiScale;
         log().info(
             "companion: screen layout session={} left={} top={} width={} height={} rows={}/{} scroll={} invGuiScale={} screen={}x{} "
-            "invLabel={},{} upgrades={} tabs={}",
+            "invLabel={},{} upgrades={} tabs={} slots={} cols={} sort={},{}",
             m.session, mLeft, mTop, mLayout.imageWidth, mLayout.imageHeight, mLayout.visibleRows, mLayout.rows, mLayout.scroll, inv,
-            f.screen.w, f.screen.h, mLayout.inventoryLabelX, mLayout.inventoryLabelY, m.upgrades.size(), mTabs.size()
+            f.screen.w, f.screen.h, mLayout.inventoryLabelX, mLayout.inventoryLabelY, m.upgrades.size(), mTabs.size(), m.storageSlots,
+            mLayout.storageColumns, mLayout.sortButton.x, mLayout.sortButton.y
         );
     }
 
@@ -447,17 +553,19 @@ void BackpackScreenLayer::buildControls(cs::BackpackScreenModel const& m) {
                                    : (shift ? sb::Icon::TransferToInventory : sb::Icon::TransferToInventoryFiltered);
             sb::icon(p, i, x, y);
         };
+        // SC TransferButton: Shift shows TRANSFER_TO_* ("Transfer to Storage"), otherwise
+        // TRANSFER_TO_*_FILTERED with the dark gray "Shift To Transfer All" line.
         b->dynamicTooltip = [toStorage]() -> std::vector<TooltipLine> {
             if (input::shiftDown()) {
-                return {{toStorage ? ctr("abp.companion.button.transfer_to_storage", "Move to backpack")
-                                   : ctr("abp.companion.button.transfer_to_inventory", "Move to inventory"),
+                return {{toStorage ? ctr("abp.mainscreen.button.transfer_to_storage", "Transfer to Storage")
+                                   : ctr("abp.mainscreen.button.transfer_to_inventory", "Transfer to Inventory"),
                          0xFFFFFF}};
             }
             return {
-                {toStorage ? ctr("abp.companion.button.transfer_to_storage_filtered", "Move matching items to the backpack")
-                           : ctr("abp.companion.button.transfer_to_inventory_filtered", "Move matching items to the inventory"),
+                {toStorage ? ctr("abp.mainscreen.button.transfer_to_storage_filtered", "Transfer Matching to Storage")
+                           : ctr("abp.mainscreen.button.transfer_to_inventory_filtered", "Transfer Matching to Inventory"),
                  0xFFFFFF},
-                {ctr("abp.companion.button.transfer_all", "Shift: move everything"), 0x555555},
+                {"§8" + ctr("abp.mainscreen.button.transfer_all", "Shift To Transfer All"), 0x555555},
             };
         };
         b->onClick = [toStorage](int button) {
@@ -474,7 +582,7 @@ void BackpackScreenLayer::buildControls(cs::BackpackScreenModel const& m) {
         sort->size         = Button::Size::Small;
         sort->rect         = R(mLayout.sortButton);
         sort->icon         = [](Painter& p, float x, float y) { sb::icon(p, sb::Icon::TransferToStorage, x, y); }; // SC's SORT icon
-        sort->tooltipLines = {{ctr("abp.companion.button.sort_action", "Sort"), 0xFFFFFF}};
+        sort->tooltipLines = {{ctr("abp.mainscreen.button.sort_action", "Sort Inventory"), 0xFFFFFF}};
         sort->onClick      = [](int button) {
             if (button == 0) net::sendScreenAction({{"action", "sort"}});
         };
@@ -484,16 +592,17 @@ void BackpackScreenLayer::buildControls(cs::BackpackScreenModel const& m) {
         by->size    = Button::Size::Small;
         by->rect    = R(mLayout.sortByButton);
         auto letter = [](sb::Icon i) { return [i](Painter& p, float x, float y) { sb::icon(p, i, x, y); }; };
+        // SC SortBy order: NAME, MOD, COUNT, TAGS.
         by->states  = {
-            {letter(sb::Icon::SortByName), {{ctr("abp.companion.button.sort_by_name", "By Name"), 0xFFFFFF}}},
-            {letter(sb::Icon::SortByCount), {{ctr("abp.companion.button.sort_by_count", "By Count"), 0xFFFFFF}}},
-            {letter(sb::Icon::SortByMod), {{ctr("abp.companion.button.sort_by_mod", "By Mod"), 0xFFFFFF}}},
-            {letter(sb::Icon::SortByTags), {{ctr("abp.companion.button.sort_by_tags", "By Tags"), 0xFFFFFF}}},
+            {letter(sb::Icon::SortByName), {{ctr("abp.mainscreen.button.sort_by_name", "By Name"), 0xFFFFFF}}},
+            {letter(sb::Icon::SortByMod), {{ctr("abp.mainscreen.button.sort_by_mod", "By Mod"), 0xFFFFFF}}},
+            {letter(sb::Icon::SortByCount), {{ctr("abp.mainscreen.button.sort_by_count", "By Count"), 0xFFFFFF}}},
+            {letter(sb::Icon::SortByTags), {{ctr("abp.mainscreen.button.sort_by_tags", "By Tags"), 0xFFFFFF}}},
         };
         auto sortBy = m.sortBy;
         by->current = [sortBy] {
-            if (sortBy == "count") return 1;
-            if (sortBy == "mod") return 2;
+            if (sortBy == "mod") return 1;
+            if (sortBy == "count") return 2;
             if (sortBy == "tag") return 3;
             return 0;
         };
@@ -514,9 +623,10 @@ void BackpackScreenLayer::buildControls(cs::BackpackScreenModel const& m) {
         sw->state        = [state] { return state; };
         int  slot        = static_cast<int>(i);
         sw->onToggle     = [slot] { net::sendScreenAction({{"action", "toggleUpgrade"}, {"slot", slot}}); };
-        sw->onTooltip    = {{"§a" + ctr("abp.companion.button.upgrade_switch_enabled", "ON"), 0xFFFFFF}};
-        sw->offTooltip   = {{"§c" + ctr("abp.companion.button.upgrade_switch_disabled", "OFF"), 0xFFFFFF}};
-        sw->inactiveTooltip = {{"§7" + ctr("abp.companion.button.upgrade_switch_inactive", "INACTIVE"), 0xFFFFFF}};
+        // SC translColoredButton: GREEN / RED / GRAY.
+        sw->onTooltip    = {{"§a" + ctr("abp.mainscreen.button.upgrade_switch_enabled", "ON"), 0x55FF55}};
+        sw->offTooltip   = {{"§c" + ctr("abp.mainscreen.button.upgrade_switch_disabled", "OFF"), 0xFF5555}};
+        sw->inactiveTooltip = {{"§7" + ctr("abp.mainscreen.button.upgrade_switch_inactive", "INACTIVE"), 0xAAAAAA}};
         mControls.add(std::move(sw));
     }
 }
@@ -541,7 +651,7 @@ void BackpackScreenLayer::drawTabs(Painter& p, cs::BackpackScreenModel const& m,
         if (!isOpen || tab.slot < 0) return;
         auto const& u     = m.upgrades[static_cast<std::size_t>(tab.slot)];
         float       maxW  = std::max(0.f, tab.rect.w - 20 - 6);
-        p.text(truncated(p, u.name, maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
+        p.text(truncated(p, tabLabel(u), maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
         tab.widgets.render(p, mx, my, t);
         if (tab.native) {
             TabContext ctx{m, tab.slot, u, &mUpgradeStacks[static_cast<std::size_t>(tab.slot)], {}, {}};
@@ -584,6 +694,21 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     );
 
     auto highlight = [&](float x, float y) { p.fillRect({x, y, 16, 16}, sb::color::HOVER, Painter::Layer::Foreground); };
+    // Counts go above every item (SC renders them at z+200): collected, drawn after a flush.
+    struct PendingCount {
+        cs::CountOverlay overlay;
+        float            x, y;
+    };
+    std::vector<PendingCount> counts;
+    std::deque<ItemStack>     dragStacks; // drag previews (stable addresses until the flush)
+    auto const* player  = currentPlayer();
+    ItemStack   carried = player ? player->mPlayerUIContainer->getItem(0) : ItemStack{};
+
+    // Inventory parts of upgrades taking storage columns (SC renderUpgradeInventoryControls).
+    for (auto& ps : mParts) {
+        if (!ps.part) continue;
+        ps.part->render(p, partContext(m, ps), ps.area, mx, my);
+    }
 
     // Upgrade slots.
     for (std::size_t i = 0; i < mLayout.upgradeSlots.size(); ++i) {
@@ -592,42 +717,59 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         if (mHover.area == SlotRef::Area::Upgrade && mHover.index == static_cast<int>(i)) highlight(x, y);
     }
 
-    // Storage slots.
+    // Storage slots (SC renderSlot): the drag preview replaces the slot's stack while dragging.
+    bool dragging = mDistButton >= 0 && mDistSlots.size() > 1 && !carried.isNull();
     for (auto const& ps : mPlaced) {
         float x = L + static_cast<float>(ps.pos.x), y = T + static_cast<float>(ps.pos.y);
         auto  i = static_cast<std::size_t>(ps.index);
         auto const& d = m.slots[i];
-        if (d.empty()) {
-            // Memory slot: the remembered item faded (SC renderSlotBackground + drawStackOverlay).
+        SlotRef     ref{SlotRef::Area::Storage, ps.index};
+        bool        inaccessible = i < m.inaccessible.size() && m.inaccessible[i];
+        if (auto preview = dragging ? dragPreviewFor(m, ref) : std::nullopt) {
+            p.fillRect({x, y, 16, 16}, Color::argb(0x80FFFFFF)); // renderStack(flag): -2130706433
+            dragStacks.push_back(carried);
+            p.item(dragStacks.back(), x, y);
+            counts.push_back({preview->overlay, x, y});
+        } else if (d.empty()) {
+            // Memory slot: the remembered item with SC's overlay (renderSlotBackground + drawStackOverlay).
             if (i < mMemoryStacks.size() && !mMemoryStacks[i].isNull()) {
                 p.item(mMemoryStacks[i], x, y);
                 sb::icon(p, sb::Icon::Memory, x, y);
+            } else if (inaccessible) {
+                drawInaccessible(p, x, y);
             }
         } else {
             p.item(mSlotStacks[i], x, y);
             render::decorateItemIcon(p, mSlotStacks[i], x, y);
-            drawCount(p, d.count, x, y);
+            counts.push_back({cs::countOverlay(d.count), x, y});
         }
-        if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index) highlight(x, y);
-        else if (mDistSlots.size() > 1 && std::find(mDistSlots.begin(), mDistSlots.end(), SlotRef{SlotRef::Area::Storage, ps.index}) != mDistSlots.end()) highlight(x, y);
+        if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index && !inaccessible) highlight(x, y);
     }
 
     // Player inventory.
-    if (auto* player = currentPlayer()) {
+    if (player) {
         auto& inv = player->getInventory();
         for (int i = 0; i < 36; ++i) {
             auto const& pos = mLayout.playerSlots[static_cast<std::size_t>(i)];
             float       x = L + static_cast<float>(pos.x), y = T + static_cast<float>(pos.y);
             sb::slotFrame(p, x, y); // part of SC's storage background texture
             auto const& s = inv.getItem(i);
-            if (!s.isNull()) {
+            if (auto preview = dragging ? dragPreviewFor(m, {SlotRef::Area::Inventory, i}) : std::nullopt) {
+                p.fillRect({x, y, 16, 16}, Color::argb(0x80FFFFFF));
+                dragStacks.push_back(carried);
+                p.item(dragStacks.back(), x, y);
+                counts.push_back({preview->overlay, x, y});
+            } else if (!s.isNull()) {
                 p.item(s, x, y);
                 render::decorateItemIcon(p, s, x, y);
-                drawCount(p, s.mCount, x, y);
+                counts.push_back({cs::countOverlay(s.mCount), x, y});
             }
             if (mHover.area == SlotRef::Area::Inventory && mHover.index == i) highlight(x, y);
         }
     }
+    p.flush();
+    for (auto const& c : counts) drawCountOverlay(p, c.overlay, c.x, c.y);
+    p.flush();
 
     // Scroll bar (InventoryScrollPanel).
     if (mLayout.scroll) {
@@ -639,8 +781,6 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             {L + static_cast<float>(thumb.x), T + static_cast<float>(thumb.y), static_cast<float>(thumb.w), static_cast<float>(thumb.h)}
         );
     }
-    (void)mx;
-    (void)my;
 }
 
 void BackpackScreenLayer::drawSearch(Painter& p, double t) {
@@ -662,9 +802,11 @@ void BackpackScreenLayer::drawSearch(Painter& p, double t) {
     mSearch.rect      = r;
     mSearch.textColor = focused ? 0xFFFFFF : 0xBBBBBB;
     mSearch.render(p, t);
+    // TextBox unfocused empty hint (SearchBox.MAGNIFYING_GLASS), centred at x + width / 2 + 2.
     if (mSearch.text().empty() && !focused) sb::icon(p, sb::Icon::Search, r.x + r.w / 2 + 2 - 3.5f, r.y + 1.5f);
-    if (!mFilter.blank() && mVisibleCount == 0) {
-        p.text(ctr("abp.companion.screen.no_results", "Nothing matches the search"), mLeft + 7, mTop + 18, Color::rgb(kTextColor));
+    // SC noResultsLabel at (7, 18) while no storage slot is visible.
+    if (mVisibleCount == 0) {
+        p.text(ctr("abp.mainscreen.label.no_search_results", "No items match the search"), mLeft + 7, mTop + 18, Color::rgb(kTextColor));
     }
 }
 
@@ -680,13 +822,29 @@ void BackpackScreenLayer::drawErrorOverlay(Painter& p, cs::BackpackScreenModel c
             if (ps.index == i) p.fillRect({mLeft + ps.pos.x, mTop + ps.pos.y, 16, 16}, sb::color::ERROR_SLOT, Painter::Layer::Foreground);
         }
     }
-    // Message box centred under the storage, at the inventory label (SC renderErrorMessage).
-    float w  = std::min(260.f, p.textWidth(m.errorMessage));
+    for (int slot : m.errorInventoryParts) {
+        for (auto& ps : mParts) {
+            if (ps.slot != slot) continue;
+            if (ps.part) ps.part->renderErrorOverlay(p, ps.area);
+            else p.fillRect(ps.area, sb::color::ERROR_SLOT, Painter::Layer::Foreground);
+        }
+    }
+    p.flush();
+    // SC renderErrorMessage: centred at (width / 2, topPos + inventoryLabelY + 4), wrapped at 260,
+    // tooltip background 0xF0100010 with red borders, red shadowed text (2 extra units after line 1).
+    auto  lines = cs::wrapText(m.errorMessage, 260, [&](std::string_view s) { return p.textWidth(std::string(s)); });
+    float w     = 0;
+    for (auto const& l : lines) w = std::max(w, p.textWidth(l));
     float cx = p.screen().w / 2;
     float y  = mTop + static_cast<float>(mLayout.inventoryLabelY) + 4;
-    Rect  body{std::floor(cx - w / 2), y, w, 8};
-    sb::tooltipBox(p, body, sb::color::ERROR_BG, sb::color::ERROR_EDGE, sb::color::ERROR_EDGE);
-    p.text(m.errorMessage, body.x, body.y, sb::color::ERROR_EDGE, true);
+    float h  = static_cast<float>(cs::errorTextHeight(lines.size()));
+    float lx = cx + static_cast<float>(static_cast<int>(-w / 2));
+    sb::tooltipBox(p, {lx, y, w, h}, sb::color::ERROR_BG, sb::color::ERROR_EDGE, sb::color::ERROR_EDGE);
+    float ty = y;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        p.text(lines[i], lx, ty, sb::color::ERROR_EDGE, true);
+        ty += i == 0 ? 12 : 10;
+    }
     p.flush();
 }
 
@@ -700,20 +858,31 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         return;
     }
     // Closed tabs (SC Tab.renderTooltip): settings tab text / upgrade name.
+    auto const* openTab = mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size()) ? &mTabs[static_cast<std::size_t>(mOpenTab)] : nullptr;
     for (std::size_t i = 0; i < mTabs.size(); ++i) {
         auto const& t = mTabs[i];
         if (static_cast<int>(i) == mOpenTab || !t.rect.contains(mx, my)) continue;
-        if (t.slot < 0) lines.push_back({ctr("abp.companion.tab.settings", "Backpack Settings"), 0xFFFFFF});
-        else lines.push_back({m.upgrades[static_cast<std::size_t>(t.slot)].name, 0xFFFFFF});
+        // SettingsTabControl: no tooltip for a tab the open tab fully covers.
+        if (openTab && !(openTab->rect.bottom() < t.rect.bottom() || openTab->rect.y > t.rect.y)) continue;
+        if (t.slot < 0) lines.push_back({ctr("abp.mainscreen.settings.tooltip", "Backpack Settings"), 0xFFFFFF});
+        else lines.push_back({tabTooltip(m.upgrades[static_cast<std::size_t>(t.slot)]), 0xFFFFFF});
         drawTooltip(p, lines, mx, my);
         return;
     }
-    // Search box hint while not focused.
+    // Upgrade inventory parts.
+    for (auto& ps : mParts) {
+        if (ps.part && ps.area.contains(mx, my)) ps.part->tooltip(partContext(m, ps), ps.area, mx, my, lines);
+    }
+    if (!lines.empty()) {
+        drawTooltip(p, lines, mx, my);
+        return;
+    }
+    // Search box hint while not focused (SearchBox.TOOLTIP).
     if (!mSearch.focused() && mSearch.rect.contains(mx, my)) {
         drawTooltip(
             p,
-            {{ctr("abp.companion.search.title", "Search"), 0xFFFFFF},
-             {ctr("abp.companion.search.detail", "@name filters by mod, #text by tooltip"), 0xAAAAAA}},
+            {{ctr("abp.mainscreen.text_box.search_box", "Click to search"), 0xFFFFFF},
+             {"§7" + ctr("abp.mainscreen.text_box.search_box_detail", "@ prefix to search by mod name"), 0xAAAAAA}},
             mx,
             my
         );
@@ -740,11 +909,15 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
     if (!s || s->isNull()) return;
     std::vector<TooltipLine> extra;
     if (mHover.area == SlotRef::Area::Storage) {
+        // SC getTooltipFromContainerItem: "Count: n / max" when the slot's own limit differs from
+        // the item's max stack size (gray, numbers dark aqua).
         auto const& d   = m.slots[static_cast<std::size_t>(mHover.index)];
         int         lim = m.slotLimits[static_cast<std::size_t>(mHover.index)];
-        if (lim > 0 && lim != d.maxStack) {
+        if (lim <= 0) lim = d.maxStack;
+        if (cs::showsCountLine(m.baseSlotLimit, d.maxStack)) {
             extra.push_back(
-                {ctr("abp.companion.tooltip.stack_count", "§7Count: {}", "§3" + cs::groupedCount(d.count) + "§7 / §3" + cs::groupedCount(lim)), 0xAAAAAA}
+                {"§7" + ctr("abp.mainscreen.tooltip.stack_count", "Count: {}", "§3" + cs::groupedCount(d.count) + "§7 / §3" + cs::groupedCount(lim)),
+                 0xAAAAAA}
             );
         }
     } else if (mHover.area == SlotRef::Area::Upgrade) {
@@ -769,11 +942,16 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
         renderSettings(p, *m, f);
         return;
     }
+    // SB BackpackScreen.render: a storage without slots closes the screen.
+    if (m->storageSlots == 0 && !closing) {
+        requestClose();
+        return;
+    }
     updateSearch(*m);
+    flushSearchPhrase(false);
     layout(*m, f);
-    buildControls(*m);
     if (mPendingTab >= 0) {
-        // "Keep tab open": reopen the upgrade tab that was open last time.
+        // "Keep tab open": reopen the upgrade tab that was open last time (SC getOpenTabId).
         for (std::size_t i = 0; i < mTabs.size(); ++i) {
             auto& t = mTabs[i];
             if (t.slot != mPendingTab || !t.native) continue;
@@ -787,6 +965,14 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
         }
         mPendingTab = -1;
     }
+    if (mSessionTabsHeight < 0 && !mTabs.empty()) {
+        // SettingsTabControl.getHeight() at init (the sort buttons below the tabs stay there).
+        float bottom = 0;
+        for (auto const& t : mTabs) bottom = std::max(bottom, t.rect.bottom());
+        mSessionTabsHeight = static_cast<int>(bottom - (mTop + static_cast<float>(mLayout.tabsOrigin.y)));
+        layout(*m, f);
+    }
+    buildControls(*m);
     float mx = f.mouseX, my = f.mouseY;
     mHover   = slotAt(*m, mx, my);
     double t = now();
@@ -804,16 +990,94 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
     p.flush();
     drawErrorOverlay(p, *m);
 
-    // The item on the cursor (follows the mouse, centred).
+    // The item on the cursor (follows the mouse, centred). While dragging over several slots it
+    // shows what stays on the cursor (SC quickCraftingRemainder; nothing when 0).
     if (auto* player = currentPlayer()) {
         auto const& cursor = player->mPlayerUIContainer->getItem(0);
         if (!cursor.isNull()) {
-            p.item(cursor, mx - 8, my - 8);
-            drawCount(p, cursor.mCount, mx - 8, my - 8);
-            p.flush();
+            long long count = cursor.mCount;
+            if (mDistButton >= 0 && mDistSlots.size() > 1) {
+                std::vector<cs::DragSlot> slots;
+                for (auto const& s : mDistSlots) {
+                    auto const* st = stackAt(s);
+                    slots.push_back({st && !st->isNull() ? static_cast<int>(s.area == SlotRef::Area::Storage ? m->slots[static_cast<std::size_t>(s.index)].count : st->mCount) : 0,
+                                     dragSlotMax(*m, s, cursor)});
+                }
+                count = cs::quickCraftRemainder(mDistButton == 1 ? cs::QuickCraft::One : cs::QuickCraft::Split, cursor.mCount, cursor.getMaxStackSize(), slots);
+            }
+            if (count > 0) {
+                p.item(cursor, mx - 8, my - 8);
+                p.flush();
+                drawCount(p, count, mx - 8, my - 8);
+                p.flush();
+            }
         }
     }
     drawTooltips(p, *m, mx, my);
+}
+
+// ---- quick craft (drag) ----------------------------------------------------------------------------------------
+
+int BackpackScreenLayer::dragSlotMax(cs::BackpackScreenModel const& m, SlotRef const& s, ItemStack const& carried) const {
+    // slot.getMaxStackSize(carried): storage slots use the server's limit for that item.
+    if (s.area == SlotRef::Area::Storage) {
+        auto const& d = m.slots[static_cast<std::size_t>(s.index)];
+        int         lim = m.slotLimits[static_cast<std::size_t>(s.index)];
+        if (!d.empty() && lim > 0) return lim;
+        int itemMax = carried.getMaxStackSize();
+        return std::max(1, static_cast<int>(std::lround(static_cast<double>(m.baseSlotLimit) * itemMax / 64.0)));
+    }
+    return carried.getMaxStackSize();
+}
+
+bool BackpackScreenLayer::canDragTo(cs::BackpackScreenModel const& m, SlotRef const& s) const {
+    auto* player = currentPlayer();
+    if (!player) return false;
+    auto const& carried = player->mPlayerUIContainer->getItem(0);
+    if (carried.isNull()) return false;
+    // itemstack.getCount() > quickCraftSlots.size() (left / right drag)
+    if (static_cast<int>(carried.mCount) <= static_cast<int>(mDistSlots.size())) return false;
+    if (s.area == SlotRef::Area::Storage) {
+        auto i = static_cast<std::size_t>(s.index);
+        if (i < m.inaccessible.size() && m.inaccessible[i]) return false;
+        auto const& d = m.slots[i];
+        if (d.empty()) return true;
+        // canItemQuickReplace: the same item, not over the slot's limit.
+        auto cd = game::ItemConv::toData(carried);
+        return d.sameItem(cd) && d.count <= dragSlotMax(m, s, carried);
+    }
+    if (s.area == SlotRef::Area::Inventory) {
+        if (m.lockedSlot == s.index) return false;
+        auto const& it = player->getInventory().getItem(s.index);
+        return it.isNull() || (it.matchesItem(carried) && it.mCount <= it.getMaxStackSize());
+    }
+    return false;
+}
+
+std::optional<cs::DragPreview> BackpackScreenLayer::dragPreviewFor(cs::BackpackScreenModel const& m, SlotRef const& s) const {
+    if (std::find(mDistSlots.begin(), mDistSlots.end(), s) == mDistSlots.end()) return std::nullopt;
+    auto* player = currentPlayer();
+    if (!player) return std::nullopt;
+    auto const& carried = player->mPlayerUIContainer->getItem(0);
+    if (carried.isNull()) return std::nullopt;
+    int  slotMax = dragSlotMax(m, s, carried);
+    auto type    = mDistButton == 1 ? cs::QuickCraft::One : cs::QuickCraft::Split;
+    int  place   = cs::quickCraftPlaceCount(type, carried.mCount, carried.getMaxStackSize(), static_cast<int>(mDistSlots.size()), slotMax);
+    int  count   = 0;
+    bool empty   = true;
+    int  limit   = 64;
+    if (s.area == SlotRef::Area::Storage) {
+        auto const& d = m.slots[static_cast<std::size_t>(s.index)];
+        empty         = d.empty();
+        count         = d.count;
+        limit         = empty ? 64 : std::max(1, m.slotLimits[static_cast<std::size_t>(s.index)] > 0 ? m.slotLimits[static_cast<std::size_t>(s.index)] : d.maxStack);
+    } else {
+        auto const& it = player->getInventory().getItem(s.index);
+        empty          = it.isNull();
+        count          = empty ? 0 : it.mCount;
+        limit          = empty ? 64 : it.getMaxStackSize();
+    }
+    return cs::dragPreview(place, count, empty, limit);
 }
 
 // ---- hit testing ----------------------------------------------------------------------------------------------
@@ -838,7 +1102,7 @@ Rect BackpackScreenLayer::slotRect(SlotRef const& s) const {
     }
 }
 
-SlotRef BackpackScreenLayer::slotAt(cs::BackpackScreenModel const&, float x, float y) const {
+SlotRef BackpackScreenLayer::slotAt(cs::BackpackScreenModel const& m, float x, float y) const {
     // Open tab content covers what is under it.
     if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size()) && mTabs[static_cast<std::size_t>(mOpenTab)].rect.contains(x, y)) return {};
     for (std::size_t i = 0; i < mLayout.upgradeSlots.size(); ++i) {
@@ -847,7 +1111,10 @@ SlotRef BackpackScreenLayer::slotAt(cs::BackpackScreenModel const&, float x, flo
     }
     for (auto const& ps : mPlaced) {
         Rect r{mLeft + static_cast<float>(ps.pos.x) - 1, mTop + static_cast<float>(ps.pos.y) - 1, 18, 18};
-        if (r.contains(x, y)) return {SlotRef::Area::Storage, ps.index};
+        if (!r.contains(x, y)) continue;
+        // SC findSlot: an inaccessible storage slot is no slot at all.
+        if (static_cast<std::size_t>(ps.index) < m.inaccessible.size() && m.inaccessible[static_cast<std::size_t>(ps.index)]) return {};
+        return {SlotRef::Area::Storage, ps.index};
     }
     for (int i = 0; i < 36; ++i) {
         SlotRef s{SlotRef::Area::Inventory, i};
@@ -909,6 +1176,8 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
             if (isOpen && t.rect.contains(x, y)) return true; // inside the open tab
             continue;
         }
+        // The tab icon is an SC ImageButton: any click plays the button sound.
+        playButtonClick();
         if (button != MouseButton::Left) return true;
         if (t.slot < 0) {
             showSettings(true); // SB opens its settings screen
@@ -917,12 +1186,12 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         if (isOpen) {
             mOpenTab = -1;
             t.widgets.widgets.clear();
-            mKeptTab.erase(m->uuid);
+            send({{"action", "openTab"}, {"slot", -1}}); // SC removeOpenTabId
             return true;
         }
         if (mOpenTab >= 0) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.widgets.clear();
-        mOpenTab        = static_cast<int>(i);
-        mKeptTab[m->uuid] = t.slot;
+        mOpenTab = static_cast<int>(i);
+        send({{"action", "openTab"}, {"slot", t.slot}}); // SC setOpenTabId
         t.widgets.widgets.clear();
         if (t.native) {
             TabContext ctx{*m, t.slot, m->upgrades[static_cast<std::size_t>(t.slot)], &mUpgradeStacks[static_cast<std::size_t>(t.slot)], {}, {}};
@@ -931,6 +1200,10 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
             t.openSize = t.native->build(ctx, t.rect, t.widgets);
         }
         return true;
+    }
+    // Upgrade inventory parts (SC: inventory controls get clicks first).
+    for (auto& ps : mParts) {
+        if (ps.part && ps.area.contains(x, y) && ps.part->mouseClicked(partContext(*m, ps), ps.area, button, x, y)) return true;
     }
     // Buttons and switches.
     if (mControls.mouseDown(button, x, y)) return true;
@@ -963,6 +1236,12 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
     if (button == MouseButton::Middle) return true;
     double t      = now();
     bool   shift  = input::shiftDown();
+    bool   ctrl   = input::ctrlDown();
+    // SC mouseClicked: Shift + Ctrl + left click on a storage slot transfers the whole slot.
+    if (shift && ctrl && button == MouseButton::Left && slot.area == SlotRef::Area::Storage) {
+        send({{"action", "click"}, {"area", "storage"}, {"index", slot.index}, {"button", 0}, {"shift", true}, {"ctrl", true}});
+        return true;
+    }
     // With an item on the cursor the click happens on release: a drag over several slots
     // distributes the stack instead (vanilla quick craft).
     if (auto* pl = currentPlayer(); pl && !shift && !pl->mPlayerUIContainer->getItem(0).isNull()
@@ -971,11 +1250,24 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         mDistSlots  = {slot};
         return true;
     }
-    bool   ctrl   = input::ctrlDown();
-    bool   isDouble = button == MouseButton::Left && !shift && slot == mLastClick && t - mLastClickAt < 0.25;
+    if (shift) {
+        // Vanilla: a second Shift + left click on the same slot within 250 ms also moves every other
+        // stack of the last shift-clicked item (mouseReleased with `lastQuickMoved`).
+        bool quickAll     = button == MouseButton::Left && slot == mLastShiftClick && t - mLastShiftClickAt < 0.25;
+        mLastShiftClick   = slot;
+        mLastShiftClickAt = quickAll ? -10 : t;
+        mLastClick        = {};
+        // The second click of the pair moves every stack of the first click's item (that slot's
+        // rest included), so it is not sent as a click of its own (that would forget the item).
+        if (quickAll) send({{"action", "quickMoveAll"}, {"area", areaName(slot.area)}, {"index", slot.index}});
+        else send({{"action", "click"}, {"area", areaName(slot.area)}, {"index", slot.index}, {"button", button == MouseButton::Right ? 1 : 0}, {"shift", true}, {"ctrl", ctrl}});
+        return true;
+    }
+    bool isDouble = button == MouseButton::Left && slot == mLastClick && t - mLastClickAt < 0.25;
     mLastClick    = slot;
     mLastClickAt  = isDouble ? -10 : t;
-    if (isDouble && slot.area != SlotRef::Area::Upgrade) {
+    if (isDouble) {
+        // PICKUP_ALL (also on upgrade slots, SC doClick).
         send({{"action", "double"}, {"area", areaName(slot.area)}, {"index", slot.index}});
         return true;
     }
@@ -984,7 +1276,7 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
         {"area", areaName(slot.area)},
         {"index", slot.index},
         {"button", button == MouseButton::Right ? 1 : 0},
-        {"shift", shift},
+        {"shift", false},
         {"ctrl", ctrl},
     });
     return true;
@@ -1013,7 +1305,7 @@ bool BackpackScreenLayer::onMouseMove(float x, float y) {
     if (mDistButton >= 0 && mView == View::Storage && m->kind != "menu") {
         auto s = slotAt(*m, x, y);
         if ((s.area == SlotRef::Area::Storage || s.area == SlotRef::Area::Inventory)
-            && std::find(mDistSlots.begin(), mDistSlots.end(), s) == mDistSlots.end()) {
+            && std::find(mDistSlots.begin(), mDistSlots.end(), s) == mDistSlots.end() && canDragTo(*m, s)) {
             mDistSlots.push_back(s);
         }
     }
@@ -1047,10 +1339,15 @@ bool BackpackScreenLayer::onScroll(float x, float y, float delta) {
     if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size()) && mTabs[static_cast<std::size_t>(mOpenTab)].widgets.scroll(x, y, delta)) {
         return true;
     }
-    if (mLayout.scroll) {
+    if (mLayout.scroll && m->kind != "menu") {
+        // NeoForge ScrollPanel: the wheel scrolls while the mouse is over the panel (slots + bar),
+        // 18 units per notch. restrictScrollToScrollbar: not while over a storage slot.
         auto const& panel = mLayout.scrollPanel;
-        Rect        r{mLeft + static_cast<float>(panel.x), mTop + static_cast<float>(panel.y), static_cast<float>(panel.w), static_cast<float>(panel.h)};
-        if (r.contains(x, y)) cs::scrollBy(mScroll, mLayout, m->storageSlots, delta > 0 ? 1 : -1);
+        Rect        r{mLeft + static_cast<float>(panel.x), mTop + static_cast<float>(panel.y), static_cast<float>(panel.w + 1), static_cast<float>(panel.h + 1)};
+        bool        overSlot = slotAt(*m, x, y).area == SlotRef::Area::Storage;
+        if (r.contains(x, y) && !(clientGuiConfig().restrictScrollToScrollbar && overSlot)) {
+            cs::scrollBy(mScroll, mLayout, m->storageSlots, delta > 0 ? 1 : -1);
+        }
     }
     return true;
 }
@@ -1664,6 +1961,7 @@ void dropScene(bool byPlayer) {
     auto const* m = net::screenModel();
     if (byPlayer && m) {
         // ESC (handled natively by the dialog) or the game dropped the scene: close the menu.
+        gLayer.flushSearchPhrase(true);
         gScene.closedSession = m->session;
         net::sendScreenAction({{"action", "close"}});
     }
@@ -1720,6 +2018,7 @@ bool gLoggedFirst = false;
 void requestClose() {
     auto const* m = net::screenModel();
     if (!m) return;
+    gLayer.flushSearchPhrase(true);
     gScene.closedSession = m->session; // never reopen this session's scene
     net::sendScreenAction({{"action", "close"}});
     gScene.closing = true;

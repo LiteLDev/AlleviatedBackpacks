@@ -21,11 +21,21 @@ bool nameLess(ItemStackData const& a, ItemStackData const& b) {
          < std::make_tuple(pathOf(b.id), b.itemNamespace(), b.aux, b.nbtHash(), std::string_view(b.nbt()));
 }
 
-std::string firstTag(ItemStackData const& item, ITagProvider const* tags) {
-    if (!tags) return {};
-    auto all = tags->tagsOf(item);
-    if (all.empty()) return {};
-    return *std::min_element(all.begin(), all.end());
+std::string lowerAscii(std::string s) {
+    for (auto& c : s) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    return s;
+}
+
+/// SC InventorySorter.BY_TAGS `compareTags`: more tags first, then the (sorted) tag names.
+/// `a` and `b` are sorted.
+int compareTags(std::vector<std::string> const& a, std::vector<std::string> const& b) {
+    if (a.size() != b.size()) return a.size() > b.size() ? -1 : 1;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
+    }
+    return 0;
 }
 } // namespace
 
@@ -41,43 +51,79 @@ std::optional<SortBy> sortByFromString(std::string_view s) {
     return std::nullopt;
 }
 
-SortBy nextSortBy(SortBy by) { return static_cast<SortBy>((static_cast<int>(by) + 1) % kSortByCount); }
+SortBy nextSortBy(SortBy by) {
+    // Sophisticated Core's SortBy order: NAME -> MOD -> COUNT -> TAGS -> NAME.
+    switch (by) {
+    case SortBy::Name:
+        return SortBy::Mod;
+    case SortBy::Mod:
+        return SortBy::Count;
+    case SortBy::Count:
+        return SortBy::Tag;
+    case SortBy::Tag:
+    default:
+        return SortBy::Name;
+    }
+}
 
-ItemLess comparatorFor(SortBy by, ITagProvider const* tags) {
+ItemLess comparatorFor(SortBy by, ITagProvider const* tags, ItemNameFn names) {
+    // Display name (SC: `getHoverName().getString()`); without a provider the id path stands in.
+    // Names are looked up once per item kind (comparisons happen O(n log n) times).
+    auto nameOf = [names, memo = std::make_shared<std::unordered_map<std::string, std::string>>()](ItemStackData const& item) -> std::string const& {
+        auto key = item.id + '#' + std::to_string(item.aux) + '#' + std::string(item.nbt());
+        auto it  = memo->find(key);
+        if (it == memo->end()) it = memo->emplace(std::move(key), names ? names(item) : std::string(pathOf(item.id))).first;
+        return it->second;
+    };
     switch (by) {
     case SortBy::Count:
+        // SC BY_COUNT: total count (most first), then the registry name.
         return [](ItemStackData const& a, ItemStackData const& b) {
             if (a.count != b.count) return a.count > b.count;
+            if (a.id != b.id) return a.id < b.id;
             return nameLess(a, b);
         };
     case SortBy::Mod:
-        return [](ItemStackData const& a, ItemStackData const& b) {
+        // SC BY_MOD: namespace, then the display name (case-sensitive).
+        return [nameOf](ItemStackData const& a, ItemStackData const& b) {
             if (a.itemNamespace() != b.itemNamespace()) return a.itemNamespace() < b.itemNamespace();
+            auto const& na = nameOf(a);
+            auto const& nb = nameOf(b);
+            if (na != nb) return na < nb;
             return nameLess(a, b);
         };
     case SortBy::Tag:
-        // Tags are looked up once per item id (comparisons happen O(n log n) times).
-        return [tags, memo = std::make_shared<std::unordered_map<std::string, std::string>>()](
+        // SC BY_TAGS: more tags first, then the sorted tag names, then the registry name. Tags are
+        // looked up once per item id (comparisons happen O(n log n) times).
+        return [tags, memo = std::make_shared<std::unordered_map<std::string, std::vector<std::string>>>()](
                    ItemStackData const& a,
                    ItemStackData const& b
                ) {
-            auto first = [&](ItemStackData const& item) -> std::string const& {
+            auto tagsOf = [&](ItemStackData const& item) -> std::vector<std::string> const& {
                 auto it = memo->find(item.id);
-                if (it == memo->end()) it = memo->emplace(item.id, firstTag(item, tags)).first;
+                if (it == memo->end()) {
+                    auto list = tags ? tags->tagsOf(item) : std::vector<std::string>{};
+                    std::sort(list.begin(), list.end());
+                    it = memo->emplace(item.id, std::move(list)).first;
+                }
                 return it->second;
             };
-            auto const& ta = first(a);
-            auto const& tb = first(b);
-            if (ta != tb) {
-                if (ta.empty()) return false; // untagged items go last
-                if (tb.empty()) return true;
-                return ta < tb;
+            if (a.id != b.id) {
+                int c = compareTags(tagsOf(a), tagsOf(b));
+                if (c != 0) return c < 0;
+                return a.id < b.id;
             }
             return nameLess(a, b);
         };
     case SortBy::Name:
     default:
-        return [](ItemStackData const& a, ItemStackData const& b) { return nameLess(a, b); };
+        // SC BY_NAME: the display name in lower case.
+        return [nameOf](ItemStackData const& a, ItemStackData const& b) {
+            auto na = lowerAscii(nameOf(a));
+            auto nb = lowerAscii(nameOf(b));
+            if (na != nb) return na < nb;
+            return nameLess(a, b);
+        };
     }
 }
 

@@ -30,6 +30,9 @@ struct UpgradeView {
     bool                     toggleable  = false; ///< shows an on/off switch
     bool                     runnable    = true;  ///< false: switch drawn as "inactive" (disabled on this server)
     bool                     hasSettings = false; ///< has a settings tab
+    /// Storage columns this upgrade takes for its inventory part (SC
+    /// `IUpgradeItem.getInventoryColumnsTaken`: tank / battery bars right of the slots).
+    int                      columnsTaken = 0;
     /// Free-form data for the upgrade's native tab (`client::ui::registerNativeTab`). Filled by
     /// server-side `net::TabDataProvider`s.
     nlohmann::json tab = nlohmann::json::object();
@@ -56,6 +59,13 @@ struct BackpackScreenModel {
     int           storageSlots = 0;
     std::vector<ItemStackData> slots;      ///< storage contents (counts may exceed 255)
     std::vector<int>           slotLimits; ///< max count of each non-empty slot (0 = item max)
+    /// Slot limit of a storage slot for 64-stackable items (SC `InventoryHandler.getSlotLimit`:
+    /// 64 x stack multiplier). The "Count: n / max" tooltip line shows when it differs from the
+    /// hovered item's own max stack size.
+    int                        baseSlotLimit = 64;
+    /// Storage slots that can't be used (SC `isInaccessibleSlot`): drawn with the inaccessible
+    /// overlay, not clickable. Shorter than `slots` = the rest are accessible.
+    std::vector<bool>          inaccessible;
     std::vector<UpgradeView>   upgrades;
     std::vector<ItemStackData> memory;     ///< remembered item per slot (empty entries = none)
     std::vector<bool>          noSort;     ///< slots excluded from sorting
@@ -70,6 +80,8 @@ struct BackpackScreenModel {
     std::string                errorMessage;
     std::vector<int>           errorUpgradeSlots;
     std::vector<int>           errorStorageSlots;
+    /// Upgrade slots whose inventory part (taken columns) is highlighted (SC `errorInventoryParts`).
+    std::vector<int>           errorInventoryParts;
     /// Extension data (other units; unknown keys are kept and patched as a whole).
     nlohmann::json             extra = nlohmann::json::object();
 

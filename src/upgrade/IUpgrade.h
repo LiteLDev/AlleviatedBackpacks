@@ -40,6 +40,10 @@ struct UpgradeInfo {
     std::vector<std::string> conflicts;
     bool                     hasSettings = false; ///< show a settings button on the upgrades page
     bool                     toggleable  = true;  ///< show an on/off toggle
+    /// Storage columns the upgrade's inventory part takes in the native backpack screen (SC
+    /// `IUpgradeItem.getInventoryColumnsTaken`, e.g. tank and battery bars). The client draws the
+    /// part registered with `ABP_REGISTER_INVENTORY_PART` there.
+    int                      inventoryColumnsTaken = 0;
 
     [[nodiscard]] std::string const& groupOrId() const { return group.empty() ? id : group; }
 };

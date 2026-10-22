@@ -22,14 +22,22 @@ inline constexpr int kSortByCount = 4;
 
 [[nodiscard]] std::string_view       toString(SortBy by);
 [[nodiscard]] std::optional<SortBy>  sortByFromString(std::string_view s);
-/// The next mode (wraps around), for "cycle sort mode" buttons.
+/// The next mode in Sophisticated Core's order Name -> Mod -> Count -> Tag (wraps around), for the
+/// sort-by button.
 [[nodiscard]] SortBy                 nextSortBy(SortBy by);
 
 using ItemLess = std::function<bool(ItemStackData const&, ItemStackData const&)>;
+/// Display name of an item (what players see), for `SortBy::Name` / `SortBy::Mod`.
+using ItemNameFn = std::function<std::string(ItemStackData const&)>;
 
-/// A strict weak ordering of item kinds for `by`. The items passed in are merged totals (one per
-/// kind), so `Count` compares totals. `tags` is needed for `SortBy::Tag` (nullptr: no tags).
-[[nodiscard]] ItemLess comparatorFor(SortBy by, ITagProvider const* tags = nullptr);
+/// A strict weak ordering of item kinds for `by`, like Sophisticated Core's `InventorySorter`:
+/// - Name: display name (lower case);
+/// - Mod: namespace, then display name;
+/// - Count: total count (most first), then item id;
+/// - Tag: number of tags (most first), then the sorted tag names, then item id.
+/// The items passed in are merged totals (one per kind), so `Count` compares totals. `tags` is
+/// needed for `SortBy::Tag` (nullptr: no tags); `names` gives display names (nullptr: id path).
+[[nodiscard]] ItemLess comparatorFor(SortBy by, ITagProvider const* tags = nullptr, ItemNameFn names = nullptr);
 
 /// Per-slot sorting constraints.
 struct SortLayout {

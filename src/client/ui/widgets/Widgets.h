@@ -44,6 +44,12 @@ public:
 /// Icon drawer for buttons: draws at the button's top-left.
 using IconFn = std::function<void(Painter&, float x, float y)>;
 
+/// Sound played after a `Button`, `ToggleButton` or `UpgradeSwitch` is clicked (SC
+/// `ButtonBase.mouseClicked` -> `GuiSoundHelper.playButtonClickSound`). Set by the screen module.
+void setButtonClickSound(std::function<void()> sound);
+/// Plays the button click sound (also for custom widgets acting as SC buttons, e.g. tab icons).
+void playButtonClick();
+
 /// SC `Button`: 18x18 (`Size::Normal`) or 12x12 (`Size::Small`) with a background, a hovered
 /// background and a foreground icon. `onClick(button)` gets 0 = left, 1 = right, 2 = middle.
 class Button : public Widget {
