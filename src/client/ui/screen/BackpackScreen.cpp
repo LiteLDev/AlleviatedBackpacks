@@ -103,6 +103,10 @@ std::string truncated(Painter& p, std::string const& text, float maxWidth) {
     return out + "...";
 }
 
+/// Bedrock's UI font draws glyphs about one unit lower than Minecraft Java's font at the same y
+/// (measured in the e2e screenshots): the screen's own texts are raised by this much.
+constexpr float kFontDrop = 1;
+
 /// SC count overlay (`renderStack`): vanilla style up to 99; above, `CountAbbreviator` text scaled
 /// by `min(1, 16 / width)` and right-aligned at x + 17 (`renderStackCount`). Yellow for a capped drag
 /// preview. Counts are drawn above items (SC z+200): call between flushes, after the items.
@@ -110,12 +114,12 @@ void drawCountOverlay(Painter& p, cs::CountOverlay const& o, float x, float y) {
     if (o.text.empty()) return;
     Color c = o.yellow ? Color::rgb(0xFFFF55) : Color::rgb(0xFFFFFF); // ChatFormatting.YELLOW
     if (!o.special) {
-        p.text(o.text, x + 19 - 2 - p.textWidth(o.text), y + 6 + 3, c, true);
+        p.text(o.text, x + 19 - 2 - p.textWidth(o.text), y + 6 + 3 - kFontDrop, c, true);
         return;
     }
     float w = p.textWidth(o.text);
     float s = cs::countScale(w);
-    p.text(o.text, x + 19 - 2 - w * s, y + 6 + 3 + (1 / (s * s) - 1), c, true, s);
+    p.text(o.text, x + 19 - 2 - w * s, y + 6 + 3 + (1 / (s * s) - 1) - kFontDrop * s, c, true, s);
 }
 
 void drawCount(Painter& p, long long count, float x, float y) { drawCountOverlay(p, cs::countOverlay(count), x, y); }
@@ -627,7 +631,7 @@ void BackpackScreenLayer::drawTabs(Painter& p, cs::BackpackScreenModel const& m,
         if (!isOpen || tab.slot < 0) return;
         auto const& u     = m.upgrades[static_cast<std::size_t>(tab.slot)];
         float       maxW  = std::max(0.f, tab.rect.w - 20 - 6);
-        p.text(truncated(p, tabLabel(u), maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
+        p.text(truncated(p, tabLabel(u), maxW), tab.rect.x + 20, tab.rect.y + 8 - kFontDrop, Color::rgb(kTextColor));
         tab.widgets.render(p, mx, my, t);
         if (tab.native) {
             TabContext ctx{m, tab.slot, u, &mUpgradeStacks[static_cast<std::size_t>(tab.slot)], {}, {}};
@@ -661,11 +665,11 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
 
     // Labels.
     auto title = truncated(p, m.title, static_cast<float>(mLayout.titleMaxWidth()));
-    p.text(title, L + cs::geometry::kTitleX, T + cs::geometry::kTitleY, Color::rgb(kTextColor));
+    p.text(title, L + cs::geometry::kTitleX, T + cs::geometry::kTitleY - kFontDrop, Color::rgb(kTextColor));
     p.text(
         ctr("abp.companion.screen.inventory", "Inventory"),
         L + static_cast<float>(mLayout.inventoryLabelX),
-        T + static_cast<float>(mLayout.inventoryLabelY),
+        T + static_cast<float>(mLayout.inventoryLabelY) - kFontDrop,
         Color::rgb(kTextColor)
     );
 
@@ -773,7 +777,7 @@ void BackpackScreenLayer::drawSearch(Painter& p, double t) {
     if (mSearch.text().empty() && !focused) sb::icon(p, sb::Icon::Search, r.x + r.w / 2 + 2 - 3.5f, r.y + 1.5f);
     // SC noResultsLabel at (7, 18) while no storage slot is visible.
     if (mVisibleCount == 0) {
-        p.text(ctr("abp.mainscreen.label.no_search_results", "No items match the search"), mLeft + 7, mTop + 18, Color::rgb(kTextColor));
+        p.text(ctr("abp.mainscreen.label.no_search_results", "No items match the search"), mLeft + 7, mTop + 18 - kFontDrop, Color::rgb(kTextColor));
     }
 }
 
@@ -803,7 +807,7 @@ void BackpackScreenLayer::drawErrorOverlay(Painter& p, cs::BackpackScreenModel c
     sb::tooltipBox(p, {lx, y, w, h}, sb::color::ERROR_BG, sb::color::ERROR_EDGE, sb::color::ERROR_EDGE);
     float ty = y;
     for (std::size_t i = 0; i < lines.size(); ++i) {
-        p.text(lines[i], lx, ty, sb::color::ERROR_EDGE, true);
+        p.text(lines[i], lx, ty - kFontDrop, sb::color::ERROR_EDGE, true);
         ty += i == 0 ? 12 : 10;
     }
     p.flush();
@@ -947,12 +951,8 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
     mControls.render(p, mx, my, t);
     drawSearch(p, t);
     p.flush();
-    // Counts (SC z+200, above items): text drawn in the flush right after the slot items is hidden by
-    // the slot frames on Bedrock, so they come after the controls' flushes.
-    // A visible quad in the same flush is needed too (empirically: text-only flushes, or off-screen /
-    // transparent quads, leave the counts under the frames): one white pixel on the panel's white
-    // top bevel, where it changes nothing.
-    p.fillRect({mLeft + 3, mTop + 1, 1, 1}, sb::color::PANEL_LITE);
+    // Counts (SC z+200): above the items and the controls.
+
     for (auto const& c : mPendingCounts) drawCountOverlay(p, c.overlay, c.x, c.y);
     p.flush();
     drawErrorOverlay(p, *m);
