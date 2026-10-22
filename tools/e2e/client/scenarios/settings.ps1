@@ -49,7 +49,7 @@ function Drag-Slots([int[]]$slots, [switch]$Right) {
     $p = Slot-Pos $slots[0]
     S-Move $p[0] $p[1]
     [AbpE2E.Native]::MouseButton($b, $false); Start-Sleep -Milliseconds 120
-    foreach ($s in $slots) { $q = Slot-Pos $s; S-Move $q[0] $q[1]; Start-Sleep -Milliseconds 150 }
+    foreach ($slotIndex in $slots) { $q = Slot-Pos $slotIndex; S-Move $q[0] $q[1]; Start-Sleep -Milliseconds 150 }
     [AbpE2E.Native]::MouseButton($b, $true); Start-Sleep -Milliseconds 400
 }
 # Template control buttons (left of the background, below the inventory label).
@@ -107,7 +107,7 @@ Tab-Click 2
 Start-Sleep -Milliseconds 1200 # preview turns to its target rotation
 Save-Screenshot 'item-display-tab' | Out-Null
 $mark = Get-LogMark
-$s0 = Slot-Pos 0
+$s0 = Slot-Pos 5 # an apple: its rotation is easy to see
 S-Click $s0[0] $s0[1]
 Expect-Setting $mark 'itemDisplay select'
 Start-Sleep -Milliseconds 400
@@ -179,10 +179,8 @@ Save-Screenshot 'template-save-tooltip' | Out-Null
 $mark = Get-LogMark
 S-Click $sv[0] $sv[1]
 Wait-LogLine "settings: .* saved template slot '1'" 10 -Since $mark | Out-Null
-# Scroll the save slot to "Enter Slot Name", type a name, Enter.
+# Scroll the save slot back to "Enter Slot Name" (wheel down = previous), type a name, Enter.
 S-Move $sv[0] $sv[1]
-Scroll -1
-Start-Sleep -Milliseconds 300
 Scroll -1
 Start-Sleep -Milliseconds 300
 S-Move $sv[0] ($sv[1] + 1); Start-Sleep -Milliseconds 400
@@ -207,10 +205,10 @@ Tab-Click 4
 S-Move $ld[0] $ld[1]; Start-Sleep -Milliseconds 500
 Save-Screenshot 'template-load-hover-preview' | Out-Null
 # Scroll through the load slots to the exported pack template (shows its source).
-foreach ($k in 1..2) { Scroll -1; Start-Sleep -Milliseconds 300 }
+Scroll -1; Start-Sleep -Milliseconds 300 # wraps to the last slot: the exported pack template
 S-Move $ld[0] ($ld[1] + 1); Start-Sleep -Milliseconds 400
 Save-Screenshot 'template-load-pack-source' | Out-Null
-foreach ($k in 1..2) { Scroll 1; Start-Sleep -Milliseconds 300 }
+Scroll 1; Start-Sleep -Milliseconds 300 # back to slot 1
 $mark = Get-LogMark
 S-Click $ld[0] $ld[1]
 Wait-LogLine "settings: .* loaded template slot '1'" 10 -Since $mark | Out-Null

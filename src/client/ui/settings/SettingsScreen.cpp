@@ -787,10 +787,21 @@ void SettingsScreen::render(Painter& p, core::screen::BackpackScreenModel const&
             // the backpack itself, turned 180 degrees).
             p.fillRect(d.previewRect, Color::argb(0xFF000000), Painter::Layer::Foreground);
             d.updateRotation();
-            if (!d.backpackStack.isNull()) {
+            // The open backpack's own item when it is carried, else a plain item of its tier.
+            ItemStack const* pv = &d.backpackStack;
+            if (auto* player = currentPlayer(); player && m.lockedSlot >= 0 && m.lockedSlot < 36) {
+                auto const& carried = player->getInventory().getItem(m.lockedSlot);
+                if (!carried.isNull() && game::isBackpack(carried)) pv = &carried;
+            }
+            if (!pv->isNull()) {
                 float size  = std::min(d.previewRect.w, d.previewRect.h) - 16;
-                drawItemTransformed(p, d.backpackStack, d.previewRect.x + d.previewRect.w / 2, d.previewRect.y + d.previewRect.h / 2, size / 16.f, -d.rotX,
-                                    d.rotY + 180, 0);
+                // SB turns its backpack model by 180 degrees (the model faces backwards); the Bedrock
+                // icon faces the viewer, and like Java's flat items it is shown from both sides.
+                float      ry = d.rotY, rx = -d.rotX;
+                auto const facesAway = [](float deg) { return std::cos(deg * 3.14159265f / 180.f) < 0; };
+                if (facesAway(ry) != facesAway(rx)) ry += 180;
+                drawItemTransformed(p, *pv, d.previewRect.x + d.previewRect.w / 2, d.previewRect.y + d.previewRect.h / 2, size / 16.f, rx,
+                                    ry, 0);
             }
         }
     };

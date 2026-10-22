@@ -32,9 +32,16 @@ void drawItemTransformed(Painter& p, ItemStack const& stack, float cx, float cy,
         ::Matrix* m  = ref.mat;
         // Pivot around the icon centre: T(c) * Rx * Ry * Rz * T(-c).
         m->translate(cx, cy, 0.f);
+        // Flatten the depth after rotating: the UI projection is orthographic (x/y unchanged) and
+        // its depth range is small, so a rotated icon must not leave it.
+        m->scale(1.f, 1.f, 0.001f);
         if (rotX != 0.f) m->rotate(rotX, 1.f, 0.f, 0.f);
         if (rotY != 0.f) m->rotate(rotY, 0.f, 1.f, 0.f);
         if (rotZ != 0.f) m->rotate(rotZ, 0.f, 0.f, 1.f);
+        // The GUI item renderer puts its icon at some UI depth (z layer). Rotating around X / Y would
+        // turn that depth into a large x / y offset, so the icon's own z is squashed first; only
+        // its x / y extent is turned.
+        if (rotX != 0.f || rotY != 0.f) m->scale(1.f, 1.f, 0.0001f);
         m->translate(-cx, -cy, 0.f);
         BaseActorRenderContext rc(ctx.mScreenContext, ctx.mClient, ctx.mClient.getMinecraftGame_DEPRECATED());
         float x = cx - 8.f * scale, y = cy - 8.f * scale;
