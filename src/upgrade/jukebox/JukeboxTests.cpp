@@ -225,7 +225,7 @@ ABP_REGISTER_SELFTEST("jukebox.tab_actions", [](Context& ctx) {
     auto const& j = data["jukebox"];
     ctx.check(j.value("advanced", false) && j.value("slotsInRow", 0) == 4, "tab data: advanced, 4 per row");
     ctx.check(j["discs"].size() == 12 && j["discMenu"].size() == 12, "tab data: 12 disc slots");
-    ctx.check(j.value("title", std::string{}) == "Jukebox", "tab title");
+    ctx.check(j.value("tabLabel", std::string{}) == "Jukebox", "tab title");
 });
 
 // ---- playback --------------------------------------------------------------------------------------

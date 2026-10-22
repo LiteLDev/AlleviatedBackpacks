@@ -600,8 +600,8 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
     }
     return nlohmann::json{
         {"refill", {{"advanced", adv}, {"slotsInRow", slotsInRow(adv)}, {"ghosts", std::move(ghosts)}, {"targets", std::move(targets)}}},
-        {"title", adv ? trFor(player, "abp.refill.tab.advanced", "Adv. Refill") : trFor(player, "abp.refill.tab", "Refill")},
-        {"tooltip", adv ? trFor(player, "abp.refill.tab.advanced_tooltip", "Advanced Refill Settings") : trFor(player, "abp.refill.tab.tooltip", "Refill Settings")},
+        {"tabLabel", adv ? trFor(player, "abp.refill.tab.advanced", "Adv. Refill") : trFor(player, "abp.refill.tab", "Refill")},
+        {"tabTooltip", adv ? trFor(player, "abp.refill.tab.advanced_tooltip", "Advanced Refill Settings") : trFor(player, "abp.refill.tab.tooltip", "Refill Settings")},
     };
 }
 

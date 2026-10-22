@@ -502,8 +502,8 @@ public:
 nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
     return nlohmann::json{
         {"inception", {{"order", std::string(toString(orderOf(ctx)))}}},
-        {"title", trFor(player, "abp.inception.tab", "Inception")},
-        {"tooltip", trFor(player, "abp.inception.tab.tooltip", "Inception Settings")},
+        {"tabLabel", trFor(player, "abp.inception.tab", "Inception")},
+        {"tabTooltip", trFor(player, "abp.inception.tab.tooltip", "Inception Settings")},
         {"hidden", !config::get<InceptionConfig>().upgradesUseInventoriesOfBackpacksInBackpack},
     };
 }

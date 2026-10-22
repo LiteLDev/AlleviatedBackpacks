@@ -150,8 +150,8 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
             {"nbt", s.filter.matchNbt},
             {"slotsInRow", kSlotsInRow},
             {"ghosts", std::move(ghosts)}}}}},
-        {"title", trFor(player, "abp.toolswapper.tab", "Tool Swap")},
-        {"tooltip", trFor(player, "abp.toolswapper.tab.tooltip", "Advanced Tool Swapper Settings")},
+        {"tabLabel", trFor(player, "abp.toolswapper.tab", "Tool Swap")},
+        {"tabTooltip", trFor(player, "abp.toolswapper.tab.tooltip", "Advanced Tool Swapper Settings")},
     };
 }
 

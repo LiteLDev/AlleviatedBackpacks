@@ -398,7 +398,7 @@ ABP_REGISTER_SELFTEST("toolswapper.settings", [](Context& ctx) {
     nlohmann::json data;
     for (auto const& pr : net::TabDataRegistry::entries())
         if (pr.upgrade == kAdvancedId) data = pr.data(p, uc);
-    ctx.check(data.value("title", std::string{}) == "Tool Swap", "tab title");
+    ctx.check(data.value("tabLabel", std::string{}) == "Tool Swap", "tab title");
     ctx.check(data["toolswapper"]["filter"]["ghosts"].size() == 8, "8 filter slots in the tab data");
     // Settings travel with the item.
     auto removed = upgrade::remove(bp, 0, nullptr);

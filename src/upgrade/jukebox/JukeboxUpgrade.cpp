@@ -321,17 +321,17 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
         {"repeat", std::string(core::repeatModeId(repeatMode(ctx)))},
         {"playing", -1},
         // SC tab label / closed tab tooltip.
-        {"title", trFor(player, "abp.jukebox.tab", "Jukebox")},
-        {"tooltip", adv ? trFor(player, "abp.jukebox.tab.advanced_tooltip", "Advanced Jukebox") : trFor(player, "abp.jukebox.tab.tooltip", "Jukebox")},
+        {"tabLabel", trFor(player, "abp.jukebox.tab", "Jukebox")},
+        {"tabTooltip", adv ? trFor(player, "abp.jukebox.tab.advanced_tooltip", "Advanced Jukebox") : trFor(player, "abp.jukebox.tab.tooltip", "Jukebox")},
     };
     if (auto st = Service::get().status(ctx.backpack().uuid(), ctx.slot())) {
         j["playing"]  = st->index;
         j["elapsed"]  = st->elapsedTicks / 20 * 20; // whole seconds: one screen patch per second
         j["duration"] = st->durationTicks;
     }
-    auto title   = j["title"];
-    auto tooltip = j["tooltip"];
-    return nlohmann::json{{"jukebox", std::move(j)}, {"title", std::move(title)}, {"tooltip", std::move(tooltip)}};
+    auto title   = j["tabLabel"];
+    auto tooltip = j["tabTooltip"];
+    return nlohmann::json{{"jukebox", std::move(j)}, {"tabLabel", std::move(title)}, {"tabTooltip", std::move(tooltip)}};
 }
 
 bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
