@@ -120,6 +120,16 @@ void drawCountOverlay(Painter& p, cs::CountOverlay const& o, float x, float y) {
 
 void drawCount(Painter& p, long long count, float x, float y) { drawCountOverlay(p, cs::countOverlay(count), x, y); }
 
+/// `rgb` at `alpha` (0..255) blended over the slot background colour, as an opaque colour: a
+/// translucent quad under an item cuts 3D block icons on Bedrock (depth), an opaque one does not.
+Color overSlot(std::uint32_t rgb, int alpha) {
+    auto mix = [&](int shift) {
+        float s = static_cast<float>((0x8B8B8B >> shift) & 0xFF), c = static_cast<float>((rgb >> shift) & 0xFF), a = alpha / 255.f;
+        return static_cast<std::uint32_t>(s * (1 - a) + c * a + 0.5f) << shift;
+    };
+    return Color::rgb(mix(16) | mix(8) | mix(0));
+}
+
 /// SC INACCESSIBLE_SLOT_BACKGROUND (original art): a dark red cross over the empty slot.
 void drawInaccessible(Painter& p, float x, float y) {
     Color dark = Color::rgb(0x6B1A14);
@@ -641,7 +651,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     // No-sort stripes (drawSlotOverlays): slot colour with alpha 0x50 over the 16x16 area.
     for (auto const& ps : mPlaced) {
         if (static_cast<std::size_t>(ps.index) < m.noSort.size() && m.noSort[static_cast<std::size_t>(ps.index)]) {
-            p.fillRect({L + ps.pos.x, T + ps.pos.y, 16, 16}, Color::rgb(m.noSortColor, 0x50 / 255.f));
+            p.fillRect({L + ps.pos.x, T + ps.pos.y, 16, 16}, overSlot(m.noSortColor, 0x50));
         }
     }
 
@@ -688,7 +698,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         SlotRef     ref{SlotRef::Area::Storage, ps.index};
         bool        inaccessible = i < m.inaccessible.size() && m.inaccessible[i];
         if (auto preview = dragging ? dragPreviewFor(m, ref) : std::nullopt) {
-            p.fillRect({x, y, 16, 16}, Color::argb(0x80FFFFFF)); // renderStack(flag): -2130706433
+            p.fillRect({x, y, 16, 16}, overSlot(0xFFFFFF, 0x80)); // renderStack(flag): -2130706433
             p.item(mDragStack, x, y);
             counts.push_back({preview->overlay, x, y});
         } else if (d.empty()) {
@@ -716,7 +726,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             sb::slotFrame(p, x, y); // part of SC's storage background texture
             auto const& s = inv.getItem(i);
             if (auto preview = dragging ? dragPreviewFor(m, {SlotRef::Area::Inventory, i}) : std::nullopt) {
-                p.fillRect({x, y, 16, 16}, Color::argb(0x80FFFFFF));
+                p.fillRect({x, y, 16, 16}, overSlot(0xFFFFFF, 0x80));
                 p.item(mDragStack, x, y);
                 counts.push_back({preview->overlay, x, y});
             } else if (!s.isNull()) {
@@ -1301,8 +1311,8 @@ bool BackpackScreenLayer::onScroll(float x, float y, float delta) {
         // 18 units per notch. restrictScrollToScrollbar: not while over a storage slot.
         auto const& panel = mLayout.scrollPanel;
         Rect        r{mLeft + static_cast<float>(panel.x), mTop + static_cast<float>(panel.y), static_cast<float>(panel.w + 1), static_cast<float>(panel.h + 1)};
-        bool        overSlot = slotAt(*m, x, y).area == SlotRef::Area::Storage;
-        if (r.contains(x, y) && !(clientGuiConfig().restrictScrollToScrollbar && overSlot)) {
+        bool        overStorage = slotAt(*m, x, y).area == SlotRef::Area::Storage;
+        if (r.contains(x, y) && !(clientGuiConfig().restrictScrollToScrollbar && overStorage)) {
             cs::scrollBy(mScroll, mLayout, m->storageSlots, delta > 0 ? 1 : -1);
         }
     }
@@ -1751,7 +1761,7 @@ void BackpackScreenLayer::renderSettings(Painter& p, cs::BackpackScreenModel con
     for (auto const& ps : mPlaced) {
         auto  i = static_cast<std::size_t>(ps.index);
         float x = mLeft + static_cast<float>(ps.pos.x), y = mTop + static_cast<float>(ps.pos.y);
-        if (i < m.noSort.size() && m.noSort[i]) p.fillRect({x, y, 16, 16}, Color::rgb(m.noSortColor, 0x50 / 255.f));
+        if (i < m.noSort.size() && m.noSort[i]) p.fillRect({x, y, 16, 16}, overSlot(m.noSortColor, 0x50));
         bool remembered = i < mMemoryStacks.size() && !mMemoryStacks[i].isNull();
         if (!m.slots[i].empty()) p.item(mSlotStacks[i], x, y);
         else if (remembered) p.item(mMemoryStacks[i], x, y);
