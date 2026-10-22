@@ -47,6 +47,9 @@ struct EntityPose {
     float bodyYaw = 0; ///< degrees; 0 faces the viewer
     float headYaw = 0; ///< degrees, same reference as bodyYaw
     float pitch   = 0; ///< head pitch, degrees
+    /// Degrees the whole model is tilted towards the viewer about the screen's horizontal axis,
+    /// i.e. seen from above (SB SmithingScreen.ARMOR_STAND_ANGLE: 25 degrees). 0 = side view.
+    float viewPitch = 0;
 };
 
 /// Draws `actor` with its feet centred at (x, bottomY) (GUI units), `scale` GUI units per block,

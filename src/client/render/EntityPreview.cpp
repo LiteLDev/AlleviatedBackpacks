@@ -286,6 +286,9 @@ bool renderEntity(ui::Painter& painter, Actor& actor, float x, float bottomY, fl
     // Model y is up, the UI y is down: turn the model 180 deg about the view axis (SB ENTITY_RENDER_ANGLE),
     // which keeps its front (+Z) towards the viewer.
     local               = glm::rotate(local, glm::pi<float>(), glm::vec3(0, 0, 1));
+    // Seen from above: tilt the top of the model towards the viewer (calibrated in the client:
+    // a negative angle about X in this flipped frame).
+    if (pose.viewPitch != 0.f) local = glm::rotate(local, -glm::radians(pose.viewPitch), glm::vec3(1, 0, 0));
     *m._m               = *m._m * local;
     camera.worldMatrixStack->_isDirty = true;
     if (clip) {

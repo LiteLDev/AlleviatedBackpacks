@@ -78,6 +78,9 @@ void setup(Player& player, CommandOutput& output) {
     inv.setItem(11, game::ItemConv::make("minecraft:netherite_upgrade_smithing_template", 1));
     inv.setItem(12, game::ItemConv::make("minecraft:netherite_ingot", 1));
     inv.setItem(13, game::ItemConv::make("minecraft:diamond_chestplate", 1));
+    inv.setItem(15, game::ItemConv::make("minecraft:coast_armor_trim_smithing_template", 1));
+    inv.setItem(16, game::ItemConv::make("minecraft:iron_chestplate", 1));
+    inv.setItem(17, game::ItemConv::make("minecraft:gold_ingot", 1));
     player.addLevels(30 - playerLevel(player));
     player.sendInventory(false);
     log().info("station setup: station {} infinity {}", station->uuid(), infinite->uuid());

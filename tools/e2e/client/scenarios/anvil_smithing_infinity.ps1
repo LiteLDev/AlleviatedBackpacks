@@ -182,6 +182,14 @@ Shift-Click $res[0] $res[1]
 Wait-TabAction $mark
 Start-Sleep -Milliseconds 500
 Save-Screenshot 'smithing-taken' | Out-Null
+# An armor trim: the stand wears the trimmed iron chestplate.
+foreach ($i in 15, 16, 17) { $p = Inv-Pos $i; Shift-Click $p[0] $p[1] }
+Gui-Move ($t[0] + 30) ($t[1] + 120)
+Start-Sleep -Milliseconds 800
+Save-Screenshot 'smithing-trim-preview' | Out-Null
+# The preview is the game's own armor stand (EntityPreview display entity), drawn without faults.
+Wait-LogLine 'smithing preview: armor stand display entity ready' 5 | Out-Null
+if ((Get-LeviLog) -match "smithing preview: (could not create|the armor stand can't be drawn)|entity preview: minecraft:armor_stand faulted") { throw 'the 3D armor stand preview failed' }
 $probe = Probe
 if ($probe -notmatch 'slot \d+ minecraft:netherite_chestplate x1') { throw "the netherite chestplate did not go into the backpack:`n$probe" }
 Write-Step 'smithing: netherite chestplate shift-clicked into the backpack'

@@ -1,13 +1,13 @@
 #pragma once
 
 // Client: the armor stand preview of the smithing tab (SB SmithingUpgradeTab: an armor stand
-// without base plate, with arms, body turned to 210 degrees and seen 25 degrees from above,
-// rendered at scale 25 with its feet at the given point; the result is worn in its equipment
-// slot, anything else held in the off hand).
+// with its body turned to 210 degrees, seen 25 degrees from above, scale 25, feet at the given
+// point, wearing the result in its equipment slot or holding anything else in the off hand).
 //
-// Drawn in software from the vanilla armor stand's box layout (sticks, shoulder plank, waist):
-// each box is projected and its visible faces are filled scanline by scanline with the
-// painter's rectangles, lit by a fixed light. The item is drawn where the stand wears or holds it.
+// The stand is the game's own armor stand: a client-only display entity from
+// `client/render/EntityPreview.h` (never added to the level), with the result equipped through
+// `Actor::setArmor` / `setOffhandSlot`, drawn by the game's actor renderer (armor models, trims
+// and enchantment glint included).
 
 #ifdef ABP_CLIENT
 
@@ -23,8 +23,8 @@ namespace abp::upgrade::smithing::client {
 enum class StandSlot { Head, Chest, Legs, Feet, Offhand };
 [[nodiscard]] StandSlot standSlotFor(ItemStack const& stack);
 
-/// Draws the stand with its feet at (feetX, feetY), `scale` GUI units per block, wearing `item`
-/// (may be null / empty).
+/// Draws the armor stand with its feet at (feetX, feetY), `scale` GUI units per block, wearing
+/// `item` (may be null / empty). Draws nothing if the entity can't be created or rendered.
 void drawArmorStand(::abp::client::ui::Painter& p, float feetX, float feetY, float scale, ItemStack const* item);
 
 } // namespace abp::upgrade::smithing::client
