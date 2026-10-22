@@ -162,7 +162,8 @@ With-Key 0x10 {
 }
 Wait-LogLine 'native screen action: quickMoveAll by .* \(ok\)' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 500
-Save-Screenshot 'leather-quick-move-all' | Out-NullClose-Backpack
+Save-Screenshot 'leather-quick-move-all' | Out-Null
+Close-Backpack
 
 # ---- netherite: transfer, sort-by modes, search, error overlay, switches, tabs --------------------
 Setup-Tier 'netherite'
