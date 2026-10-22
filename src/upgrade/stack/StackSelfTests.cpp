@@ -340,13 +340,23 @@ ABP_REGISTER_SELFTEST("stack.tank_needs_multiplier", [](Context& ctx) {
     int cap = tank->tankCapacity(0);
     ctx.require(cap > 0, "tank capacity");
     // More than the base capacity (the capacity without the stack upgrade): x2 needed.
-    int filled = tank->fill(api::FluidStack{"minecraft:water", cap / 2 + 1000}, false);
-    ctx.require(filled == cap / 2 + 1000, "filled " + std::to_string(filled));
+    // The tank moves at most its IO rate per call: fill in steps.
+    int target = cap / 2 + 1000, filled = 0;
+    for (int guard = 0; filled < target && guard < 10000; ++guard) {
+        int n = tank->fill(api::FluidStack{"minecraft:water", target - filled}, false);
+        if (n <= 0) break;
+        filled += n;
+    }
+    ctx.require(filled == target, "filled " + std::to_string(filled));
     ctx.check(minimumMultiplierRequired(bp, 1) == 2, "tank needs x2, got " + std::to_string(minimumMultiplierRequired(bp, 1)));
     std::string reason;
     ctx.check(!upgrade::remove(bp, 0, nullptr, &reason).has_value(), "stack upgrade can't go while the tank needs it");
     ctx.check(reason.find("64") != std::string::npos, "reason: " + reason);
-    tank->drainAny(2000, false);
+    for (int drained = 0, guard = 0; drained < 2000 && guard < 10000; ++guard) {
+        int n = tank->drainAny(2000 - drained, false).amount;
+        if (n <= 0) break;
+        drained += n;
+    }
     ctx.check(minimumMultiplierRequired(bp, 1) == 1, "within the base capacity");
     ctx.check(upgrade::remove(bp, 0, nullptr, &reason).has_value(), "removable now: " + reason);
 });
