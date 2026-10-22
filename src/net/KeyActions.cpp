@@ -5,7 +5,7 @@
 //                                                     B over a backpack in an inventory screen
 //   {"action":"interact"}                             Inventory interaction (C): Deposit / Restock
 //                                                     on the container the player looks at
-//   {"action":"toolSwap"}                             Tool swap: best tool for the looked-at block/entity
+//   {"action":"toolSwap"}                             Tool swap (SB): a tool that works on the looked-at block/entity
 //   {"action":"toggleUpgrade","slot":n}               Toggle upgrade N of the carried backpack
 //
 // B inside the native screen (nested backpack, back, close) and the sort / transfer keys are
@@ -20,6 +20,7 @@
 #include "mc/world/level/block/Block.h"
 #include "mc/world/phys/HitResult.h"
 
+#include "feature/admin/SbConfig.h"
 #include "game/BackpackItem.h"
 #include "game/PlayerScan.h"
 #include "mod/I18n.h"
@@ -77,7 +78,9 @@ bool openAt(Player& player, nlohmann::json const& body) {
 bool interact(Player& player) {
     auto hit = player.traceRay(kReach, false, true);
     if (hit.mType != HitResultType::Tile) return false;
-    auto container = player.getDimensionBlockSource().tryGetContainer(hit.mBlock);
+    auto& region = player.getDimensionBlockSource();
+    if (admin::isBlockInteractionDisallowed(region.getBlock(hit.mBlock).getTypeName())) return false; // SB noInteractionBlocks
+    auto container = region.tryGetContainer(hit.mBlock);
     if (!container) return false;
     for (auto const& [carried, bp] : ranked(player)) {
         if (!bp) continue;
@@ -90,35 +93,12 @@ bool interact(Player& player) {
     return false;
 }
 
-bool hasToolSwapper(Player& player) {
-    for (auto const& [carried, bp] : ranked(player)) {
-        if (bp && upgrade::hasActive(*bp, upgrade::toolswapper::kGroup)) return true;
-    }
-    return false;
-}
-
+/// SB tool swap key: handled by the Tool Swapper unit (crosshair target, wrench-like tools,
+/// SB's status messages).
 bool toolSwap(Player& player) {
-    if (game::isBackpack(player.getSelectedItem())) {
-        upgrade::transfer::sendTip(player, trFor(player, "abp.companion.status.swap_backpack", "Can't swap tool for a held backpack"));
-        return false;
-    }
-    if (!hasToolSwapper(player)) {
-        upgrade::transfer::sendTip(player, trFor(player, "abp.companion.status.no_tool_swap_upgrade", "No tool swapper upgrade installed"));
-        return false;
-    }
-    auto hit = player.traceRay(kReach, true, true);
-    bool ok  = false;
-    if (hit.mType == HitResultType::Tile) {
-        ok = upgrade::toolswapper::swapForBlock(player, player.getDimensionBlockSource().getBlock(hit.mBlock));
-    } else if (hit.mType == HitResultType::Entity) {
-        auto* target = hit.getEntity();
-        ok = target && upgrade::toolswapper::isShearable(*target) ? upgrade::toolswapper::swapForEntityUse(player, *target)
-                                                                  : upgrade::toolswapper::swapForAttack(player);
-    } else {
-        return false;
-    }
-    if (!ok) upgrade::transfer::sendTip(player, trFor(player, "abp.companion.status.no_tool", "No tool found to swap to"));
-    return ok;
+    auto r = upgrade::toolswapper::onSwapKey(player);
+    log().info("key action: {} tool swap -> {}", player.getRealName(), static_cast<int>(r));
+    return r == upgrade::toolswapper::KeyResult::Swapped;
 }
 
 bool toggleUpgrade(Player& player, int slot) {
@@ -154,6 +134,9 @@ bool handleKeyAction(Player& player, nlohmann::json const& body) {
     if (action == "interact") return interact(player);
     if (action == "toolSwap") return toolSwap(player);
     if (action == "toggleUpgrade") return toggleUpgrade(player, body.value("slot", -1));
+    for (auto const& h : KeyActionRegistry::entries()) {
+        if (h.action == action && h.handle) return h.handle(player, body);
+    }
     return false;
 }
 

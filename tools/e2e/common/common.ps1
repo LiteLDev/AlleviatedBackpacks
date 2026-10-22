@@ -20,20 +20,105 @@ function Write-Step([string]$msg) { Write-Host "[e2e] $msg" }
 # File locks. The lock is an exclusively opened file (FileShare.None), so the OS releases it
 # when the holding process dies: there is no stale-lock state to clean up. The holder writes
 # "pid/repo/time" to <lock>.owner (the lock file itself cannot be read while held), which is
-# informational only.
+# informational only. Other projects' harnesses (BEI, BeetrootSkin) take the game lock the same
+# way but only write into the lock file itself, so the holder is found with the Restart Manager
+# (which process has the file open) and <lock>.owner only names the repo when its pid matches.
 # ---------------------------------------------------------------------------------------
-function Enter-FileLock([string]$Path, [int]$TimeoutMinutes = 120, [int]$PollSeconds = 5, [string]$What = 'lock') {
-    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    $announced = $false
+# Compiled on first use (only while waiting for a lock), not on every harness start.
+function Get-FileHolderPids([string]$Path) {
+    if (-not ('AbpE2E.FileHolders' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace AbpE2E {
+public static class FileHolders {
+    [StructLayout(LayoutKind.Sequential)] struct RM_UNIQUE_PROCESS { public int dwProcessId; public System.Runtime.InteropServices.ComTypes.FILETIME ProcessStartTime; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct RM_PROCESS_INFO {
+        public RM_UNIQUE_PROCESS Process;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string strAppName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string strServiceShortName;
+        public int ApplicationType; public uint AppStatus; public uint TSSessionId;
+        [MarshalAs(UnmanagedType.Bool)] public bool bRestartable;
+    }
+    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmStartSession(out uint h, int flags, StringBuilder key);
+    [DllImport("rstrtmgr.dll")] static extern int RmEndSession(uint h);
+    [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmRegisterResources(uint h, uint nFiles, string[] files, uint nApps, RM_UNIQUE_PROCESS[] apps, uint nSvc, string[] svcs);
+    [DllImport("rstrtmgr.dll")] static extern int RmGetList(uint h, out uint needed, ref uint count, [In, Out] RM_PROCESS_INFO[] info, ref uint reasons);
+    // Pids of the processes that have the file open (empty when unknown).
+    public static int[] Get(string path) {
+        var result = new List<int>();
+        uint h;
+        if (RmStartSession(out h, 0, new StringBuilder(64)) != 0) return result.ToArray();
+        try {
+            if (RmRegisterResources(h, 1, new[] { path }, 0, null, 0, null) != 0) return result.ToArray();
+            uint needed = 0, count = 0, reasons = 0;
+            RM_PROCESS_INFO[] info = null;
+            for (int attempt = 0; attempt < 5; attempt++) {
+                int rc = RmGetList(h, out needed, ref count, info, ref reasons);
+                if (rc == 0) {
+                    for (int i = 0; i < count; i++) result.Add(info[i].Process.dwProcessId);
+                    break;
+                }
+                if (rc != 234 /* ERROR_MORE_DATA: the list grew, size again */) break;
+                info = new RM_PROCESS_INFO[needed + 2];
+                count = (uint)info.Length;
+            }
+        } finally { RmEndSession(h); }
+        return result.ToArray();
+    }
+}
+}
+'@
+    }
+    return @([AbpE2E.FileHolders]::Get($Path))
+}
+
+# "pid N, <repo or command line>" for whoever holds the lock file, or '?' when unknown.
+function Get-FileLockHolder([string]$Path) {
+    $pids = @(@(try { Get-FileHolderPids $Path } catch { @() }) | Where-Object { $_ -ne $PID })
+    $owner = try { (Get-Content "$Path.owner" -Raw -ErrorAction Stop).Trim() } catch { '' }
+    if (-not $pids) {
+        # Restart Manager could not tell (e.g. virtualized path): fall back to the owner file.
+        if ($owner) { return "last recorded: $owner" } else { return '?' }
+    }
+    $h = $pids[0]
+    if ($owner -match '^pid=(\d+) repo=(.*?) at=(\S+)' -and [int]$Matches[1] -eq $h) {
+        return "pid $h, $($Matches[2]) (since $($Matches[3]))"
+    }
+    $cmd = try { (Get-CimInstance Win32_Process -Filter "ProcessId=$h" -ErrorAction Stop).CommandLine } catch { $null }
+    if (-not $cmd) { $cmd = try { (Get-Process -Id $h -ErrorAction Stop).Path } catch { 'exited' } }
+    return "pid $h, $cmd (another project's harness, e.g. BEI/BeetrootSkin)"
+}
+
+# Set when Enter-FileLock gave up, so callers can report "not run" instead of a failure.
+$script:LockTimedOut = $false
+
+# Waits for the lock, printing who holds it every -ReportSeconds. Throws after -TimeoutMinutes
+# (0 or less = wait forever) and sets $script:LockTimedOut.
+function Enter-FileLock([string]$Path, [int]$TimeoutMinutes = 120, [int]$PollSeconds = 5, [string]$What = 'lock', [int]$ReportSeconds = 60) {
+    $script:LockTimedOut = $false
+    $start = Get-Date
+    $deadline = if ($TimeoutMinutes -gt 0) { $start.AddMinutes($TimeoutMinutes) } else { [datetime]::MaxValue }
+    $nextReport = $start
     while ($true) {
         $s = Enter-FileLockOnce $Path
-        if ($s) { return $s }
-        if (-not $announced) {
-            $holder = try { (Get-Content "$Path.owner" -Raw -ErrorAction Stop).Trim() } catch { '?' }
-            Write-Step "waiting for $What $Path (held by: $holder)"
-            $announced = $true
+        if ($s) {
+            $waited = [int]((Get-Date) - $start).TotalSeconds
+            if ($waited -ge $PollSeconds) { Write-Step "got $What after $([Math]::Round($waited / 60.0, 1)) min" }
+            return $s
         }
-        if ((Get-Date) -gt $deadline) { throw "Timed out after $TimeoutMinutes min waiting for $What $Path" }
+        $now = Get-Date
+        if ($now -ge $nextReport) {
+            $limit = if ($TimeoutMinutes -gt 0) { " of $TimeoutMinutes" } else { '' }
+            Write-Step ("waiting for {0} ({1:N1}{2} min), held by {3} [{4}]" -f $What, ($now - $start).TotalMinutes, $limit, (Get-FileLockHolder $Path), $Path)
+            $nextReport = $now.AddSeconds($ReportSeconds)
+        }
+        if ($now -gt $deadline) {
+            $script:LockTimedOut = $true
+            throw "Timed out after $TimeoutMinutes min waiting for $What $Path (held by $(Get-FileLockHolder $Path))"
+        }
         Start-Sleep -Seconds $PollSeconds
     }
 }

@@ -22,6 +22,9 @@
 //
 // Data flows server -> client through `UpgradeView::tab` (server: `ABP_REGISTER_TAB_DATA`) and
 // client -> server through `TabContext::sendTabAction` (server: `ABP_REGISTER_TAB_ACTION`).
+// Optional keys of the tab data read by the host: "tabLabel" (open tab title, SC `translUpgrade`,
+// e.g. "Adv. Pickup") and "tabTooltip" (closed tab tooltip, e.g. "Advanced Pickup Settings"); both
+// default to the upgrade's name.
 // Upgrades with settings but without a native tab get the built-in generic tab (description +
 // a button that opens the upgrade's server-side settings UI).
 
@@ -65,6 +68,9 @@ public:
     /// is open, after `build`. Widgets added in `build` live until the tab closes or is rebuilt:
     /// a tab may keep pointers to them for `update`, but must not use them at any other time.
     virtual void update(TabContext const& /*ctx*/) {}
+    /// Asked after `update`: true makes the host clear the widgets and call `build` again (the
+    /// open size changed, e.g. a filter switched to tag matching).
+    virtual bool needsRebuild() { return false; }
     /// Extra drawing above the widgets.
     virtual void render(Painter& /*p*/, TabContext const& /*ctx*/, Rect /*area*/, float /*mx*/, float /*my*/) {}
 };

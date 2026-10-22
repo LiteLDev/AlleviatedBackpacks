@@ -6,7 +6,9 @@
   1. (-Build) builds bin/client/AlleviatedBackpacks via tools/build.ps1 -Target client (before
      taking the lock, so the game is not held while compiling).
   2. Takes the machine-wide game lock (%APPDATA%\levilauncher.exe\bei-e2e.lock, shared with
-     BEI's harness; waits while another run holds it).
+     BEI's and BeetrootSkin's harnesses; waits while another run holds it, printing the holder
+     every minute; gives up after -LockTimeoutMinutes with exit code 2). Remote modes start the
+     BDS host only after that, so a queued run holds no server slot.
   3. Closes a running game, restores mods a killed run left aside, deploys the mod to
      mods\AlleviatedBackpacks, moves every other mod (e.g. BEI) aside, installs the ABP-Test world.
   4. Runs optional scenarios/<name>.prelaunch.ps1, launches the game, waits for
@@ -39,7 +41,10 @@ param(
     [switch]$KeepOpen,          # leave the game running; the harness waits until you close it, then cleans up
     [switch]$KeepOtherMods,     # do not move other mods (BEI, ...) aside
     [string]$ModDir,            # default: <repo>/bin/client/AlleviatedBackpacks
-    [ValidateSet('local', 'remote-mod', 'remote-vanilla')][string]$Mode = 'local'
+    [ValidateSet('local', 'remote-mod', 'remote-vanilla')][string]$Mode = 'local',
+    [int]$LockTimeoutMinutes = 120,  # give up (exit 2, "NOT RUN") if the game lock is not free by then; 0 = wait forever
+    [int]$SlotWaitMinutes = 3,       # remote modes: no server slot by then -> release the game lock and queue again
+    [int]$HostTimeoutMinutes = 15    # remote modes: max wait for the BDS host (slot + boot), game lock held
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/lib.ps1"
@@ -55,31 +60,79 @@ New-Item -ItemType Directory -Force $outDir | Out-Null
 $failures = [System.Collections.Generic.List[string]]::new()
 $script:Mode   = $Mode
 $remote        = $Mode -ne 'local'
-$hostProc      = $null
+$hostInfo      = $null
+$lockTimeout   = $null   # set when the run could not start: "NOT RUN", exit 2
+$lockAcquired  = $false
 $script:HostDir = $null
+
+# Starts the BDS host (server harness, scenario client-host) in a free server slot and waits until
+# it is ready. Called with the game lock held, so a queued run does not hold a slot meanwhile.
+# Returns $null (host killed) when no slot became free within -SlotWaitMinutes: the caller then
+# gives the game lock back instead of blocking the game while every slot is busy.
+function Start-RemoteHost {
+    $script:HostDir = Join-Path $outDir 'host'
+    New-Item -ItemType Directory -Force $script:HostDir | Out-Null
+    $env:ABP_E2E_HOST_DIR = $script:HostDir
+    $env:ABP_E2E_HOST_OWNER_PID = "$PID"
+    $serverRun = Join-Path $PSScriptRoot '../server/run.ps1'
+    $harnessLog = Join-Path $outDir 'host-harness.log'
+    $script:HostProc = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', $serverRun, '-Scenario', 'client-host', '-Quiet', '-TimeoutSec', '7200') `
+        -PassThru -WindowStyle Hidden -RedirectStandardOutput $harnessLog -RedirectStandardError (Join-Path $outDir 'host-harness.err')
+    Write-Step "starting the BDS host (pid $($script:HostProc.Id))"
+    $ready = Join-Path $script:HostDir 'ready.json'
+    $start = Get-Date
+    $deadline = $start.AddMinutes($HostTimeoutMinutes)
+    $slotDeadline = $start.AddMinutes($SlotWaitMinutes)
+    $nextReport = $start.AddSeconds(60)
+    while (-not (Test-Path $ready)) {
+        if ($script:HostProc.HasExited) { throw "the BDS host exited early (see $harnessLog)" }
+        if ((Get-Date) -gt $slotDeadline -and -not (Select-String -Path $harnessLog -Pattern 'acquired server slot' -Quiet -ErrorAction SilentlyContinue)) {
+            Write-Step "no free server slot within $SlotWaitMinutes min; stopping the host"
+            $script:HostProc.Kill($true); $script:HostProc.WaitForExit(15000) | Out-Null
+            $script:HostProc = $null
+            return $null
+        }
+        if ((Get-Date) -gt $deadline) { throw "the BDS host did not get ready in $HostTimeoutMinutes min (see $harnessLog)" }
+        if ((Get-Date) -ge $nextReport) {
+            $last = Get-Content $harnessLog -Tail 1 -ErrorAction SilentlyContinue
+            Write-Step ("waiting for the BDS host ({0:N1} min): {1}" -f ((Get-Date) - $start).TotalMinutes, $last)
+            $nextReport = (Get-Date).AddSeconds(60)
+        }
+        Start-Sleep -Seconds 2
+    }
+    $info = Get-Content $ready -Raw | ConvertFrom-Json
+    if (-not $info.port) { throw "bad $ready" }
+    $script:HostLog = Join-Path $PSScriptRoot '../server/out/client-host/server.log'
+    Write-Step "BDS host ready on port $($info.port) (slot $($info.slot))"
+    return $info
+}
+
+# Asks the host to stop (it shuts the server down and releases its slot); does not wait.
+function Request-HostStop {
+    if ($script:HostProc -and $script:HostDir -and -not $script:HostProc.HasExited) {
+        Set-Content -Path (Join-Path $script:HostDir 'stop') -Value 'stop'
+    }
+}
+
+$script:HostProc = $null
+$script:HostSlotTimedOut = $false
 try {
     if ($Build) { Invoke-ModBuild client; if ($remote) { Invoke-ModBuild server } }
-    if ($remote) {
-        # A BDS slot with the server build; it runs until we write <hostDir>\stop.
-        $script:HostDir = Join-Path $outDir 'host'
-        New-Item -ItemType Directory -Force $script:HostDir | Out-Null
-        $env:ABP_E2E_HOST_DIR = $script:HostDir
-        $serverRun = Join-Path $PSScriptRoot '../server/run.ps1'
-        $hostProc  = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', $serverRun, '-Scenario', 'client-host', '-Quiet', '-TimeoutSec', '7200') `
-            -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $outDir 'host-harness.log') -RedirectStandardError (Join-Path $outDir 'host-harness.err')
-        Write-Step "starting the BDS host (pid $($hostProc.Id))"
-        $ready = Join-Path $script:HostDir 'ready.json'
-        $deadline = (Get-Date).AddMinutes(10)
-        while (-not (Test-Path $ready)) {
-            if ($hostProc.HasExited) { throw "the BDS host exited early (see $outDir\host-harness.log)" }
-            if ((Get-Date) -gt $deadline) { throw 'the BDS host did not get ready in 10 min' }
-            Start-Sleep -Seconds 2
-        }
-        $hostInfo = Get-Content $ready -Raw | ConvertFrom-Json
-        $script:HostLog = Join-Path $PSScriptRoot '../server/out/client-host/server.log'
-        Write-Step "BDS host ready on port $($hostInfo.port)"
+    # Game lock first, then the BDS host: a run queued for the game holds no server slot. If no
+    # slot is free, give the game lock back and queue again (until -LockTimeoutMinutes).
+    $lockDeadline = if ($LockTimeoutMinutes -gt 0) { (Get-Date).AddMinutes($LockTimeoutMinutes) } else { [datetime]::MaxValue }
+    while ($true) {
+        $left = if ($LockTimeoutMinutes -gt 0) { [Math]::Max(1, [int][Math]::Ceiling(($lockDeadline - (Get-Date)).TotalMinutes)) } else { 0 }
+        Enter-E2ELock -TimeoutMinutes $left
+        if (-not $remote) { break }
+        try { $hostInfo = Start-RemoteHost } catch { Exit-E2ELock; throw }
+        if ($hostInfo) { break }
+        Exit-E2ELock
+        if ((Get-Date) -gt $lockDeadline) { $script:HostSlotTimedOut = $true; throw "no free server slot whenever the game lock was ours (within $LockTimeoutMinutes min)" }
+        Write-Step "released the game lock; queueing again in 30 s"
+        Start-Sleep -Seconds 30
     }
-    Enter-E2ELock
+    $lockAcquired = $true
     try {
         if (Get-GameProcess) { Write-Step "closing a running game first"; Stop-Game }
         Restore-OtherMods
@@ -132,6 +185,7 @@ try {
             while (Get-GameProcess) { Start-Sleep -Seconds 2 }
         }
         Stop-Game
+        Request-HostStop # the host shuts down while we clean up
         if ($remote) { Restore-ExternalServers } else { Remove-TestWorld }
         Remove-DeployedMod
         Restore-OtherMods
@@ -140,15 +194,32 @@ try {
         Exit-E2ELock
     }
 } catch {
-    $failures.Add("harness: $_")
-    Write-Host "[e2e] $($_.ScriptStackTrace)" -ForegroundColor DarkGray
-} finally {
-    if ($hostProc) {
-        Set-Content -Path (Join-Path $script:HostDir 'stop') -Value 'stop'
-        if (-not $hostProc.WaitForExit(120000)) { $hostProc.Kill($true); $failures.Add('BDS host did not stop') }
-        elseif ($hostProc.ExitCode -ne 0) { $failures.Add("BDS host failed (exit $($hostProc.ExitCode), see tools/e2e/server/out/client-host/)") }
-        Remove-Item Env:ABP_E2E_HOST_DIR -ErrorAction SilentlyContinue
+    if (($script:LockTimedOut -and -not $lockAcquired) -or $script:HostSlotTimedOut) {
+        $lockTimeout = "$_"
+    } else {
+        $failures.Add("harness: $_")
+        Write-Host "[e2e] $($_.ScriptStackTrace)" -ForegroundColor DarkGray
     }
+} finally {
+    # Runs on success, failure, timeout and Ctrl+C: never leave the host (and its slot) behind.
+    if ($script:HostProc) {
+        $hp = $script:HostProc
+        if (-not $hostInfo) {
+            # Not ready yet (still waiting for a slot or booting): nobody needs it, kill it now.
+            if (-not $hp.HasExited) { Write-Step "killing the BDS host that never got ready"; $hp.Kill($true) }
+        } else {
+            Request-HostStop
+            if (-not $hp.WaitForExit(120000)) { $hp.Kill($true); $failures.Add('BDS host did not stop') }
+            elseif ($hp.ExitCode -ne 0) { $failures.Add("BDS host failed (exit $($hp.ExitCode), see tools/e2e/server/out/client-host/)") }
+        }
+        Remove-Item Env:ABP_E2E_HOST_DIR, Env:ABP_E2E_HOST_OWNER_PID -ErrorAction SilentlyContinue
+    }
+}
+
+if ($lockTimeout) {
+    Write-Host "[e2e] client scenario '$Scenario' NOT RUN (game lock or server slot not free in time; nothing was tested)" -ForegroundColor Yellow
+    Write-Host "[e2e]   $lockTimeout" -ForegroundColor Yellow
+    exit 2
 }
 
 if ($failures.Count -gt 0) {

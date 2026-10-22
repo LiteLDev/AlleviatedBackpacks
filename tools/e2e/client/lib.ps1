@@ -666,7 +666,10 @@ $script:AddAndPlay   = @(0.693, 0.663)  # "Add and play"
 function Send-HostConsole([string]$Command) {
     if (-not $script:HostDir) { throw 'Send-HostConsole needs a remote mode' }
     $name = 'cmd-{0:D6}.txt' -f (++$script:HostCmd)
-    Set-Content -Path (Join-Path $script:HostDir $name) -Value $Command -Encoding UTF8
+    # Written under another name and renamed, so the host never reads a half-written file.
+    $tmp = Join-Path $script:HostDir "$name.tmp"
+    Set-Content -Path $tmp -Value $Command -Encoding UTF8
+    Move-Item -Force $tmp (Join-Path $script:HostDir $name)
 }
 $script:HostCmd = 0
 

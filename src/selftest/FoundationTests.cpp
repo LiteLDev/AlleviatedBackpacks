@@ -10,6 +10,8 @@
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "game/Storage.h"
+#include "mod/Config.h"
+#include "mod/GeneralConfig.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/FilterMenu.h"
@@ -76,13 +78,18 @@ ABP_REGISTER_SELFTEST("core.insert_extract", [](Context& ctx) {
     auto got = inv.extract(1, 15, kInternal);
     ctx.check(got.count == 15 && inv.at(1).count == 25, "extract 15");
     ctx.check(bp->dirty(), "inventory changes mark the backpack dirty");
-    // Nesting: other backpacks and shulker boxes are refused by default.
+    // Nesting: other backpacks are refused by default; shulker boxes too when the server says so
+    // (SB lets them in unless `containerItemsDisallowed`; `general.allowShulkerBoxes` is the switch).
     auto other  = ctx.createBackpack(Tier::Leather);
     auto nested = game::ItemConv::toData(ctx.backpackItem(*other));
     ctx.check(inv.insert(nested, core::AccessContext{core::Source::Player}).inserted == 0, "backpack nesting refused");
     auto self = game::ItemConv::toData(ctx.backpackItem(*bp));
     ctx.check(inv.insert(self, core::AccessContext{core::Source::Player}).inserted == 0, "backpack can't hold itself");
+    auto& general      = config::mut<GeneralConfig>();
+    bool  savedShulker = general.allowShulkerBoxes;
+    general.allowShulkerBoxes = false;
     ctx.check(inv.insert(data("minecraft:shulker_box", 1), core::AccessContext{core::Source::Player}).inserted == 0, "shulker refused");
+    general.allowShulkerBoxes = savedShulker;
 });
 
 // ---- storage ---------------------------------------------------------------------------------

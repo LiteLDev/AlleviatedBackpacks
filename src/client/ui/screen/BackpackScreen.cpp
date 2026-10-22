@@ -39,9 +39,11 @@
 #include "client/ui/UiRoot.h"
 #include "client/ui/screen/InventoryParts.h"
 #include "client/ui/screen/Tabs.h"
+#include "client/ui/settings/SettingsScreen.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "client/ui/widgets/TextInput.h"
 #include "client/ui/widgets/Widgets.h"
+#include "core/Appearance.h"
 #include "core/screen/CountFormat.h"
 #include "core/screen/SearchFilter.h"
 #include "core/screen/StorageLayout.h"
@@ -118,6 +120,23 @@ void requestClose(); // host: close the screen now (and tell the server)
 
 bool isFillerItem(core::ItemStackData const& d) { return d.id == cs::kFillerId; }
 
+/// SC Infinity upgrades: an installed upgrade whose tab data says "infinite" makes every non-empty
+/// storage slot infinite; the slot count shows "∞" (InfinityInventoryPart.isInfinite).
+bool infiniteStorage(cs::BackpackScreenModel const& m) {
+    return std::any_of(m.upgrades.begin(), m.upgrades.end(), [](cs::UpgradeView const& u) {
+        return u.tab.is_object() && u.tab.value("infinite", false);
+    });
+}
+
+/// "∞" in the count position (pixel art: the game font's U+221E is too small to read there).
+void drawInfinite(Painter& p, float x, float y) {
+    static PixelArt const shadow{{".##.##.", "#..#..#", "#..#..#", ".##.##."}, {"#=3F3F3F"}};
+    static PixelArt const glyph{{".##.##.", "#..#..#", "#..#..#", ".##.##."}, {"#=FFFFFF"}};
+    float gx = x + 17 - 8, gy = y + 11;
+    p.pixels(shadow, gx + 1, gy + 1, 1, Painter::Layer::Foreground);
+    p.pixels(glyph, gx, gy, 1, Painter::Layer::Foreground);
+}
+
 class BackpackScreenLayer final : public IUiLayer {
 public:
     // ---- host ---------------------------------------------------------------------------------
@@ -134,7 +153,14 @@ public:
     [[nodiscard]] int         zOrder() const override { return 1000; }
     [[nodiscard]] bool        visible(FrameInfo const&) const override { return rendering && net::displayModel(); }
     [[nodiscard]] bool        contains(float, float) const override { return true; }
-    [[nodiscard]] bool        wantsTextInput() const override { return mSearch.focused() || openTabWantsText(); }
+    [[nodiscard]] bool        wantsTextInput() const override {
+        return mSearch.focused() || openTabWantsText() || (mView == View::Settings && mSettingsScreen.wantsText());
+    }
+
+    /// Sends a pending search phrase now (the screen is closing).
+    void flushSearch() {
+        if (auto const* m = net::screenModel()) flushSearchPhrase(*m, true);
+    }
 
     void resetFocus() {
         mSearch.setFocused(false);
@@ -245,22 +271,24 @@ private:
     void renderMenu(Painter& p, cs::BackpackScreenModel const& m, FrameInfo const& f);
     bool menuMouse(cs::BackpackScreenModel const& m, MouseButton button, float x, float y);
 
-    // ---- settings screen (SC SettingsScreen) ------------------------------------------------------
+    // ---- settings screen (P2-2: client/ui/settings/SettingsScreen) ---------------------------------
     enum class View { Storage, Settings };
-    enum SettingsTab { kBackTab = -2, kMainTab = -3, kNoSortTab = -4, kMemoryTab = -5 };
-    View                  mView = View::Storage;
-    std::vector<TabState> mSettingsTabs;
-    int                   mSettingsOpen = -1;
-    int                   mDragButton   = -1; ///< mouse button held for drag-selecting slots
-    int                   mDragLastSlot = -1;
-    void showSettings(bool on);
-    void buildSettingsTab(cs::BackpackScreenModel const& m, TabState& tab);
-    void renderSettings(Painter& p, cs::BackpackScreenModel const& m, FrameInfo const& f);
-    bool settingsMouse(cs::BackpackScreenModel const& m, MouseButton button, bool down, float x, float y);
-    void settingsSlotClick(int index, int button);
+    View                     mView = View::Storage;
+    int                      mDragButton = -1; ///< (storage view) unused, kept for resetFocus
+    settings::SettingsScreen mSettingsScreen;
+    void                     showSettings(bool on);
     [[nodiscard]] nlohmann::json settingsValues(cs::BackpackScreenModel const& m) const {
         auto it = m.extra.find("settings");
         return it != m.extra.end() && it->is_object() ? *it : nlohmann::json::object();
+    }
+    std::string mSentPhrase; ///< last search phrase sent to the server (SC setSearchPhrase)
+    double      mPhraseEditedAt = -1;
+    void        flushSearchPhrase(cs::BackpackScreenModel const& m, bool force) {
+        if (mPhraseEditedAt < 0 || (!force && now() - mPhraseEditedAt < 0.75)) return;
+        mPhraseEditedAt = -1;
+        if (mSearch.text() == mSentPhrase || !settingsValues(m).value("keepSearchPhrase", true)) return;
+        mSentPhrase = mSearch.text();
+        net::sendScreenAction({{"action", "setting"}, {"what", "searchPhrase"}, {"value", mSentPhrase}});
     }
 
     // SC "keep search phrase" / "keep tab open" (per backpack, this game session)
@@ -291,10 +319,10 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         mFilter       = {};
         mOpenTab      = -1;
         mTabsSig.clear();
+        mTabs.clear(); // a backpack without upgrade tabs has the same (empty) signature
         mMatchesDirty = true;
+        if (mView == View::Settings) mSettingsScreen.close();
         mView         = View::Storage;
-        mSettingsTabs.clear();
-        mSettingsOpen = -1;
         mDragButton   = -1;
         mSearch.bordered       = false;
         mSearch.padding        = 1;
@@ -303,10 +331,20 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         mSearch.onChange       = [this](std::string const& text) {
             mMatchesDirty = true;
             if (auto const* cur = net::screenModel(); cur && !cur->uuid.empty()) mKeptSearch[cur->uuid] = text;
+            // SC StorageContainerMenuBase.setSearchPhrase: the server keeps the phrase (sent once
+            // typing pauses, see flushSearchPhrase).
+            mPhraseEditedAt = now();
         };
         auto settings = settingsValues(m);
-        if (!m.uuid.empty() && settings.value("keepSearchPhrase", false)) {
-            if (auto it = mKeptSearch.find(m.uuid); it != mKeptSearch.end()) mSearch.setText(it->second);
+        mSentPhrase.clear();
+        mPhraseEditedAt = -1;
+        if (!m.uuid.empty() && settings.value("keepSearchPhrase", true)) {
+            auto phrase = settings.value("searchPhrase", std::string{});
+            if (phrase.empty()) {
+                if (auto it = mKeptSearch.find(m.uuid); it != mKeptSearch.end()) phrase = it->second;
+            }
+            mSentPhrase = phrase;
+            mSearch.setText(phrase);
         }
         mPendingTab = -1;
         if (!m.uuid.empty() && settings.value("keepTabOpen", true)) {
@@ -337,14 +375,29 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         ctx.sendTabAction    = [slot = t.slot](nlohmann::json d) { net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(d)}}); };
         ctx.sendScreenAction = [](nlohmann::json b) { net::sendScreenAction(std::move(b)); };
         t.native->update(ctx);
+        if (t.native->needsRebuild()) {
+            t.widgets.widgets.clear();
+            t.openSize = t.native->build(ctx, t.rect, t.widgets);
+        }
     }
 }
 
+namespace {
+/// An upgrade shows a settings tab when it has settings or a native tab, unless its tab data hides
+/// it (`"hidden": true`, e.g. SB hides the Inception tab by config).
+bool hasTab(cs::UpgradeView const& u) {
+    if (auto h = u.tab.find("hidden"); h != u.tab.end() && h->is_boolean() && h->get<bool>()) return false;
+    return u.hasSettings || (!u.id.empty() && hasNativeTab(u.id));
+}
+} // namespace
+
 void BackpackScreenLayer::rebuildTabs(cs::BackpackScreenModel const& m) {
-    std::string sig;
+    // The upgrade count is part of the signature: a screen without upgrade tabs (e.g. a nested
+    // backpack) must not keep the previous screen's tabs (its signature is empty too).
+    std::string sig = std::to_string(m.upgrades.size()) + "|";
     for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
         auto const& u = m.upgrades[i];
-        if (u.hasSettings || (!u.id.empty() && hasNativeTab(u.id))) sig += std::to_string(i) + ":" + u.id + ";";
+        if (hasTab(u)) sig += std::to_string(i) + ":" + u.id + ";";
     }
     if (sig == mTabsSig && !mTabs.empty()) return;
     mTabsSig = sig;
@@ -353,7 +406,7 @@ void BackpackScreenLayer::rebuildTabs(cs::BackpackScreenModel const& m) {
     mTabs.push_back(TabState{}); // backpack settings
     for (std::size_t i = 0; i < m.upgrades.size(); ++i) {
         auto const& u = m.upgrades[i];
-        if (!(u.hasSettings || (!u.id.empty() && hasNativeTab(u.id)))) continue;
+        if (!hasTab(u)) continue;
         TabState t;
         t.slot   = static_cast<int>(i);
         t.native = createNativeTab(u.id);
@@ -570,10 +623,23 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     int cols = mLayout.storageColumns;
     sb::slotsBackground(p, L + 7, T + 17, cols, mVisibleCount / cols, mVisibleCount % cols);
 
-    // No-sort stripes (drawSlotOverlays): slot colour with alpha 0x50 over the 16x16 area.
+    // Slot colour stripes (drawSlotOverlays over SC's ISlotColorCategory list: item display, then
+    // no sort), alpha 0x50, the 16 unit height split between them.
+    auto        settings    = settingsValues(m);
+    auto        display     = settings.value("itemDisplay", nlohmann::json::object());
+    auto        displaySel  = display.is_object() ? display.value("slots", std::vector<int>{}) : std::vector<int>{};
+    int         displayDye  = display.is_object() ? std::clamp(display.value("color", 14), 0, 15) : 14;
+    bool        showDisplay = settings.value("itemDisplayEnabled", true);
     for (auto const& ps : mPlaced) {
-        if (static_cast<std::size_t>(ps.index) < m.noSort.size() && m.noSort[static_cast<std::size_t>(ps.index)]) {
-            p.fillRect({L + ps.pos.x, T + ps.pos.y, 16, 16}, Color::rgb(m.noSortColor, 0x50 / 255.f));
+        std::vector<std::uint32_t> colors;
+        if (showDisplay && std::find(displaySel.begin(), displaySel.end(), ps.index) != displaySel.end()) {
+            colors.push_back(core::kDyes[static_cast<std::size_t>(displayDye)].argb & 0xFFFFFF);
+        }
+        if (static_cast<std::size_t>(ps.index) < m.noSort.size() && m.noSort[static_cast<std::size_t>(ps.index)]) colors.push_back(m.noSortColor);
+        float stripe = colors.empty() ? 16.f : std::floor(16.f / static_cast<float>(colors.size()));
+        for (std::size_t c = 0; c < colors.size(); ++c) {
+            float yo = static_cast<float>(c) * stripe;
+            p.fillRect({L + ps.pos.x, T + ps.pos.y + yo, 16, c + 1 == colors.size() ? 16 - yo : stripe}, Color::rgb(colors[c], 0x50 / 255.f));
         }
     }
 
@@ -602,6 +668,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     }
 
     // Storage slots.
+    bool infinite = infiniteStorage(m);
     for (auto const& ps : mPlaced) {
         float x = L + static_cast<float>(ps.pos.x), y = T + static_cast<float>(ps.pos.y);
         auto  i = static_cast<std::size_t>(ps.index);
@@ -615,7 +682,8 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         } else {
             p.item(mSlotStacks[i], x, y);
             render::decorateItemIcon(p, mSlotStacks[i], x, y);
-            drawCount(p, d.count, x, y);
+            if (infinite) drawInfinite(p, x, y);
+            else drawCount(p, d.count, x, y);
         }
         if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index) highlight(x, y);
         else if (mDistSlots.size() > 1 && std::find(mDistSlots.begin(), mDistSlots.end(), SlotRef{SlotRef::Area::Storage, ps.index}) != mDistSlots.end()) highlight(x, y);
@@ -759,7 +827,7 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
     if (mHover.area == SlotRef::Area::Storage) {
         auto const& d   = m.slots[static_cast<std::size_t>(mHover.index)];
         int         lim = m.slotLimits[static_cast<std::size_t>(mHover.index)];
-        if (lim > 0 && lim != d.maxStack) {
+        if (lim > 0 && lim != d.maxStack && !infiniteStorage(m)) {
             extra.push_back(
                 {ctr("abp.companion.tooltip.stack_count", "§7Count: {}", "§3" + cs::groupedCount(d.count) + "§7 / §3" + cs::groupedCount(lim)), 0xAAAAAA}
             );
@@ -783,10 +851,11 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
         return;
     }
     if (mView == View::Settings) {
-        renderSettings(p, *m, f);
+        mSettingsScreen.render(p, *m, f);
         return;
     }
     updateSearch(*m);
+    flushSearchPhrase(*m, false);
     layout(*m, f);
     buildControls(*m);
     if (mPendingTab >= 0) {
@@ -893,7 +962,7 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
     auto const* m = net::screenModel();
     if (!m || !active()) return false;
     if (m->kind == "menu") return down ? menuMouse(*m, button, x, y) : true;
-    if (mView == View::Settings) return settingsMouse(*m, button, down, x, y);
+    if (mView == View::Settings) return mSettingsScreen.mouseButton(*m, button, down, x, y);
     if (!down) {
         mDraggingBar = false;
         if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.mouseUp(button, x, y);
@@ -1015,17 +1084,7 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
 bool BackpackScreenLayer::onMouseMove(float x, float y) {
     auto const* m = net::screenModel();
     if (!m || !active()) return false;
-    if (mView == View::Settings && mDragButton >= 0) {
-        // SC SettingsScreen.mouseDragged: dragging over slots selects / unselects them too.
-        for (auto const& ps : mPlaced) {
-            Rect r{mLeft + static_cast<float>(ps.pos.x) - 1, mTop + static_cast<float>(ps.pos.y) - 1, 18, 18};
-            if (r.contains(x, y) && ps.index != mDragLastSlot) {
-                mDragLastSlot = ps.index;
-                settingsSlotClick(ps.index, mDragButton);
-            }
-        }
-        return true;
-    }
+    if (mView == View::Settings) return mSettingsScreen.mouseMove(x, y);
     if (mDraggingBar) {
         cs::scrollDrag(mScroll, mLayout, m->storageSlots, y - mDragY);
         mDragY = y;
@@ -1066,6 +1125,7 @@ void BackpackScreenLayer::finishDistribution() {
 bool BackpackScreenLayer::onScroll(float x, float y, float delta) {
     auto const* m = net::screenModel();
     if (!m || !active()) return false;
+    if (mView == View::Settings) return mSettingsScreen.scroll(x, y, delta);
     if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size()) && mTabs[static_cast<std::size_t>(mOpenTab)].widgets.scroll(x, y, delta)) {
         return true;
     }
@@ -1102,6 +1162,7 @@ bool BackpackScreenLayer::onKey(int vk, bool down) {
     if (!m || !active()) return false;
     if (mSearch.focused()) return mSearch.onKey(vk, down);
     if (openTabWantsText()) return mTabs[static_cast<std::size_t>(mOpenTab)].widgets.key(vk, down);
+    if (mView == View::Settings && mSettingsScreen.key(vk, down)) return true;
     if (!down) return true;
     using input::KeyAction;
     bool shift = input::shiftDown();
@@ -1158,6 +1219,7 @@ bool BackpackScreenLayer::onChar(std::string const& utf8) {
         return r;
     }
     if (openTabWantsText()) return mTabs[static_cast<std::size_t>(mOpenTab)].widgets.chr(utf8);
+    if (mView == View::Settings) return mSettingsScreen.chr(utf8);
     return false;
 }
 
@@ -1255,399 +1317,24 @@ bool BackpackScreenLayer::menuMouse(cs::BackpackScreenModel const&, MouseButton 
 }
 
 // ---- settings screen -----------------------------------------------------------------------------------------------
-// SB's SettingsScreen: the storage slots (contents, memory and no-sort marks), the player inventory,
-// and tabs: Back to the backpack, Backpack (context + main toggles), No Sort and Memory. Slot clicks /
-// drags in the No Sort or Memory tab select (left) / unselect (right) slots.
+// SB's settings screen lives in client/ui/settings/SettingsScreen (P2-2); this layer switches views.
 
 void BackpackScreenLayer::showSettings(bool on) {
-    mView         = on ? View::Settings : View::Storage;
-    mSettingsOpen = -1;
+    auto const* m = net::screenModel();
     mDragButton   = -1;
-    mSettingsTabs.clear();
     mSearch.setFocused(false);
     mScroll = {};
-    if (!on) mMatchesDirty = true;
-}
-
-namespace {
-/// SC ContextButton: 62x18, the context name centred in white.
-class ContextButton final : public Widget {
-public:
-    std::function<std::string()>              label;
-    std::function<std::vector<TooltipLine>()> tip;
-    std::function<void()>                     onClick;
-
-    void render(Painter& p, float mx, float my, double) override {
-        sb::buttonBackground(p, rect, hovered(mx, my));
-        auto text = label ? label() : std::string{};
-        p.text(text, rect.x + rect.w / 2, rect.y - 4 + rect.h / 2, Color::rgb(0xFFFFFF), true, 1, TextAlign::Center);
-    }
-    bool mouseDown(MouseButton, float x, float y) override {
-        if (!hovered(x, y)) return false;
-        if (onClick) onClick();
-        return true;
-    }
-    void tooltip(float x, float y, std::vector<TooltipLine>& out) const override {
-        if (!hovered(x, y) || !tip) return;
-        auto lines = tip();
-        out.insert(out.end(), lines.begin(), lines.end());
-    }
-};
-
-std::unique_ptr<Button> iconButton(Rect r, sb::Icon icon, std::vector<TooltipLine> tip, std::function<void(int)> onClick) {
-    auto b          = std::make_unique<Button>();
-    b->size         = Button::Size::Normal;
-    b->rect         = r;
-    b->icon         = [icon](Painter& p, float x, float y) { sb::icon(p, icon, x + 1, y + 1); };
-    b->tooltipLines = std::move(tip);
-    b->onClick      = std::move(onClick);
-    return b;
-}
-
-void setting(nlohmann::json body) {
-    body["action"] = "setting";
-    net::sendScreenAction(std::move(body));
-}
-} // namespace
-
-void BackpackScreenLayer::buildSettingsTab(cs::BackpackScreenModel const& m, TabState& tab) {
-    tab.widgets.widgets.clear();
-    float x = tab.rect.x, y = tab.rect.y;
-    auto  values = settingsValues(m);
-    if (tab.slot == kMainTab) {
-        auto ctxBtn   = std::make_unique<ContextButton>();
-        ctxBtn->rect  = {x + 3, y + 24, 62, 18};
-        ctxBtn->label = [this] {
-            auto const* cur = net::screenModel();
-            bool        pl  = cur && settingsValues(*cur).value("context", std::string("backpack")) == "player";
-            return pl ? ctr("abp.companion.settings.context_player", "Player") : ctr("abp.companion.settings.context_backpack", "Backpack");
-        };
-        ctxBtn->tip = [this]() -> std::vector<TooltipLine> {
-            auto const* cur = net::screenModel();
-            bool        pl  = cur && settingsValues(*cur).value("context", std::string("backpack")) == "player";
-            if (pl) {
-                return {{ctr("abp.companion.settings.context_player.tooltip", "Settings for all your backpacks"), 0xFFFFFF},
-                        {ctr("abp.companion.settings.context_player.detail", "Used by every backpack that does not change them"), 0xAAAAAA}};
-            }
-            return {{ctr("abp.companion.settings.context_backpack.tooltip", "Settings of this backpack"), 0xFFFFFF},
-                    {ctr("abp.companion.settings.context_backpack.detail", "Start from your settings; changes apply to this backpack only"), 0xAAAAAA}};
-        };
-        ctxBtn->onClick = [] { setting({{"what", "context"}}); };
-        tab.widgets.add(std::move(ctxBtn));
-        struct Opt {
-            char const* name;
-            sb::Icon    on, off;
-            char const* onKey;
-            char const* onText;
-            char const* offKey;
-            char const* offText;
-            char const* onTipKey;
-            char const* onTip;
-            char const* offTipKey;
-            char const* offTip;
-            bool        def;
-        };
-        static Opt const opts[] = {
-            {"shiftClickIntoOpenTab", sb::Icon::ShiftClickTabOn, sb::Icon::ShiftClickTabOff,
-             "abp.companion.settings.shift_click_open_tab.on", "Shift-click: open tab first",
-             "abp.companion.settings.shift_click_open_tab.off", "Shift-click: inventory first",
-             "abp.companion.settings.shift_click_open_tab.on.tooltip", "Shift-clicked stacks go into the open upgrade tab when it takes them, otherwise into the inventory or backpack.",
-             "abp.companion.settings.shift_click_open_tab.off.tooltip", "Shift-clicked stacks go into the inventory or backpack first and only then into the open upgrade tab.",
-             true},
-            {"keepTabOpen", sb::Icon::KeepTabOpenOn, sb::Icon::KeepTabOpenOff,
-             "abp.companion.settings.keep_tab_open.on", "Remember open tab: on",
-             "abp.companion.settings.keep_tab_open.off", "Remember open tab: off",
-             "abp.companion.settings.keep_tab_open.on.tooltip", "The upgrade tab that was open when the screen closed opens again next time.",
-             "abp.companion.settings.keep_tab_open.off.tooltip", "All upgrade tabs start closed every time the screen opens.",
-             true},
-            {"keepSearchPhrase", sb::Icon::KeepSearchOn, sb::Icon::KeepSearchOff,
-             "abp.companion.settings.keep_search_phrase.on", "Remember search: on",
-             "abp.companion.settings.keep_search_phrase.off", "Remember search: off",
-             "abp.companion.settings.keep_search_phrase.on.tooltip", "The search text stays and filters the slots again when the screen reopens.",
-             "abp.companion.settings.keep_search_phrase.off.tooltip", "The search box starts empty every time the screen opens.",
-             false},
-        };
-        float bx = x + 3;
-        for (auto const& o : opts) {
-            auto t     = std::make_unique<ToggleButton>();
-            t->size    = Button::Size::Normal;
-            t->rect    = {bx, y + 46, 18, 18};
-            t->states  = {
-                {[o](Painter& p, float ix, float iy) { sb::icon(p, o.off, ix + 1, iy + 1); },
-                 {{ctr(o.offKey, o.offText), 0xFFFFFF}, {ctr(o.offTipKey, o.offTip), 0xAAAAAA}}},
-                {[o](Painter& p, float ix, float iy) { sb::icon(p, o.on, ix + 1, iy + 1); },
-                 {{ctr(o.onKey, o.onText), 0xFFFFFF}, {ctr(o.onTipKey, o.onTip), 0xAAAAAA}}},
-            };
-            t->current = [this, o] {
-                auto const* cur = net::screenModel();
-                return cur && settingsValues(*cur).value(o.name, o.def) ? 1 : 0;
-            };
-            t->onClick = [o](int) { setting({{"what", "option"}, {"name", o.name}}); };
-            tab.widgets.add(std::move(t));
-            bx += 18;
-        }
-        tab.openSize = {std::max(65.f + 6, 20 + 6 + 60.f), 46 + 18 + 6};
-        return;
-    }
-    bool memory = tab.slot == kMemoryTab;
-    char const* what = memory ? "memory" : "noSort";
-    tab.widgets.add(iconButton({x + 3, y + 24, 18, 18}, sb::Icon::SelectAll,
-                               {{ctr("abp.companion.settings.select_all", "Select every slot"), 0xFFFFFF}},
-                               [what](int b) { if (b == 0) setting({{"what", what}, {"op", "selectAll"}}); }));
-    tab.widgets.add(iconButton({x + 21, y + 24, 18, 18}, sb::Icon::UnselectAll,
-                               {{ctr("abp.companion.settings.unselect_all", "Clear every slot"), 0xFFFFFF}},
-                               [what](int b) { if (b == 0) setting({{"what", what}, {"op", "unselectAll"}}); }));
-    if (memory) {
-        auto t     = std::make_unique<ToggleButton>();
-        t->size    = Button::Size::Normal;
-        t->rect    = {x + 39, y + 24, 18, 18};
-        t->states  = {
-            {[](Painter& p, float ix, float iy) { sb::icon(p, sb::Icon::IgnoreNbt, ix + 1, iy + 1); }, {{ctr("abp.companion.settings.ignore_nbt", "Ignore NBT"), 0xFFFFFF}}},
-            {[](Painter& p, float ix, float iy) { sb::icon(p, sb::Icon::MatchNbt, ix + 1, iy + 1); }, {{ctr("abp.companion.settings.match_nbt", "Match NBT"), 0xFFFFFF}}},
-        };
-        t->current = [this] {
-            auto const* cur = net::screenModel();
-            return cur && settingsValues(*cur).value("memoryMatchNbt", false) ? 1 : 0;
-        };
-        t->onClick = [](int) { setting({{"what", "memoryMatchNbt"}}); };
-        tab.widgets.add(std::move(t));
+    if (on && m) {
+        mView                   = View::Settings;
+        mSettingsScreen.onBack  = [this] { showSettings(false); };
+        mSettingsScreen.open(*m);
     } else {
-        auto b          = std::make_unique<Button>();
-        b->size         = Button::Size::Normal;
-        b->rect         = {x + 39, y + 24, 18, 18};
-        b->icon         = [](Painter& p, float ix, float iy) {
-            auto const* cur = net::screenModel();
-            sb::colorSquare(p, ix, iy, cur ? cur->noSortColor : 0x80C71F);
-        };
-        b->tooltipLines = {{ctr("abp.companion.settings.toggle_color", "Change colour"), 0xFFFFFF},
-                           {ctr("abp.companion.settings.toggle_color.detail1", "Left click: next"), 0xAAAAAA},
-                           {ctr("abp.companion.settings.toggle_color.detail2", "Right click: previous"), 0xAAAAAA}};
-        b->onClick      = [](int button) { setting({{"what", "noSortColor"}, {"dir", button == 1 ? -1 : 1}}); };
-        tab.widgets.add(std::move(b));
-    }
-    tab.openSize = {std::max(39.f + 18 + 6, 20 + 6 + 60.f), 24 + 18 + 6};
-}
-
-void BackpackScreenLayer::settingsSlotClick(int index, int button) {
-    if (mSettingsOpen < 0 || mSettingsOpen >= static_cast<int>(mSettingsTabs.size())) return;
-    int kind = mSettingsTabs[static_cast<std::size_t>(mSettingsOpen)].slot;
-    if (kind != kMemoryTab && kind != kNoSortTab) return;
-    if (button != 0 && button != 1) return;
-    setting({{"what", kind == kMemoryTab ? "memory" : "noSort"}, {"op", button == 0 ? "select" : "unselect"}, {"index", index}});
-}
-
-void BackpackScreenLayer::renderSettings(Painter& p, cs::BackpackScreenModel const& m, FrameInfo const& f) {
-    cs::LayoutInput in;
-    in.storageSlots = m.storageSlots;
-    in.columnsTaken = inventoryColumnsTaken(m); // SC SettingsScreen: slots on line - columns taken
-    in.upgradeSlots = 0;
-    in.screenHeight = static_cast<int>(f.screen.h);
-    in.sortButtons  = cs::SortButtonsPosition::Hidden;
-    mLayout         = cs::computeLayout(in);
-    mLeft           = std::floor((f.screen.w - static_cast<float>(mLayout.imageWidth)) / 2);
-    mTop            = std::floor((f.screen.h - static_cast<float>(mLayout.imageHeight)) / 2);
-    cs::scrollBy(mScroll, mLayout, m.storageSlots, 0);
-    mPlaced = cs::placeStorageSlots(mLayout, m.storageSlots, {}, mScroll, &mVisibleCount);
-    float  mx = f.mouseX, my = f.mouseY;
-    double t  = now();
-
-    if (mSettingsTabs.empty()) {
-        for (int kind : {kBackTab, kMainTab, kNoSortTab, kMemoryTab}) {
-            TabState tab;
-            tab.slot = kind;
-            mSettingsTabs.push_back(std::move(tab));
-        }
-    }
-    float tx = mLeft + static_cast<float>(mLayout.tabsOrigin.x), ty = mTop + static_cast<float>(mLayout.tabsOrigin.y);
-    for (std::size_t i = 0; i < mSettingsTabs.size(); ++i) {
-        auto& tab = mSettingsTabs[i];
-        Rect  r{tx, ty + static_cast<float>(i) * 25, cs::geometry::kTabWidth, cs::geometry::kTabHeight};
-        if (r.x != tab.rect.x || r.y != tab.rect.y) {
-            tab.rect = r;
-            if (static_cast<int>(i) == mSettingsOpen) buildSettingsTab(m, tab);
-        }
-        tab.rect.x = r.x;
-        tab.rect.y = r.y;
-        if (static_cast<int>(i) == mSettingsOpen) {
-            tab.rect.w = std::max<float>(tab.openSize.w, cs::geometry::kTabWidth);
-            tab.rect.h = tab.openSize.h;
-        } else {
-            tab.rect.w = r.w;
-            tab.rect.h = r.h;
-        }
-    }
-
-    mHover = {};
-    bool overTab = mSettingsOpen >= 0 && mSettingsTabs[static_cast<std::size_t>(mSettingsOpen)].rect.contains(mx, my);
-    if (!overTab) {
-        for (auto const& ps : mPlaced) {
-            Rect r{mLeft + static_cast<float>(ps.pos.x) - 1, mTop + static_cast<float>(ps.pos.y) - 1, 18, 18};
-            if (r.contains(mx, my)) mHover = {SlotRef::Area::Storage, ps.index};
-        }
-    }
-
-    p.gradientRect(f.screen, Color::argb(0xC0101010), Color::argb(0xD0101010));
-    p.flush();
-    // Tabs (behind the background), the open one last.
-    auto const* open = mSettingsOpen >= 0 ? &mSettingsTabs[static_cast<std::size_t>(mSettingsOpen)] : nullptr;
-    auto drawTab     = [&](TabState& tab, bool isOpen) {
-        sb::tabBackground(p, tab.rect);
-        sb::Icon icon = tab.slot == kBackTab ? sb::Icon::BackToBackpack
-                      : tab.slot == kMainTab ? sb::Icon::BackpackSettings
-                      : tab.slot == kNoSortTab ? sb::Icon::NoSortTab
-                                               : sb::Icon::MemoryTab;
-        sb::icon(p, icon, tab.rect.x + 1, tab.rect.y + 4);
-        if (!isOpen) return;
-        auto title = tab.slot == kMainTab ? ctr("abp.companion.settings.backpack", "Backpack")
-                   : tab.slot == kNoSortTab ? ctr("abp.companion.settings.no_sort", "No Sort")
-                                            : ctr("abp.companion.settings.memory", "Memory");
-        p.text(truncated(p, title, std::max(0.f, tab.rect.w - 26)), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
-        tab.widgets.render(p, mx, my, t);
-    };
-    for (std::size_t i = 0; i < mSettingsTabs.size(); ++i) {
-        auto& tab = mSettingsTabs[i];
-        if (static_cast<int>(i) == mSettingsOpen) continue;
-        if (open && !(open->rect.bottom() < tab.rect.y || open->rect.y > tab.rect.y)) continue;
-        drawTab(tab, false);
-    }
-    if (open) drawTab(mSettingsTabs[static_cast<std::size_t>(mSettingsOpen)], true);
-    p.flush();
-
-    sb::storageBackground(p, {mLeft, mTop, static_cast<float>(mLayout.imageWidth), static_cast<float>(mLayout.imageHeight)});
-    int cols = mLayout.storageColumns;
-    sb::slotsBackground(p, mLeft + 7, mTop + 17, cols, mVisibleCount / cols, mVisibleCount % cols);
-    for (auto const& ps : mPlaced) {
-        auto  i = static_cast<std::size_t>(ps.index);
-        float x = mLeft + static_cast<float>(ps.pos.x), y = mTop + static_cast<float>(ps.pos.y);
-        if (i < m.noSort.size() && m.noSort[i]) p.fillRect({x, y, 16, 16}, Color::rgb(m.noSortColor, 0x50 / 255.f));
-        bool remembered = i < mMemoryStacks.size() && !mMemoryStacks[i].isNull();
-        if (!m.slots[i].empty()) p.item(mSlotStacks[i], x, y);
-        else if (remembered) p.item(mMemoryStacks[i], x, y);
-        if (remembered) sb::icon(p, sb::Icon::Memory, x, y);
-        if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index) p.fillRect({x, y, 16, 16}, sb::color::HOVER, Painter::Layer::Foreground);
-    }
-    auto title = ctr("abp.companion.settings.title", "Backpack Settings");
-    p.text(truncated(p, title, static_cast<float>(mLayout.imageWidth - 15)), mLeft + 8, mTop + 6, Color::rgb(kTextColor));
-    p.text(ctr("abp.companion.screen.inventory", "Inventory"), mLeft + static_cast<float>(mLayout.inventoryLabelX), mTop + static_cast<float>(mLayout.inventoryLabelY), Color::rgb(kTextColor));
-    if (auto* player = currentPlayer()) {
-        auto& inv = player->getInventory();
-        for (int i = 0; i < 36; ++i) {
-            auto const& pos = mLayout.playerSlots[static_cast<std::size_t>(i)];
-            auto const& s   = inv.getItem(i);
-            sb::slotFrame(p, mLeft + static_cast<float>(pos.x), mTop + static_cast<float>(pos.y));
-            if (!s.isNull()) p.item(s, mLeft + static_cast<float>(pos.x), mTop + static_cast<float>(pos.y));
-        }
-    }
-    if (mLayout.scroll) {
-        auto bar   = mLayout.scrollBar();
-        auto thumb = cs::scrollThumb(mLayout, m.storageSlots, mScroll);
-        sb::scrollBar(p, {mLeft + bar.x, mTop + bar.y, static_cast<float>(bar.w), static_cast<float>(bar.h)},
-                      {mLeft + thumb.x, mTop + thumb.y, static_cast<float>(thumb.w), static_cast<float>(thumb.h)});
-    }
-    p.flush();
-
-    // Tooltips: widgets, tab tooltips, hovered slot items.
-    std::vector<TooltipLine> lines;
-    if (open) open->widgets.tooltip(mx, my, lines);
-    if (lines.empty()) {
-        for (std::size_t i = 0; i < mSettingsTabs.size() && lines.empty(); ++i) {
-            auto const& tab = mSettingsTabs[i];
-            bool        isOpen = static_cast<int>(i) == mSettingsOpen;
-            Rect        iconRect{tab.rect.x + 1, tab.rect.y + 4, 16, 16};
-            if (isOpen ? !iconRect.contains(mx, my) : !tab.rect.contains(mx, my)) continue;
-            switch (tab.slot) {
-            case kBackTab:
-                lines.push_back({ctr("abp.companion.settings.back_to_backpack", "Back to the backpack"), 0xFFFFFF});
-                break;
-            case kMainTab:
-                if (!isOpen) lines.push_back({ctr("abp.companion.settings.backpack.tooltip", "Backpack Settings"), 0xFFFFFF});
-                break;
-            case kNoSortTab:
-                lines.push_back({ctr("abp.companion.settings.no_sort.tooltip", "Slots sorting leaves alone"), 0xFFFFFF});
-                if (isOpen) {
-                    lines.push_back({ctr("abp.companion.settings.no_sort.open1", "Mark slots whose items sorting never moves"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.select_all_hint", "Buttons: select every slot / clear every slot"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.select_hint", "Left click or drag: select a slot"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.unselect_hint", "Right click or drag: clear a slot"), 0xAAAAAA});
-                } else {
-                    lines.push_back({ctr("abp.companion.settings.no_sort.detail1", "Mark slots whose items sorting never moves"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.open_tab_hint", "Open the tab to edit the slots"), 0xAAAAAA});
-                }
-                break;
-            case kMemoryTab:
-                lines.push_back({ctr("abp.companion.settings.memory.tooltip", "Remembered slots"), 0xFFFFFF});
-                lines.push_back({ctr("abp.companion.settings.memory.detail1", "A remembered slot keeps its item and only takes that item"), 0xAAAAAA});
-                if (isOpen) {
-                    lines.push_back({ctr("abp.companion.settings.select_all_hint", "Buttons: select every slot / clear every slot"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.select_hint", "Left click or drag: select a slot"), 0xAAAAAA});
-                    lines.push_back({ctr("abp.companion.settings.unselect_hint", "Right click or drag: clear a slot"), 0xAAAAAA});
-                } else {
-                    lines.push_back({ctr("abp.companion.settings.open_tab_hint", "Open the tab to edit the slots"), 0xAAAAAA});
-                }
-                break;
-            default:
-                break;
-            }
-        }
-    }
-    if (!lines.empty()) {
-        drawTooltip(p, lines, mx, my);
-        return;
-    }
-    if (mHover.area == SlotRef::Area::Storage) {
-        auto i = static_cast<std::size_t>(mHover.index);
-        ItemStack const* s = !m.slots[i].empty() ? &mSlotStacks[i] : (i < mMemoryStacks.size() && !mMemoryStacks[i].isNull() ? &mMemoryStacks[i] : nullptr);
-        if (s) drawTooltip(p, itemTooltipLines(*s), mx, my);
+        if (mView == View::Settings) mSettingsScreen.close();
+        mView         = View::Storage;
+        mMatchesDirty = true;
     }
 }
 
-bool BackpackScreenLayer::settingsMouse(cs::BackpackScreenModel const& m, MouseButton button, bool down, float x, float y) {
-    if (!down) {
-        mDragButton = -1;
-        mDraggingBar = false;
-        return true;
-    }
-    if (mSettingsOpen >= 0 && mSettingsTabs[static_cast<std::size_t>(mSettingsOpen)].widgets.mouseDown(button, x, y)) return true;
-    for (std::size_t i = 0; i < mSettingsTabs.size(); ++i) {
-        auto& tab = mSettingsTabs[i];
-        Rect  iconRect{tab.rect.x + 1, tab.rect.y + 4, 16, 16};
-        bool  isOpen = static_cast<int>(i) == mSettingsOpen;
-        if (!iconRect.contains(x, y)) {
-            if (isOpen && tab.rect.contains(x, y)) return true;
-            continue;
-        }
-        if (button != MouseButton::Left) return true;
-        if (tab.slot == kBackTab) {
-            showSettings(false);
-            return true;
-        }
-        if (isOpen) {
-            mSettingsOpen = -1;
-            tab.widgets.widgets.clear();
-        } else {
-            if (mSettingsOpen >= 0) mSettingsTabs[static_cast<std::size_t>(mSettingsOpen)].widgets.widgets.clear();
-            mSettingsOpen = static_cast<int>(i);
-            buildSettingsTab(m, tab);
-        }
-        return true;
-    }
-    if (mLayout.scroll && button == MouseButton::Left) {
-        auto bar = mLayout.scrollBar();
-        Rect r{mLeft + static_cast<float>(bar.x), mTop + static_cast<float>(bar.y), static_cast<float>(bar.w), static_cast<float>(bar.h)};
-        if (r.contains(x, y)) {
-            mDraggingBar = true;
-            mDragY       = y;
-            return true;
-        }
-    }
-    if (mHover.area == SlotRef::Area::Storage) {
-        int b         = button == MouseButton::Right ? 1 : (button == MouseButton::Left ? 0 : -1);
-        mDragButton   = b;
-        mDragLastSlot = mHover.index;
-        settingsSlotClick(mHover.index, b);
-    }
-    return true;
-}
 // ---- screen host ----------------------------------------------------------------------------------------------
 // The native screen lives in a scene of its own (a common dialog scene that is never drawn
 // natively; BEI's recipe screen does the same): it gives the companion focus and a free cursor,
@@ -1744,6 +1431,7 @@ void requestClose() {
     auto const* m = net::screenModel();
     if (!m) return;
     gScene.closedSession = m->session; // never reopen this session's scene
+    gLayer.flushSearch();
     net::sendScreenAction({{"action", "close"}});
     gScene.closing = true;
     gLayer.closing = true;

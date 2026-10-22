@@ -39,7 +39,7 @@
     "abp.companion.button.upgrade_switch_inactive": "未激活",
     "abp.key.open_backpack": "打开背包",
     "abp.key.inventory_interaction": "运行容器交互升级",
-    "abp.key.tool_swap": "根据方块/实体切换工具",
+    "abp.key.tool_swap": "根据当前方块/实体切换工具",
     "abp.key.toggle_upgrade_1": "Alt+ 开关第 1 个升级",
     "abp.key.toggle_upgrade_2": "Alt+ 开关第 2 个升级",
     "abp.key.toggle_upgrade_3": "Alt+ 开关第 3 个升级",
