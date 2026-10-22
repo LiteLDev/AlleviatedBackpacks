@@ -20,6 +20,7 @@
 #include "mc/world/level/block/Block.h"
 #include "mc/world/phys/HitResult.h"
 
+#include "feature/admin/SbConfig.h"
 #include "game/BackpackItem.h"
 #include "game/PlayerScan.h"
 #include "mod/I18n.h"
@@ -77,9 +78,9 @@ bool openAt(Player& player, nlohmann::json const& body) {
 bool interact(Player& player) {
     auto hit = player.traceRay(kReach, false, true);
     if (hit.mType != HitResultType::Tile) return false;
-    // SB InventoryInteractionHelper: no interaction with blocks in noInteractionBlocks.
-    if (upgrade::transfer::interactionDisallowed(player.getDimensionBlockSource(), hit.mBlock)) return false;
-    auto container = player.getDimensionBlockSource().tryGetContainer(hit.mBlock);
+    auto& region = player.getDimensionBlockSource();
+    if (admin::isBlockInteractionDisallowed(region.getBlock(hit.mBlock).getTypeName())) return false; // SB noInteractionBlocks
+    auto container = region.tryGetContainer(hit.mBlock);
     if (!container) return false;
     for (auto const& [carried, bp] : ranked(player)) {
         if (!bp) continue;
@@ -156,6 +157,9 @@ bool handleKeyAction(Player& player, nlohmann::json const& body) {
     if (action == "interact") return interact(player);
     if (action == "toolSwap") return toolSwap(player);
     if (action == "toggleUpgrade") return toggleUpgrade(player, body.value("slot", -1));
+    for (auto const& h : KeyActionRegistry::entries()) {
+        if (h.action == action && h.handle) return h.handle(player, body);
+    }
     return false;
 }
 

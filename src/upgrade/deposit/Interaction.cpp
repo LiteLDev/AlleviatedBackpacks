@@ -25,6 +25,7 @@
 #include "mc/world/level/BlockSource.h"
 #include "mc/world/level/block/Block.h"
 
+#include "feature/admin/SbConfig.h"
 #include "game/BackpackItem.h"
 #include "game/Storage.h"
 #include "mod/Config.h"
@@ -40,15 +41,12 @@ namespace abp::upgrade::transfer {
 
 /// `config/container_interaction.json`
 struct InteractionConfig {
-    int  version = 2;
+    int  version = 1;
     /// Like the Java mod, only sneak + use runs Deposit / Restock (a plain use opens the
     /// container as usual). false: any use of the backpack on a container runs them.
     bool requireSneak = true;
     /// Minimum time between two runs for one player (holding the use button repeats the use).
     int cooldownMs = 300;
-    /// SB `noInteractionBlocks`: blocks that inventory interaction upgrades can't interact with,
-    /// e.g. "minecraft:shulker_box" (default: none).
-    std::vector<std::string> noInteractionBlocks{};
 };
 
 namespace {
@@ -61,12 +59,7 @@ bool hasInteractionUpgrade(std::shared_ptr<game::Backpack> const& bp) {
 
 } // namespace
 
-bool interactionDisallowed(Block const& block) {
-    auto const& list = config::get<InteractionConfig>().noInteractionBlocks;
-    if (list.empty()) return false;
-    auto name = block.getTypeName();
-    return std::find(list.begin(), list.end(), name) != list.end();
-}
+bool interactionDisallowed(Block const& block) { return admin::isBlockInteractionDisallowed(block.getTypeName()); }
 
 bool interactionDisallowed(BlockSource& region, BlockPos const& pos) { return interactionDisallowed(region.getBlock(pos)); }
 
@@ -116,9 +109,9 @@ public:
         if (!uuid || !game::Storage::get().available()) return false;
         auto bp = game::Storage::get().find(*uuid);
         if (!bp || !hasInteractionUpgrade(bp)) return false;
-        // SB InventoryInteractionHelper: no interaction with blocks in noInteractionBlocks.
-        if (interactionDisallowed(player.getDimensionBlockSource(), ev.blockPos())) return false;
-        auto container = player.getDimensionBlockSource().tryGetContainer(ev.blockPos());
+        auto& region = player.getDimensionBlockSource();
+        if (admin::isBlockInteractionDisallowed(region.getBlock(ev.blockPos()).getTypeName())) return false; // SB noInteractionBlocks
+        auto container = region.tryGetContainer(ev.blockPos());
         if (!container) return false;
 
         ev.cancel(); // neither open the container nor use the item
@@ -271,7 +264,7 @@ ABP_REGISTER_SELFTEST("deposit.no_interaction_blocks", [](Context& ctx) -> ll::c
     fill(*bp, "minecraft:cobblestone", 10);
     ctx.require(ctx.give(sp, ctx.backpackItem(*bp), 0) == 0, "give backpack");
     PlacedBlock barrel(ctx, sp, "minecraft:barrel");
-    auto&       cfg   = config::mut<InteractionConfig>();
+    auto&       cfg   = config::mut<admin::SbServerConfig>();
     auto        saved = cfg.noInteractionBlocks;
     cfg.noInteractionBlocks = {"minecraft:barrel"};
     ctx.check(interactionDisallowed(sp.getDimensionBlockSource(), barrel.pos()), "barrel disallowed");
