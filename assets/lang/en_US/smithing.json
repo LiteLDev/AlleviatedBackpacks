@@ -2,7 +2,10 @@
   "abp.upgrade.smithing.name": "Smithing Upgrade",
   "abp.smithing.title": "Smithing",
   "abp.smithing.open": "Smithing",
-  "abp.smithing.help_title": "Smithing",
-  "abp.smithing.help1": "§7Template, base item and material",
-  "abp.smithing.help2": "§7Upgrade gear to netherite or add armor trims"
+  "abp.smithing.missing_template": "Add Smithing Template",
+  "abp.smithing.error": "Item can't be upgraded this way",
+  "abp.smithing.netherite.base": "Add diamond armor, weapon, or tool",
+  "abp.smithing.netherite.addition": "Add Netherite Ingot",
+  "abp.smithing.trim.base": "Add a piece of armor",
+  "abp.smithing.trim.addition": "Add ingot or crystal"
 }

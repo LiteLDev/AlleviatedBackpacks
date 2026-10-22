@@ -160,6 +160,23 @@ std::string tabTooltip(cs::UpgradeView const& u) {
 
 bool isFillerItem(core::ItemStackData const& d) { return d.id == cs::kFillerId; }
 
+/// SC Infinity upgrades: an installed upgrade whose tab data says "infinite" makes every non-empty
+/// storage slot infinite; the slot count shows "∞" (InfinityInventoryPart.isInfinite).
+bool infiniteStorage(cs::BackpackScreenModel const& m) {
+    return std::any_of(m.upgrades.begin(), m.upgrades.end(), [](cs::UpgradeView const& u) {
+        return u.tab.is_object() && u.tab.value("infinite", false);
+    });
+}
+
+/// "∞" in the count position (pixel art: the game font's U+221E is too small to read there).
+void drawInfinite(Painter& p, float x, float y) {
+    static PixelArt const shadow{{".##.##.", "#..#..#", "#..#..#", ".##.##."}, {"#=3F3F3F"}};
+    static PixelArt const glyph{{".##.##.", "#..#..#", "#..#..#", ".##.##."}, {"#=FFFFFF"}};
+    float gx = x + 17 - 8, gy = y + 11;
+    p.pixels(shadow, gx + 1, gy + 1, 1, Painter::Layer::Foreground);
+    p.pixels(glyph, gx, gy, 1, Painter::Layer::Foreground);
+}
+
 class BackpackScreenLayer final : public IUiLayer {
 public:
     // ---- host ---------------------------------------------------------------------------------
@@ -363,6 +380,7 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         mFilter       = {};
         mOpenTab      = -1;
         mTabsSig.clear();
+        mTabs.clear(); // a backpack without upgrade tabs has the same (empty) signature
         mMatchesDirty = true;
         mView         = View::Storage;
         mSettingsTabs.clear();
@@ -692,8 +710,10 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         if (mHover.area == SlotRef::Area::Upgrade && mHover.index == static_cast<int>(i)) highlight(x, y);
     }
 
-    // Storage slots (SC renderSlot): the drag preview replaces the slot's stack while dragging.
+    // Storage slots (SC renderSlot): the drag preview replaces the slot's stack while dragging;
+    // infinite slots show "∞" instead of the count (SC isInfiniteSlot).
     bool dragging = mDistButton >= 0 && mDistSlots.size() > 1 && !carried.isNull();
+    bool infinite = infiniteStorage(m);
     for (auto const& ps : mPlaced) {
         float x = L + static_cast<float>(ps.pos.x), y = T + static_cast<float>(ps.pos.y);
         auto  i = static_cast<std::size_t>(ps.index);
@@ -715,7 +735,8 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         } else {
             p.item(mSlotStacks[i], x, y);
             render::decorateItemIcon(p, mSlotStacks[i], x, y);
-            counts.push_back({cs::countOverlay(d.count), x, y});
+            if (infinite) drawInfinite(p, x, y);
+            else counts.push_back({cs::countOverlay(d.count), x, y});
         }
         if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index && !inaccessible) highlight(x, y);
     }
@@ -877,7 +898,7 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         auto const& d   = m.slots[static_cast<std::size_t>(mHover.index)];
         int         lim = m.slotLimits[static_cast<std::size_t>(mHover.index)];
         if (lim <= 0) lim = d.maxStack;
-        if (cs::showsCountLine(m.baseSlotLimit, d.maxStack)) {
+        if (cs::showsCountLine(m.baseSlotLimit, d.maxStack) && !infiniteStorage(m)) {
             extra.push_back(
                 {"§7" + ctr("abp.mainscreen.tooltip.stack_count", "Count: {}", "§3" + cs::groupedCount(d.count) + "§7 / §3" + cs::groupedCount(lim)),
                  0xAAAAAA}

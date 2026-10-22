@@ -94,6 +94,7 @@ ItemStack InputSlot::take(Player& player, int amount) {
 
 int InputSlot::accept(Player& player, ItemStack const& stack) {
     if (stack.isNull() || stack.mCount <= 0 || !mRef.valid()) return 0;
+    if (mMayPlace && !mMayPlace(stack)) return 0;
     auto cur      = mRef.item(mKey);
     auto incoming = game::ItemConv::toData(stack);
     int  max      = std::max<int>(1, stack.getMaxStackSize());
@@ -113,15 +114,15 @@ int InputSlot::accept(Player& player, ItemStack const& stack) {
 // ---- OutputSlot ---------------------------------------------------------------------------------
 
 ItemStack OutputSlot::take(Player& player, int) {
-    if (!mMenu.ref().valid() || !mCraft) return {};
+    if (!mRef.valid() || !mCraft) return {};
     auto crafted = mCraft(player);
     if (!crafted || crafted->result.isNull()) return {};
-    mMenu.pendingUndo = StationMenu::PendingUndo{crafted->result, std::move(crafted->undo)};
+    mPending = PendingUndo{crafted->result, std::move(crafted->undo)};
     return crafted->result;
 }
 
 int OutputSlot::accept(Player& player, ItemStack const& stack) {
-    auto& pending = mMenu.pendingUndo;
+    auto& pending = mPending;
     if (!pending || stack.isNull() || !stack.matchesItem(pending->result)) return 0;
     if (stack.mCount >= pending->result.mCount) {
         if (pending->undo) pending->undo(player);

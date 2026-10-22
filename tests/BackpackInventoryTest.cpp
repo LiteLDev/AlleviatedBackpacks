@@ -196,3 +196,34 @@ TEST(BackpackInventory, LargeCounts) {
     auto j = inv.toJson();
     EXPECT_EQ(BackpackInventory::fromJson(j).at(0).count, 4000);
 }
+
+TEST(BackpackInventory, InfiniteSlotsNeverDeplete) {
+    BackpackInventory inv(3);
+    inv.set(0, stone(1));
+    inv.set(1, stone(5));
+    inv.addInfiniteSlots("inf", [&inv](int slot) { return !inv.at(slot).empty(); });
+    EXPECT_TRUE(inv.isInfinite(0));
+    EXPECT_FALSE(inv.isInfinite(2)); // empty slots are not infinite
+    EXPECT_FALSE(inv.isInfinite(7)); // out of range
+
+    auto got = inv.extract(0, 64, kPlayer);
+    EXPECT_EQ(got.count, 64); // not limited by the stored count
+    EXPECT_EQ(inv.at(0).count, 1);
+    auto all = inv.extractMatching([](ItemStackData const& s) { return s.id == "minecraft:stone"; }, 100, kPlayer);
+    EXPECT_EQ(all.count, 100);
+    EXPECT_EQ(inv.at(1).count, 5);
+
+    // Extract filters still apply.
+    inv.addExtractFilter("deny", 0, [](ExtractQuery const&) { return false; });
+    EXPECT_TRUE(inv.extract(0, 1, kPlayer).empty());
+
+    inv.removeHooks("inf");
+    inv.removeHooks("deny");
+    EXPECT_FALSE(inv.isInfinite(0));
+    EXPECT_EQ(inv.extract(1, 64, kPlayer).count, 5);
+    EXPECT_TRUE(inv.at(1).empty());
+
+    inv.addInfiniteSlots("inf", [](int) { return true; });
+    inv.clearFilters();
+    EXPECT_FALSE(inv.isInfinite(0));
+}
