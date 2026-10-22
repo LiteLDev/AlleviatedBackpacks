@@ -76,7 +76,7 @@ function V-Click([string]$key, [switch]$Right) {
     $b = if ($Right) { 1 } else { 0 }
     [AbpE2E.Native]::MouseButton($b, $false); Start-Sleep -Milliseconds 200; [AbpE2E.Native]::MouseButton($b, $true); Start-Sleep -Milliseconds 400
     # Let the game finish the right-button gesture (hold / drag) before the next click elsewhere.
-    if ($Right) { Move-Mouse ($p[0] + 2) ($p[1] + 2); Start-Sleep -Milliseconds 500 }
+    if ($Right) { Move-Mouse ($p[0] + 2) ($p[1] + 2); Start-Sleep -Milliseconds 500; Write-Step ("after right click: " + ((Get-LeviLog -Since ((Get-LogMark) - 6)) -join " | ")) }
 }
 
 # ---- setup ------------------------------------------------------------------------------------------------
