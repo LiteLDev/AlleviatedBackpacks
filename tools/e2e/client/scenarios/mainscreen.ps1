@@ -264,10 +264,10 @@ $search = @(($L.SortX - 6), 10)
 Gui-Click $search[0] $search[1] -Right
 Start-Sleep -Milliseconds 400
 
-# Error overlay: a second magnet upgrade into a free upgrade slot.
+# Error overlay: a second jukebox upgrade (SB allows one) into the free upgrade slot.
 $h1 = Hotbar-Pos 1
 Gui-Click $h1[0] $h1[1]
-$u = Upgrade-Pos 5
+$u = Upgrade-Pos 6
 Gui-Click $u[0] $u[1]
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'error-overlay' | Out-Null

@@ -237,18 +237,18 @@ ABP_REGISTER_SELFTEST("mainscreen.kept_search_and_tab", [](Context& ctx) {
 ABP_REGISTER_SELFTEST("mainscreen.error_overlay", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& p  = ctx.player();
     auto  bp = ctx.createBackpack(Tier::Iron);
-    ctx.installUpgrade(bp, "magnet", 1);
+    ctx.installUpgrade(bp, "jukebox", 1); // SB: one jukebox per backpack (magnets are unlimited)
     Companion c(p);
     auto      s     = open(ctx, p, bp);
-    auto*     magnet = upgrade::byId("magnet");
-    ctx.require(magnet != nullptr, "magnet");
+    auto*     magnet = upgrade::byId("jukebox");
+    ctx.require(magnet != nullptr, "jukebox");
     setCursor(p, game::ItemConv::make(magnet->info().itemId, 1));
-    ctx.check(!act(p, s, "click", {{"area", "upgrade"}, {"index", 0}}), "second magnet refused");
+    ctx.check(!act(p, s, "click", {{"area", "upgrade"}, {"index", 0}}), "second jukebox refused");
     co_await ctx.ticks(1);
     auto const* m = net::sentModel(p);
     ctx.require(m != nullptr, "model");
-    ctx.check(m->errorUpgradeSlots == std::vector<int>{1}, "the existing magnet's slot is highlighted");
-    ctx.check(m->errorMessage == "Only 1x Magnet Upgrade can be used in " + m->title, "SC message: " + m->errorMessage);
+    ctx.check(m->errorUpgradeSlots == std::vector<int>{1}, "the existing jukebox's slot is highlighted");
+    ctx.check(m->errorMessage.starts_with("Only 1x ") && m->errorMessage.ends_with(" can be used in " + m->title), "SC message: " + m->errorMessage);
     setCursor(p, ItemStack::EMPTY_ITEM());
     bp->inventory().set(0, data("minecraft:apple", 2));
     (void)act(p, s, "click", {{"area", "storage"}, {"index", 0}});
@@ -289,9 +289,9 @@ ABP_REGISTER_SELFTEST("mainscreen.locked_slot", [](Context& ctx) {
 // ---- e2e setup ------------------------------------------------------------------------------------
 
 /// A backpack of `tier` filled for the client scenario: varied items and counts (incl. an
-/// abbreviated count), gaps, a memory slot, two no-sort slots, a magnet upgrade (switch, error
-/// test), from iron up a stack upgrade, from gold a pickup upgrade (tab) and from diamond a tank and
-/// a battery (taken columns). The player also gets a second magnet upgrade.
+/// abbreviated count), gaps, a memory slot, two no-sort slots, a magnet upgrade (switch,
+/// tab), from iron up a stack upgrade, from gold a pickup upgrade (tab) and from diamond a tank and
+/// a battery (taken columns); netherite also gets a jukebox. The player gets a spare upgrade: a\n/// second jukebox for netherite (SB allows one: error overlay test), else a magnet.
 std::shared_ptr<game::Backpack> setupBackpack(Player& player, Tier tier) {
     auto bp = game::Storage::get().create(tier);
     if (!bp) return nullptr;
@@ -313,6 +313,7 @@ std::shared_ptr<game::Backpack> setupBackpack(Player& player, Tier tier) {
         install("tank");
         install("battery");
     }
+    if (tier == Tier::Netherite) install("jukebox"); // the error overlay test adds a second one
     static constexpr std::string_view kItems[] = {
         "minecraft:cobblestone", "minecraft:dirt",    "minecraft:oak_log",  "minecraft:diamond", "minecraft:iron_ingot",
         "minecraft:apple",       "minecraft:redstone", "minecraft:oak_planks", "minecraft:torch", "minecraft:gold_ingot",
@@ -356,8 +357,8 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
             }
             auto stack = game::makeBackpackItem(tier, bp->uuid());
             if (!player.add(stack)) player.drop(stack, false);
-            if (auto* magnet = upgrade::byId("magnet")) {
-                auto extra = game::ItemConv::make(magnet->info().itemId, 1);
+            if (auto* spare = upgrade::byId(tier == core::Tier::Netherite ? "jukebox" : "magnet")) {
+                auto extra = game::ItemConv::make(spare->info().itemId, 1);
                 if (!player.add(extra)) player.drop(extra, false);
             }
             player.sendInventory(false);
