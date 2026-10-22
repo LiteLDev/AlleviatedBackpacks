@@ -66,6 +66,7 @@ InsertVerdict BackpackInventory::checkInsert(int slot, ItemStackData const& stac
 }
 
 InsertVerdict BackpackInventory::checkDirectInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const {
+    if (isSlotBlocked(slot)) return InsertVerdict::Deny; // blocked slots refuse direct inserts too
     InsertQuery q{*this, slot, stack, ctx, true};
     for (auto const& f : mInsertFilters) {
         if (auto v = f.fn(q); v != InsertVerdict::Allow) return v;
