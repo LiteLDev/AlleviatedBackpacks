@@ -717,7 +717,20 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
 
     auto area = areaOf(body);
     int  idx  = body.value("index", -1);
-    if (action == "dropCursor") {
+    bool intercepted = false;
+    if (action == "click" && body.value("button", 0) == 1 && !body.value("shift", false) && !cursorOf(player).isNull()
+        && (area == Area::Inventory || (area == Area::Storage && menu))) {
+        for (auto const& h : ScreenClickInterceptRegistry::entries()) {
+            if (h.handle && h.handle(player, menu, area == Area::Storage ? "storage" : "inventory", idx)) {
+                intercepted = true;
+                break;
+            }
+        }
+    }
+    if (intercepted) {
+        items = true;
+        ok    = true;
+    } else if (action == "dropCursor") {
         items       = true;
         auto cursor = cursorOf(player);
         if (cursor.isNull()) return false;

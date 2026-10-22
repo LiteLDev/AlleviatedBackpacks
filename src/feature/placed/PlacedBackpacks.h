@@ -1,6 +1,7 @@
 #pragma once
 
 #include <compare>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -113,6 +114,18 @@ public:
     /// Opens `backpack` for `player`: as a placed backpack when it is placed near the player, else
     /// like `BackpackMenu::openBackpack` (settings menus use it for their back buttons).
     static bool openBackpack(Player& player, std::shared_ptr<game::Backpack> const& backpack, ui::BackpackMenu::View view);
+
+    /// Additive extension points (P2-13, linked storage).
+    struct PlacementHooks {
+        /// A creative player places `hand`: return the item to place instead (the hand item is then
+        /// kept), or nullopt for the default (place `hand`, consumed). SB: placing a linked-storage
+        /// endpoint in creative places a new secondary endpoint of its group.
+        std::function<std::optional<ItemStack>(Player&, ItemStack const& hand)> creativeCopy;
+        /// Two placed backpack items may stand for the same storage uuid (linked-storage endpoints
+        /// share their group's storage). Default: never.
+        std::function<bool(core::ItemStackData const& a, core::ItemStackData const& b)> mayShareUuid;
+    };
+    static void setPlacementHooks(PlacementHooks hooks);
 
     /// Runs the placed-backpack upgrade ticks / consistency checks now (selftests).
     void tickPlaced(int interval);

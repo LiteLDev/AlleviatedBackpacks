@@ -82,6 +82,13 @@ void setTypeGate(TypeGate gate);
 /// True if the gate allows this upgrade type.
 [[nodiscard]] bool typeAllowed(IUpgrade const& upgrade);
 
+/// Server-wide install gate, checked by `canInstall` after the built-in checks (slot, type gate,
+/// conflicts, `maxPerBackpack`) and before `IUpgrade::canInstall`. Return false and set `reason`
+/// to refuse (e.g. Sophisticated Backpacks' `maxUpgradesPerStorage`). nullptr removes it.
+using InstallGate = std::function<
+    bool(std::shared_ptr<game::Backpack> const& backpack, IUpgrade const& upgrade, Player* player, std::string& reason)>;
+void setInstallGate(InstallGate gate);
+
 /// Extra backpack-wide rules applied on every hook rebuild, after the foundation rule and before
 /// the upgrades' `attach()`. `fn` registers inventory hooks (use an owner such as "abp:<unit>").
 /// Re-adding an `id` replaces it. Rebuild the hooks of loaded backpacks after (un)registering.

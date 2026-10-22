@@ -91,7 +91,7 @@ std::shared_ptr<Backpack> Storage::forItem(ItemStack& stack, bool* itemChanged) 
         if (auto bp = find(*uuid, &status)) {
             // The item was upgraded to a higher tier (tier upgrades swap the item id): grow the
             // storage. The stored tier is the truth otherwise (a lower-tier item id never shrinks it).
-            if (static_cast<int>(*tier) > static_cast<int>(bp->tier())) {
+            if (static_cast<int>(*tier) > static_cast<int>(bp->tier()) && (!mTierGrowthGate || mTierGrowthGate(stack, *bp))) {
                 bp->data().setTier(*tier);
                 bp->markDirty();
                 bp->rebuildHooks();

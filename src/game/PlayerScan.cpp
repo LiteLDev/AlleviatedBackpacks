@@ -67,6 +67,15 @@ NestedBackpackProvider& nestedProvider() {
 
 void setNestedBackpackProvider(NestedBackpackProvider provider) { nestedProvider() = std::move(provider); }
 
+namespace {
+CarriedUpgradeGate& carriedUpgradeGate() {
+    static CarriedUpgradeGate gate;
+    return gate;
+}
+} // namespace
+
+void setCarriedUpgradeGate(CarriedUpgradeGate gate) { carriedUpgradeGate() = std::move(gate); }
+
 std::vector<std::pair<CarriedBackpack, std::shared_ptr<Backpack>>>
 carriedBackpacks(Player& player, bool assignUuids, bool includeNested) {
     std::vector<std::pair<CarriedBackpack, std::shared_ptr<Backpack>>> out;
@@ -86,6 +95,11 @@ carriedBackpacks(Player& player, bool assignUuids, bool includeNested) {
         }
     }
     if (includeNested && !out.empty() && nestedProvider()) nestedProvider()(player, out);
+    if (includeNested && carriedUpgradeGate()) {
+        for (auto& [c, bp] : out) {
+            if (!carriedUpgradeGate()(player, c)) c.upgradeGate = [](std::string_view, std::string_view) { return false; };
+        }
+    }
     return out;
 }
 

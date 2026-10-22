@@ -77,4 +77,11 @@ using NestedBackpackProvider =
     std::function<void(Player& player, std::vector<std::pair<CarriedBackpack, std::shared_ptr<Backpack>>>& list)>;
 void setNestedBackpackProvider(NestedBackpackProvider provider);
 
+/// Extension point: whether the upgrades of a carried backpack run at all (ticks, pickup, ...).
+/// `carriedBackpacks(..., includeNested = true)` - the list the upgrade ticker and the pickup
+/// dispatch use - gives entries the gate rejects an `upgradeGate` that turns every upgrade off.
+/// Used for Sophisticated Backpacks' `nerfs.onlyWornBackpackTriggersUpgrades`. nullptr removes it.
+using CarriedUpgradeGate = std::function<bool(Player& player, CarriedBackpack const& carried)>;
+void setCarriedUpgradeGate(CarriedUpgradeGate gate);
+
 } // namespace abp::game

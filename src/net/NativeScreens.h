@@ -27,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "nlohmann/json.hpp"
@@ -69,6 +70,25 @@ using TabActionRegistry = StaticRegistry<TabActionHandler>;
 using ContentsLineProvider = std::function<void(Player& player, game::Backpack& backpack, std::vector<std::string>& lines)>;
 using ContentsLineRegistry = StaticRegistry<ContentsLineProvider>;
 
+/// Intercepts a right click (button 1, no Shift) with an item on the cursor on a slot of the native
+/// screen, before the default click handling: `area` is "storage" or "inventory", `menu` the open
+/// backpack menu (nullptr on other menus, "inventory" only). Return true when handled (the
+/// player's inventory and the screen are re-synced), false to fall through. E.g. the Ender
+/// Linker's "right click a storage with the linker" (Sophisticated Core's overrideStackedOnOther).
+struct ScreenClickInterceptor {
+    std::string                                                                                   id;
+    std::function<bool(Player&, ui::BackpackMenu* menu, std::string_view area, int index)> handle;
+};
+using ScreenClickInterceptRegistry = StaticRegistry<ScreenClickInterceptor>;
+
+/// A key action (`KeyActionPacket` {"action": name, ...}) added by a feature unit. Returns
+/// whether it did something.
+struct KeyActionExtension {
+    std::string                                              action;
+    std::function<bool(Player&, nlohmann::json const& body)> handle;
+};
+using KeyActionRegistry = StaticRegistry<KeyActionExtension>;
+
 /// The model `player` sees for `menu` (session 0, containerId -1).
 [[nodiscard]] core::screen::BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu);
 /// Session id of the player's open native screen (0 = none).
@@ -97,6 +117,12 @@ struct TabActionRegistrar {
 struct ContentsLineRegistrar {
     explicit ContentsLineRegistrar(ContentsLineProvider p) { ContentsLineRegistry::add(std::move(p)); }
 };
+struct ScreenClickInterceptRegistrar {
+    explicit ScreenClickInterceptRegistrar(ScreenClickInterceptor i) { ScreenClickInterceptRegistry::add(std::move(i)); }
+};
+struct KeyActionRegistrar {
+    explicit KeyActionRegistrar(KeyActionExtension h) { KeyActionRegistry::add(std::move(h)); }
+};
 } // namespace detail
 
 } // namespace abp::net
@@ -109,3 +135,9 @@ struct ContentsLineRegistrar {
 /// Adds contents tooltip lines (see `abp::net::ContentsLineProvider`).
 #define ABP_REGISTER_CONTENTS_LINES(...)                                                                               \
     static ::abp::net::detail::ContentsLineRegistrar ABP_UNIQUE(abp_contents_lines_)(__VA_ARGS__)
+/// Adds a native screen right-click interceptor (see `abp::net::ScreenClickInterceptor`).
+#define ABP_REGISTER_SCREEN_CLICK(...)                                                                                 \
+    static ::abp::net::detail::ScreenClickInterceptRegistrar ABP_UNIQUE(abp_screen_click_)(__VA_ARGS__)
+/// Adds a key action (see `abp::net::KeyActionExtension`).
+#define ABP_REGISTER_KEY_ACTION(...)                                                                                   \
+    static ::abp::net::detail::KeyActionRegistrar ABP_UNIQUE(abp_key_action_)(__VA_ARGS__)

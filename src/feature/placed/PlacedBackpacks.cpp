@@ -271,8 +271,22 @@ void PlacedBackpacks::save() const {
     db->saveData(std::string(kDbKey), j.dump(), DBHelpers::Category::Uncategorized);
 }
 
+namespace {
+PlacedBackpacks::PlacementHooks& placementHooks() {
+    static PlacedBackpacks::PlacementHooks hooks;
+    return hooks;
+}
+} // namespace
+
+void PlacedBackpacks::setPlacementHooks(PlacementHooks hooks) { placementHooks() = std::move(hooks); }
+
 void PlacedBackpacks::add(PlacedEntry entry) {
-    if (auto old = mByUuid.find(entry.uuid); old != mByUuid.end() && !(old->second == entry.loc)) {
+    auto shared = [&](BlockLocation const& other) {
+        auto const& may = placementHooks().mayShareUuid;
+        auto        it  = mEntries.find(other);
+        return may && it != mEntries.end() && may(it->second.item, entry.item);
+    };
+    if (auto old = mByUuid.find(entry.uuid); old != mByUuid.end() && !(old->second == entry.loc) && !shared(old->second)) {
         // The same backpack can't stand in two places: keep the newest.
         log().warn("placed backpack {} was registered at two positions; keeping the newest", entry.uuid);
         mEntries.erase(old->second);
@@ -390,11 +404,19 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
         player.sendMessage(trFor(player, "abp.placed.blocked", "There is no room for the backpack here."));
         return false;
     }
+    // Creative: a linked-storage endpoint is placed as a new secondary endpoint, the hand keeps it.
+    bool keepInHand = false;
+    if (player.isCreative() && placementHooks().creativeCopy) {
+        if (auto copy = placementHooks().creativeCopy(player, item)) {
+            item       = *copy;
+            keepInHand = true;
+        }
+    }
     auto uuidBefore = game::backpackUuid(item);
     auto result     = place(region, target, item, facingTowards(player.getRotation().y));
     if (result != PlaceResult::Ok) {
         // place() may have bound a fresh uuid to the item before failing: keep that binding.
-        if (game::backpackUuid(item) != uuidBefore) {
+        if (!keepInHand && game::backpackUuid(item) != uuidBefore) {
             player.getInventory().setItem(slot, item);
             player.sendInventory(false);
         }
@@ -405,10 +427,13 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
         }
         return false;
     }
-    // Always consumed (also in creative): the block now is the backpack.
-    auto& inv = player.getInventory();
-    inv.setItem(slot, ItemStack::EMPTY_ITEM());
-    player.sendInventory(false);
+    // Consumed (also in creative): the block now is the backpack. A creative endpoint copy keeps
+    // the hand item (it is another endpoint of the same group).
+    if (!keepInHand) {
+        auto& inv = player.getInventory();
+        inv.setItem(slot, ItemStack::EMPTY_ITEM());
+        player.sendInventory(false);
+    }
     mCooldowns[player.getOrCreateUniqueID().rawID] = mNow;
     return true;
 }
