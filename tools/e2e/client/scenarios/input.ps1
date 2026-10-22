@@ -28,6 +28,7 @@ function Key-Combo([int]$mod, [string]$key) {
     Press-Key $key
     [AbpE2E.Native]::Key([uint16]$mod, $true); Start-Sleep -Milliseconds 300
 }
+function Tap-Vk([int]$vk) { Assert-GameForeground; [AbpE2E.Native]::Key([uint16]$vk, $false); Start-Sleep -Milliseconds 80; [AbpE2E.Native]::Key([uint16]$vk, $true); Start-Sleep -Milliseconds 300 }
 function Hold([int]$vk) { Assert-GameForeground; [AbpE2E.Native]::Key([uint16]$vk, $false) }
 function Release([int]$vk) { [AbpE2E.Native]::Key([uint16]$vk, $true); Start-Sleep -Milliseconds 100 }
 
@@ -326,11 +327,11 @@ Start-Sleep -Milliseconds 700
 if ((Get-LeviLog -Since $mark) -match 'native screen action: sort by') { throw 'middle click over the player inventory sorted' }
 # [ / ] transfer (Shift: everything).
 $mark = Get-LogMark
-Press-Key ([string][char]0xDB)
+Tap-Vk 0xDB                                 # [
 Wait-LogLine 'native screen action: transfer by' 10 -Since $mark | Out-Null
 $mark = Get-LogMark
 Hold 0x10
-Press-Key ([string][char]0xDD)
+Tap-Vk 0xDD                                 # ]
 Release 0x10
 Wait-LogLine 'native screen action: transfer by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 500
