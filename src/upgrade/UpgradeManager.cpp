@@ -235,8 +235,10 @@ bool canInstall(
         why = message(player, "abp.upgrade.error.max", "This backpack already has the maximum of this upgrade.");
         return false;
     }
-    return type->canInstall(UpgradeContext(backpack, slot, player), why);
+    return type->canInstallItem(UpgradeContext(backpack, slot, player), item.withCount(1), why);
 }
+
+nlohmann::json settingsOf(core::ItemStackData const& item) { return extractSettings(item).second; }
 
 namespace {
 /// Puts `item` into the (free) slot and runs onInstall. No checks, no hook rebuild.

@@ -37,6 +37,7 @@
 #include "client/render/RenderHooks.h"
 #include "client/tooltip/ContentsTooltip.h"
 #include "client/ui/UiRoot.h"
+#include "client/ui/screen/InventoryParts.h"
 #include "client/ui/screen/Tabs.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "client/ui/widgets/TextInput.h"
@@ -200,6 +201,11 @@ private:
     [[nodiscard]] Rect    slotRect(SlotRef const& s) const;
     void                  send(nlohmann::json body) const { net::sendScreenAction(std::move(body)); }
     void                  openBackpackKey(cs::BackpackScreenModel const& m);
+    /// Absolute area of the upgrade inventory parts (InventoryParts.h).
+    [[nodiscard]] Rect inventoryPartsRect() const {
+        auto const& r = mLayout.inventoryParts;
+        return {mLeft + static_cast<float>(r.x), mTop + static_cast<float>(r.y), static_cast<float>(r.w), static_cast<float>(r.h)};
+    }
     [[nodiscard]] ItemStack const* stackAt(SlotRef const& s) const;
 
     // model caches
@@ -414,6 +420,7 @@ bool BackpackScreenLayer::openTabWantsText() const {
 void BackpackScreenLayer::layout(cs::BackpackScreenModel const& m, FrameInfo const& f) {
     cs::LayoutInput in;
     in.storageSlots = m.storageSlots;
+    in.columnsTaken = inventoryColumnsTaken(m); // Tank / Battery inventory parts
     in.upgradeSlots = static_cast<int>(m.upgrades.size());
     in.screenHeight = static_cast<int>(f.screen.h);
     for (auto const& u : m.upgrades) in.upgradeSwitches.push_back(!u.item.empty() && u.toggleable);
@@ -559,7 +566,9 @@ void BackpackScreenLayer::drawTabs(Painter& p, cs::BackpackScreenModel const& m,
         if (!isOpen || tab.slot < 0) return;
         auto const& u     = m.upgrades[static_cast<std::size_t>(tab.slot)];
         float       maxW  = std::max(0.f, tab.rect.w - 20 - 6);
-        p.text(truncated(p, u.name, maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
+        // SC tab label (`translUpgrade`, e.g. "Tank"), when the upgrade's tab data names one.
+        auto label = u.tab.is_object() ? u.tab.value("tabLabel", u.name) : u.name;
+        p.text(truncated(p, label, maxW), tab.rect.x + 20, tab.rect.y + 8, Color::rgb(kTextColor));
         tab.widgets.render(p, mx, my, t);
         if (tab.native) {
             TabContext ctx{m, tab.slot, u, &mUpgradeStacks[static_cast<std::size_t>(tab.slot)], {}, {}};
@@ -631,6 +640,9 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index) highlight(x, y);
         else if (mDistSlots.size() > 1 && std::find(mDistSlots.begin(), mDistSlots.end(), SlotRef{SlotRef::Area::Storage, ps.index}) != mDistSlots.end()) highlight(x, y);
     }
+
+    // Upgrade inventory parts (Tank / Battery bars) right of the slots.
+    renderInventoryParts(p, m, inventoryPartsRect(), mx, my);
 
     // Player inventory.
     if (auto* player = currentPlayer()) {
@@ -715,6 +727,7 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
     // Open tab widgets, controls.
     if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.tooltip(mx, my, lines);
     mControls.tooltip(mx, my, lines);
+    if (lines.empty()) inventoryPartsTooltip(m, inventoryPartsRect(), mx, my, lines);
     if (!lines.empty()) {
         drawTooltip(p, lines, mx, my);
         return;
@@ -724,7 +737,11 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         auto const& t = mTabs[i];
         if (static_cast<int>(i) == mOpenTab || !t.rect.contains(mx, my)) continue;
         if (t.slot < 0) lines.push_back({ctr("abp.companion.tab.settings", "Backpack Settings"), 0xFFFFFF});
-        else lines.push_back({m.upgrades[static_cast<std::size_t>(t.slot)].name, 0xFFFFFF});
+        else {
+            // SC closed tab tooltip (`translUpgradeTooltip`), when the upgrade's tab data names one.
+            auto const& u = m.upgrades[static_cast<std::size_t>(t.slot)];
+            lines.push_back({u.tab.is_object() ? u.tab.value("tabTooltip", u.name) : u.name, 0xFFFFFF});
+        }
         drawTooltip(p, lines, mx, my);
         return;
     }
@@ -900,6 +917,11 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
     if (!down) {
         mDraggingBar = false;
         if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size())) mTabs[static_cast<std::size_t>(mOpenTab)].widgets.mouseUp(button, x, y);
+        // SC: upgrade inventory parts react on release (Tank bar: fill / drain the cursor item).
+        if (mDistButton < 0 && button != MouseButton::Middle
+            && clickInventoryParts(*m, inventoryPartsRect(), button == MouseButton::Right ? 1 : 0, x, y)) {
+            return true;
+        }
         if (mDistButton >= 0 && (button == MouseButton::Right ? 1 : 0) == mDistButton) finishDistribution();
         return true;
     }
@@ -1437,6 +1459,7 @@ void BackpackScreenLayer::settingsSlotClick(int index, int button) {
 void BackpackScreenLayer::renderSettings(Painter& p, cs::BackpackScreenModel const& m, FrameInfo const& f) {
     cs::LayoutInput in;
     in.storageSlots = m.storageSlots;
+    in.columnsTaken = inventoryColumnsTaken(m); // SC SettingsScreen: slots on line - columns taken
     in.upgradeSlots = 0;
     in.screenHeight = static_cast<int>(f.screen.h);
     in.sortButtons  = cs::SortButtonsPosition::Hidden;

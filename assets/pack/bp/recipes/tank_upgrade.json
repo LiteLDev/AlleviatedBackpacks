@@ -8,16 +8,13 @@
       "crafting_table"
     ],
     "pattern": [
-      "GIG",
+      "GGG",
       "GBG",
-      "GIG"
+      "GGG"
     ],
     "key": {
       "G": {
         "item": "minecraft:glass"
-      },
-      "I": {
-        "item": "minecraft:iron_ingot"
       },
       "B": {
         "item": "alleviatedbackpacks:upgrade_base"
