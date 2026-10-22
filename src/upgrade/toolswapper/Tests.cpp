@@ -3,6 +3,7 @@
 #include "mc/deps/core/string/HashedString.h"
 #include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/ActorDefinitionIdentifier.h"
+#include "mc/world/actor/ActorFlags.h"
 #include "mc/world/actor/Mob.h"
 #include "mc/world/actor/player/Inventory.h"
 #include "mc/world/actor/player/Player.h"
@@ -13,12 +14,15 @@
 #include "mc/world/level/BlockSource.h"
 #include "mc/world/level/Level.h"
 #include "mc/world/level/Spawner.h"
+#include "mc/deps/core/math/Vec2.h"
+#include "mc/world/level/GameType.h"
 #include "mc/world/level/block/Block.h"
 
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "mod/Config.h"
+#include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
@@ -95,164 +99,12 @@ ll::coro::CoroTask<BlockPos> waitGround(Context& ctx, Player& p) {
     co_return pos;
 }
 
-ABP_REGISTER_SELFTEST("toolswapper.classify", [](Context& ctx) {
-    auto pick  = item("minecraft:diamond_pickaxe");
-    auto wpick = item("minecraft:wooden_pickaxe");
-    auto sword = item("minecraft:diamond_sword");
-    auto shov  = item("minecraft:diamond_shovel");
-    auto stone = item("minecraft:cobblestone");
-    ctx.check(isTool(pick) && isTool(shov) && isTool(item("minecraft:shears")), "pickaxe/shovel/shears are tools");
-    ctx.check(isWeapon(sword) && isWeapon(item("minecraft:iron_axe")), "sword/axe are weapons");
-    ctx.check(!isTool(stone) && !isWeapon(stone) && !isWeapon(pick), "cobblestone is no tool, pickaxe no weapon");
-    auto const& stoneB = block(ctx, "minecraft:stone");
-    auto const& dirtB  = block(ctx, "minecraft:dirt");
-    auto const& obsB   = block(ctx, "minecraft:obsidian");
-    ctx.info(
-        "speeds stone: diamond_pickaxe=" + std::to_string(mineSpeed(pick, stoneB)) + " wooden_pickaxe="
-        + std::to_string(mineSpeed(wpick, stoneB)) + " shovel=" + std::to_string(mineSpeed(shov, stoneB))
-        + " hand=" + std::to_string(mineSpeed(ItemStack::EMPTY_ITEM(), stoneB))
-    );
-    ctx.check(mineSpeed(pick, stoneB) > mineSpeed(wpick, stoneB), "diamond pickaxe beats wooden on stone");
-    ctx.check(mineSpeed(wpick, stoneB) > 1.0f, "wooden pickaxe works on stone");
-    ctx.check(mineSpeed(stone, stoneB) <= 1.0f, "cobblestone is a bare hand");
-    ctx.check(mineSpeed(shov, dirtB) > mineSpeed(pick, dirtB), "shovel beats pickaxe on dirt");
-    ctx.check(canHarvest(pick, obsB), "diamond pickaxe harvests obsidian");
-    ctx.check(!canHarvest(ItemStack::EMPTY_ITEM(), stoneB), "stone needs a pickaxe for drops");
-    ctx.check(canHarvest(ItemStack::EMPTY_ITEM(), dirtB), "dirt drops by hand");
-    ctx.info(
-        "damage: sword=" + std::to_string(attackDamage(sword)) + " pick=" + std::to_string(attackDamage(pick))
-        + " iron_sword=" + std::to_string(attackDamage(item("minecraft:iron_sword")))
-    );
-    ctx.check(attackDamage(sword) > attackDamage(item("minecraft:iron_sword")), "diamond sword beats iron sword");
-    ctx.check(useToolFor(block(ctx, "minecraft:oak_log")) == "minecraft:is_axe", "logs need an axe");
-    ctx.check(useToolFor(block(ctx, "minecraft:grass_block")) == "minecraft:is_hoe", "grass needs a hoe");
-    ctx.check(useToolFor(block(ctx, "minecraft:podzol")) == "minecraft:is_shovel", "podzol needs a shovel");
-    ctx.check(useToolFor(stoneB).empty(), "stone has no use tool");
-});
 
-ABP_REGISTER_SELFTEST("toolswapper.block_swap", [](Context& ctx) {
-    auto& p  = ctx.player();
-    auto  bp = setup(ctx, false, item("minecraft:cobblestone", 10));
-    put(*bp, 3, item("minecraft:wooden_pickaxe"));
-    put(*bp, 7, item("minecraft:diamond_pickaxe"));
-    put(*bp, 9, item("minecraft:diamond_shovel"));
-    ctx.require(swapForBlock(p, block(ctx, "minecraft:stone")), "swapped for stone");
-    ctx.check(heldId(p) == "minecraft:diamond_pickaxe", "holding the diamond pickaxe, got " + heldId(p));
-    ctx.check(
-        bp->inventory().at(7).id == "minecraft:cobblestone" && bp->inventory().at(7).count == 10,
-        "cobblestone went into the tool's slot"
-    );
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:stone")), "an effective tool is never swapped away");
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:cobblestone")), "still effective on cobblestone");
-    ctx.require(swapForBlock(p, block(ctx, "minecraft:dirt")), "swapped for dirt");
-    ctx.check(heldId(p) == "minecraft:diamond_shovel", "holding the shovel, got " + heldId(p));
-    ctx.check(bp->inventory().at(9).id == "minecraft:diamond_pickaxe", "pickaxe went into the shovel's slot");
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:bedrock")), "nothing helps against bedrock");
-});
-
-ABP_REGISTER_SELFTEST("toolswapper.empty_hand_and_no_tool", [](Context& ctx) {
-    auto& p  = ctx.player();
-    auto  bp = setup(ctx);
-    put(*bp, 0, item("minecraft:iron_pickaxe"));
-    ctx.require(swapForBlock(p, block(ctx, "minecraft:stone")), "swap from an empty hand");
-    ctx.check(heldId(p) == "minecraft:iron_pickaxe", "pickaxe in hand");
-    ctx.check(bp->inventory().at(0).empty(), "slot emptied");
-    // No suitable tool: nothing happens.
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:dirt")), "no shovel, no swap");
-    ctx.check(heldId(p) == "minecraft:iron_pickaxe", "pickaxe kept");
-});
-
-ABP_REGISTER_SELFTEST("toolswapper.attack_swap", [](Context& ctx) {
-    auto& p  = ctx.player();
-    auto  bp = setup(ctx, false, item("minecraft:bread", 5));
-    put(*bp, 1, item("minecraft:iron_sword"));
-    put(*bp, 2, item("minecraft:diamond_sword"));
-    put(*bp, 4, item("minecraft:diamond_pickaxe"));
-    ctx.require(swapForAttack(p), "swapped for attack");
-    ctx.check(heldId(p) == "minecraft:diamond_sword", "best weapon in hand, got " + heldId(p));
-    ctx.check(
-        bp->inventory().at(2).id == "minecraft:bread" && bp->inventory().at(2).count == 5,
-        "bread stored in the sword's slot"
-    );
-    ctx.check(!swapForAttack(p), "a held weapon stays");
-});
-
-ABP_REGISTER_SELFTEST("toolswapper.modes", [](Context& ctx) {
-    auto& p  = ctx.player();
-    auto  bp = setup(ctx, true, item("minecraft:cobblestone", 3));
-    put(*bp, 0, item("minecraft:diamond_pickaxe"));
-    put(*bp, 1, item("minecraft:diamond_sword"));
-    auto uc = upgradeCtx(bp);
-    auto s  = settingsOf(uc);
-    s.mode  = ToolMode::OnlyTools;
-    saveSettings(uc, s);
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:stone")), "only-tools mode keeps a held block");
-    ctx.check(swapForAttack(p), "only-tools mode is about blocks: weapons still swap");
-    ctx.check(heldId(p) == "minecraft:diamond_sword", "sword in hand, got " + heldId(p));
-    put(*bp, 1, item("minecraft:diamond_sword"));
-    p.getInventory().setItem(0, item("minecraft:wooden_shovel"));
-    ctx.check(swapForBlock(p, block(ctx, "minecraft:stone")), "only-tools mode swaps a held tool");
-    ctx.check(heldId(p) == "minecraft:diamond_pickaxe", "pickaxe in hand");
-    s.mode = ToolMode::Off;
-    saveSettings(uc, s);
-    p.getInventory().setItem(0, ItemStack::EMPTY_ITEM());
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:dirt")), "tools off: no block swap");
-    ctx.check(swapForAttack(p), "tools off: weapons still swap");
-    ctx.check(heldId(p) == "minecraft:diamond_sword", "sword in hand");
-    s.mode    = ToolMode::Any;
-    s.weapons = false;
-    saveSettings(uc, s);
-    p.getInventory().setItem(0, ItemStack::EMPTY_ITEM());
-    bp->inventory().set(5, game::ItemConv::toData(item("minecraft:iron_sword")));
-    ctx.check(!swapForAttack(p), "weapons off: no attack swap");
-    put(*bp, 6, item("minecraft:iron_pickaxe"));
-    upgrade::setEnabled(bp, 0, false);
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:stone")), "disabled upgrade does nothing");
-});
-
-ABP_REGISTER_SELFTEST("toolswapper.filter_and_durability", [](Context& ctx) {
-    auto& p    = ctx.player();
-    auto  bp   = setup(ctx, true);
-    auto  worn = item("minecraft:diamond_pickaxe");
-    worn.setDamageValue(static_cast<short>(worn.mItem.get()->getMaxDamage() - 2));
-    put(*bp, 0, worn);
-    put(*bp, 1, item("minecraft:iron_pickaxe"));
-    put(*bp, 2, item("minecraft:netherite_pickaxe"));
-    auto uc = upgradeCtx(bp);
-    // Deny the netherite pickaxe.
-    core::Filter f(kFilterSlots);
-    f.mode = core::FilterMode::Deny;
-    f.setGhost(0, game::ItemConv::toData(item("minecraft:netherite_pickaxe")));
-    uc.settings()["filter"] = f.toJson();
-    uc.saveSettings(true);
-    ctx.require(swapForBlock(p, block(ctx, "minecraft:stone")), "swap");
-    ctx.check(heldId(p) == "minecraft:iron_pickaxe", "filter + durability pick the iron pickaxe, got " + heldId(p));
-    // Durability check off: the worn diamond pickaxe wins.
-    auto s              = settingsOf(uc);
-    s.skipLowDurability = false;
-    saveSettings(uc, s);
-    p.getInventory().setItem(0, ItemStack::EMPTY_ITEM());
-    bp->inventory().set(1, {});
-    ctx.require(swapForBlock(p, block(ctx, "minecraft:stone")), "swap 2");
-    ctx.check(heldId(p) == "minecraft:diamond_pickaxe", "worn diamond pickaxe allowed now, got " + heldId(p));
-});
-
-ABP_REGISTER_SELFTEST("toolswapper.no_loss_when_full", [](Context& ctx) {
-    auto& p     = ctx.player();
-    auto  other = ctx.createBackpack(core::Tier::Leather);
-    // Holding another backpack: it can't go into a backpack, so nothing may change.
-    auto bp = setup(ctx, false, ctx.backpackItem(*other));
-    put(*bp, 4, item("minecraft:diamond_pickaxe"));
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:stone")), "no swap when the held item can't be stored");
-    ctx.check(bp->inventory().at(4).id == "minecraft:diamond_pickaxe", "tool stays in its slot");
-    ctx.check(game::isBackpack(p.getInventory().getItem(0)), "held backpack untouched");
-});
-
-/// Voids every cobblestone put into the backpack (stands in for a Void upgrade).
-class VoidCobbleUpgrade : public IUpgrade {
+/// Voids every wooden pickaxe put into the backpack (stands in for a Void upgrade).
+class VoidPickaxeUpgrade : public IUpgrade {
 public:
     UpgradeInfo mInfo{
-        .id           = "selftest_void_cobble",
+        .id           = "selftest_void_pickaxe",
         .itemId       = "minecraft:structure_void",
         .nameKey      = "abp.selftest.upgrade",
         .nameFallback = "Selftest Upgrade",
@@ -260,30 +112,168 @@ public:
     [[nodiscard]] UpgradeInfo const& info() const override { return mInfo; }
     void                             attach(UpgradeContext const& ctx, core::BackpackInventory& inv) override {
         inv.addInsertFilter(ctx.hookOwner(), 0, [](core::InsertQuery const& q) {
-            return q.stack.id == "minecraft:cobblestone" ? core::InsertVerdict::Void : core::InsertVerdict::Allow;
+            return q.stack.id == "minecraft:wooden_pickaxe" ? core::InsertVerdict::Void : core::InsertVerdict::Allow;
         });
     }
 };
 
-ABP_REGISTER_SELFTEST("toolswapper.never_voids_held_item", [](Context& ctx) {
-    ScopedUpgrade scoped(std::make_shared<VoidCobbleUpgrade>());
-    auto&         p  = ctx.player();
-    auto          bp = setup(ctx, false, item("minecraft:cobblestone", 32));
-    ctx.installUpgrade(bp, "selftest_void_cobble");
-    put(*bp, 4, item("minecraft:diamond_pickaxe"));
-    ctx.check(!swapForBlock(p, block(ctx, "minecraft:stone")), "no swap when the held item would be voided");
-    ctx.check(heldId(p) == "minecraft:cobblestone" && p.getInventory().getItem(0).mCount == 32, "cobblestone kept");
-    ctx.check(bp->inventory().at(4).id == "minecraft:diamond_pickaxe", "pickaxe back in its slot");
+Mob* spawnMob(Context& ctx, Player& p, BlockPos const& ground, std::string const& id) {
+    auto pos  = p.getPosition();
+    pos.x    += 1.5f;
+    pos.y     = static_cast<float>(ground.y + 1);
+    Mob* mob  = nullptr;
+    for (bool surface : {false, true}) {
+        mob = p.getLevel().getSpawner().spawnMob(p.getDimensionBlockSource(), ActorDefinitionIdentifier(id), nullptr, pos, false, surface, false);
+        if (mob) break;
+    }
+    ctx.require(mob != nullptr, "spawn " + id);
+    return mob;
+}
+
+void lookDown(Player& p, BlockPos const& ground) {
+    p.teleport(Vec3{static_cast<float>(ground.x) + 0.5f, static_cast<float>(ground.y + 1), static_cast<float>(ground.z) + 0.5f}, p.getDimensionId(), Vec2{90.0f, 0.0f});
+}
+
+// ---- registration / settings -----------------------------------------------------------------------
+
+ABP_REGISTER_SELFTEST("toolswapper.items", [](Context& ctx) {
+    auto* basic = upgrade::byId(kBasicId);
+    auto* adv   = upgrade::byId(kAdvancedId);
+    ctx.require(basic && adv, "registered");
+    ctx.check(!basic->info().hasSettings, "SB: the basic tool swapper has no settings tab");
+    ctx.check(adv->info().hasSettings, "advanced has a tab");
+    auto bp = ctx.createBackpack(core::Tier::Iron);
+    ctx.installUpgrade(bp, std::string(kBasicId));
+    ctx.check(!upgrade::canInstall(bp, 1, game::ItemConv::toData(item("alleviatedbackpacks:advanced_tool_swapper_upgrade")), nullptr), "one tool swapper per backpack");
+    auto s = settingsOf(UpgradeContext(bp, 0));
+    ctx.check(s.swapWeapon && s.mode == ToolMode::Any, "SB defaults: Swap Weapon, Swap Tools");
+    ctx.check(s.filter.ghosts.size() == 8 && s.filter.mode == core::FilterMode::Deny, "8 slot filter, empty deny list");
+    ctx.check(toString(ToolMode::Any) == "name" && toolModeFromString("onlyTools") == ToolMode::OnlyTools && toolModeFromString("noSwap") == ToolMode::Off, "SB mode names");
+});
+
+ABP_REGISTER_SELFTEST("toolswapper.classify", [](Context& ctx) {
+    ctx.check(isSword(item("minecraft:diamond_sword")) && !isSword(item("minecraft:diamond_axe")), "swords");
+    ctx.check(isTool(item("minecraft:iron_pickaxe")) && isTool(item("minecraft:shears")) && isTool(item("minecraft:stone_hoe")), "tools");
+    ctx.check(!isTool(item("minecraft:stick")) && !isTool(item("minecraft:diamond_sword")), "sticks and swords are no tools");
+    ctx.check(isAxe(item("minecraft:golden_axe")), "axes");
+    auto const& stone = block(ctx, "minecraft:stone");
+    ctx.check(goodAtBreaking(item("minecraft:iron_pickaxe"), stone), "a pickaxe is good at stone");
+    ctx.check(!goodAtBreaking(item("minecraft:iron_shovel"), stone), "a shovel is not");
+    ctx.check(!goodAtBreaking(ItemStack{}, stone), "a hand is not");
+    ctx.check(destroyProgress(ItemStack{}, block(ctx, "minecraft:short_grass")) >= 1.0f || destroyProgress(ItemStack{}, block(ctx, "minecraft:tallgrass")) >= 1.0f, "grass breaks instantly");
+    ctx.check(destroySpeed(item("minecraft:diamond_pickaxe"), stone) > destroySpeed(item("minecraft:stone_pickaxe"), stone), "diamond is faster than stone");
+    ctx.check(attackDamage(item("minecraft:diamond_sword")) > attackDamage(item("minecraft:wooden_sword")), "attack damage");
+});
+
+// ---- block click (SB onBlockClick) -----------------------------------------------------------------
+
+ABP_REGISTER_SELFTEST("toolswapper.block_swap", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& p      = ctx.player();
+    auto  bp     = setup(ctx, false, item("minecraft:wooden_pickaxe"));
+    auto  ground = co_await waitGround(ctx, p);
+    auto  name   = p.getDimensionBlockSourceConst().getBlock(ground).getTypeName();
+    ctx.info("ground: " + name);
+    put(*bp, 3, item("minecraft:stone_shovel"));
+    put(*bp, 5, item("minecraft:diamond_shovel"));
+    ctx.check(onBlockClick(p, ground), "handled");
+    ctx.check(heldId(p) == "minecraft:diamond_shovel", "the fastest tool for " + name + ", got " + heldId(p));
+    ctx.check(bp->inventory().count([](auto const& d) { return d.id == "minecraft:wooden_pickaxe"; }) == 1, "the pickaxe went into the backpack");
+    // The held tool is already good at this block: nothing changes.
+    ctx.check(onBlockClick(p, ground) && heldId(p) == "minecraft:diamond_shovel", "kept");
+
+    // SB: only when holding a tool or a weapon.
+    auto bp2 = setup(ctx, false, item("minecraft:dirt", 5));
+    put(*bp2, 1, item("minecraft:diamond_shovel"));
+    ctx.check(!onBlockClick(p, ground) && heldId(p) == "minecraft:dirt", "holding a block: no swap");
+    auto bp3 = setup(ctx, false);
+    put(*bp3, 1, item("minecraft:diamond_shovel"));
+    ctx.check(!onBlockClick(p, ground) && heldId(p) == "<empty>", "empty hand: no swap");
+    // Creative: never.
+    auto bp4 = setup(ctx, false, item("minecraft:wooden_pickaxe"));
+    put(*bp4, 1, item("minecraft:diamond_shovel"));
+    p.setPlayerGameType(GameType::Creative);
+    ctx.check(!onBlockClick(p, ground) && heldId(p) == "minecraft:wooden_pickaxe", "creative: no swap");
+    p.setPlayerGameType(GameType::Survival);
+});
+
+ABP_REGISTER_SELFTEST("toolswapper.modes_and_filter", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& p      = ctx.player();
+    auto  ground = co_await waitGround(ctx, p);
+    // Swap Tools: a held sword is swapped too.
+    auto bp = setup(ctx, true, item("minecraft:iron_sword"));
+    put(*bp, 1, item("minecraft:diamond_shovel"));
+    ctx.check(onBlockClick(p, ground) && heldId(p) == "minecraft:diamond_shovel", "Swap Tools: sword -> shovel");
+    // Only Swap For Other Tools: not for a weapon.
+    bp = setup(ctx, true, item("minecraft:iron_sword"));
+    put(*bp, 1, item("minecraft:diamond_shovel"));
+    setToolMode(upgradeCtx(bp), ToolMode::OnlyTools);
+    ctx.check(!onBlockClick(p, ground) && heldId(p) == "minecraft:iron_sword", "Only Swap For Other Tools: keeps the sword");
+    auto bpTools = setup(ctx, true, item("minecraft:wooden_pickaxe"));
+    put(*bpTools, 1, item("minecraft:diamond_shovel"));
+    setToolMode(upgradeCtx(bpTools), ToolMode::OnlyTools);
+    ctx.check(onBlockClick(p, ground) && heldId(p) == "minecraft:diamond_shovel", "Only Swap For Other Tools: pickaxe -> shovel");
+    // Do Not Swap Tools.
+    bp = setup(ctx, true, item("minecraft:wooden_pickaxe"));
+    put(*bp, 1, item("minecraft:diamond_shovel"));
+    setToolMode(upgradeCtx(bp), ToolMode::Off);
+    ctx.check(!onBlockClick(p, ground) && heldId(p) == "minecraft:wooden_pickaxe", "Do Not Swap Tools");
+    // Filter (deny list): a denied tool is never taken.
+    bp = setup(ctx, true, item("minecraft:wooden_pickaxe"));
+    put(*bp, 1, item("minecraft:diamond_shovel"));
+    put(*bp, 2, item("minecraft:stone_shovel"));
+    auto f = Settings::defaultFilter();
+    f.setGhost(0, game::ItemConv::toData(item("minecraft:diamond_shovel")));
+    setFilter(upgradeCtx(bp), f);
+    ctx.check(onBlockClick(p, ground) && heldId(p) == "minecraft:stone_shovel", "denied diamond shovel skipped, got " + heldId(p));
+    // Allow list: only the listed tools (the held one must pass too).
+    bp = setup(ctx, true, item("minecraft:wooden_pickaxe"));
+    put(*bp, 1, item("minecraft:diamond_shovel"));
+    f      = Settings::defaultFilter();
+    f.mode = core::FilterMode::Allow;
+    setFilter(upgradeCtx(bp), f);
+    ctx.check(!onBlockClick(p, ground) && heldId(p) == "minecraft:wooden_pickaxe", "empty allow list: nothing passes");
+});
+
+ABP_REGISTER_SELFTEST("toolswapper.never_voids_held_item", [](Context& ctx) -> ll::coro::CoroTask<> {
+    ScopedUpgrade scoped(std::make_shared<VoidPickaxeUpgrade>());
+    auto&         p      = ctx.player();
+    auto          ground = co_await waitGround(ctx, p);
+    auto          bp     = setup(ctx, false, item("minecraft:wooden_pickaxe"));
+    ctx.installUpgrade(bp, "selftest_void_pickaxe");
+    put(*bp, 4, item("minecraft:diamond_shovel"));
+    (void)onBlockClick(p, ground);
+    ctx.check(heldId(p) == "minecraft:wooden_pickaxe", "no swap when the held item would be voided");
+    ctx.check(bp->inventory().at(4).id == "minecraft:diamond_shovel", "shovel back in its slot");
+});
+
+// ---- attack (SB onAttackEntity) ------------------------------------------------------------------
+
+ABP_REGISTER_SELFTEST("toolswapper.attack_swap", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = setup(ctx, false, item("minecraft:stone_pickaxe"));
+    put(*bp, 1, item("minecraft:diamond_axe"));
+    put(*bp, 2, item("minecraft:stone_sword"));
+    put(*bp, 3, item("minecraft:iron_sword"));
+    ctx.check(onAttack(p) && heldId(p) == "minecraft:iron_sword", "the best sword wins over an axe, got " + heldId(p));
+    ctx.check(onAttack(p) && heldId(p) == "minecraft:iron_sword", "holding a sword: kept");
+    bp = setup(ctx, false, item("minecraft:stone_pickaxe"));
+    put(*bp, 1, item("minecraft:diamond_axe"));
+    ctx.check(onAttack(p) && heldId(p) == "minecraft:diamond_axe", "no sword: the best axe");
+    bp = setup(ctx, false);
+    put(*bp, 1, item("minecraft:iron_sword"));
+    ctx.check(!onAttack(p) && heldId(p) == "<empty>", "SB: empty hand is no tool: no swap");
+    bp = setup(ctx, true, item("minecraft:stone_pickaxe"));
+    put(*bp, 1, item("minecraft:iron_sword"));
+    setSwapWeapon(upgradeCtx(bp), false);
+    ctx.check(!onAttack(p) && heldId(p) == "minecraft:stone_pickaxe", "Do Not Swap Weapon");
 });
 
 ABP_REGISTER_SELFTEST("toolswapper.hook_start_destroy", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& p  = ctx.player();
-    auto  bp = setup(ctx, false, item("minecraft:stick"));
+    auto  bp = setup(ctx, false, item("minecraft:wooden_pickaxe"));
     put(*bp, 6, item("minecraft:diamond_shovel"));
-    auto        pos   = co_await waitGround(ctx, p);
-    auto const& below = p.getDimensionBlockSourceConst().getBlock(pos);
-    ctx.require(!below.isAir(), "found the ground");
-    ctx.info("block below: " + below.getTypeName());
+    auto pos = co_await waitGround(ctx, p);
+    ctx.require(!p.getDimensionBlockSourceConst().getBlock(pos).isAir(), "found the ground");
     auto* gm = p.mGameMode.get();
     ctx.require(gm != nullptr, "game mode");
     bool destroyed = false;
@@ -291,157 +281,130 @@ ABP_REGISTER_SELFTEST("toolswapper.hook_start_destroy", [](Context& ctx) -> ll::
     co_await ctx.ticks(2); // served on the next tick
     gm->stopDestroyBlock(pos);
     ctx.check(heldId(p) == "minecraft:diamond_shovel", "startDestroyBlock swapped in the shovel, got " + heldId(p));
-    ctx.check(bp->inventory().at(6).id == "minecraft:stick", "stick stored");
 });
-
-Mob* spawnSheep(Context& ctx, Player& p, BlockPos const& ground) {
-    auto pos  = p.getPosition();
-    pos.x    += 1.5f;
-    pos.y     = static_cast<float>(ground.y + 1);
-    Mob* mob  = nullptr;
-    for (bool surface : {false, true}) {
-        mob = p.getLevel().getSpawner().spawnMob(
-            p.getDimensionBlockSource(),
-            ActorDefinitionIdentifier("minecraft:sheep"),
-            nullptr,
-            pos,
-            false,
-            surface,
-            false
-        );
-        if (mob) break;
-    }
-    ctx.require(mob != nullptr, "spawn sheep");
-    return mob;
-}
 
 ABP_REGISTER_SELFTEST("toolswapper.hook_attack", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& p  = ctx.player();
-    auto  bp = setup(ctx);
+    auto  bp = setup(ctx, false, item("minecraft:wooden_pickaxe"));
     put(*bp, 2, item("minecraft:stone_sword"));
     auto  ground = co_await waitGround(ctx, p);
-    auto* sheep  = spawnSheep(ctx, p, ground);
+    auto* sheep  = spawnMob(ctx, p, ground, "minecraft:sheep");
     auto  id     = sheep->getOrCreateUniqueID();
     co_await ctx.ticks(2);
     auto* s = p.getLevel().fetchEntity(id, false);
     ctx.require(s != nullptr, "sheep present");
     p.mGameMode.get()->attack(*s, s->getPosition());
-    // The swap is served at the start of the next tick.
-    co_await ctx.ticks(2);
+    co_await ctx.ticks(2); // served at the start of the next tick
     ctx.check(heldId(p) == "minecraft:stone_sword", "attack swapped in the sword, got " + heldId(p));
-    ctx.check(bp->inventory().at(2).empty(), "sword left its slot (empty hand: nothing to store)");
     if (auto* again = p.getLevel().fetchEntity(id, false)) again->despawn();
 });
 
-ABP_REGISTER_SELFTEST("toolswapper.shears_and_use", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto& p  = ctx.player();
-    auto  bp = setup(ctx);
-    put(*bp, 0, item("minecraft:shears"));
-    put(*bp, 1, item("minecraft:stone_axe"));
-    put(*bp, 2, item("minecraft:diamond_axe"));
-    put(*bp, 3, item("minecraft:iron_hoe"));
+// ---- tool swap key (SB BlockToolSwapPayload / EntityToolSwapPayload) ----------------------------------
+
+ABP_REGISTER_SELFTEST("toolswapper.key_block", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& p      = ctx.player();
     auto  ground = co_await waitGround(ctx, p);
-    auto* sheep  = spawnSheep(ctx, p, ground);
-    auto  id     = sheep->getOrCreateUniqueID();
+    auto  name   = p.getDimensionBlockSourceConst().getBlock(ground).getTypeName();
+    lookDown(p, ground);
     co_await ctx.ticks(2);
-    auto* s = p.getLevel().fetchEntity(id, false);
-    ctx.require(s != nullptr, "sheep present");
-    ctx.check(isShearable(*s), "sheep is shearable");
-    // Through the interaction hook: the swap is served on the next tick.
-    p.mGameMode.get()->interact(*s, s->getPosition(), HandSlot::Mainhand);
+    // Basic: no key swap.
+    auto bp = setup(ctx, false, item("minecraft:stick"));
+    put(*bp, 1, item("minecraft:wooden_shovel"));
+    ctx.check(onSwapKey(p) == KeyResult::NoUpgrade, "basic tool swapper can't swap on key press");
+    // Advanced: the shovel flattens the grass under the player; repeated presses cycle tools.
+    bp = setup(ctx, true, item("minecraft:stick"));
+    lookDown(p, ground);
     co_await ctx.ticks(2);
-    ctx.check(heldId(p) == "minecraft:shears", "shears in hand, got " + heldId(p));
-    if (auto* again = p.getLevel().fetchEntity(id, false)) again->despawn();
-    // Holding something already: no interaction swap.
-    ctx.check(!swapForBlockUse(p, block(ctx, "minecraft:oak_log")), "no use-swap with a full hand");
-    p.getInventory().setItem(0, ItemStack::EMPTY_ITEM());
-    ctx.check(swapForBlockUse(p, block(ctx, "minecraft:oak_log")), "log -> axe");
-    ctx.check(heldId(p) == "minecraft:diamond_axe", "best axe in hand, got " + heldId(p));
-    // Through the use-on-block hook: only while sneaking with an empty hand.
-    p.getInventory().setItem(0, ItemStack::EMPTY_ITEM());
-    auto const& groundBlock = p.getDimensionBlockSourceConst().getBlock(ground);
-    ctx.require(
-        groundBlock.getTypeName() == "minecraft:grass_block",
-        "standing on grass, not " + groundBlock.getTypeName()
-    );
-    Vec3 hit{
-        static_cast<float>(ground.x) + 0.5f,
-        static_cast<float>(ground.y + 1),
-        static_cast<float>(ground.z) + 0.5f
-    };
-    ItemStack empty;
-    p.setSneaking(false);
-    (void)p.mGameMode.get()->useItemOn(empty, ground, 1, hit, HandSlot::Mainhand, &groundBlock, true);
-    co_await ctx.ticks(2);
-    ctx.check(heldId(p) == "<empty>", "no swap without sneaking, got " + heldId(p));
-    p.setSneaking(true);
-    (void)p.mGameMode.get()->useItemOn(empty, ground, 1, hit, HandSlot::Mainhand, &groundBlock, true);
-    co_await ctx.ticks(2);
-    p.setSneaking(false);
-    ctx.check(heldId(p) == "minecraft:iron_hoe", "sneak-use on grass -> hoe, got " + heldId(p));
+    if (name != "minecraft:grass_block" && name != "minecraft:dirt") {
+        ctx.info("ground is " + name + ": flatten check skipped");
+        co_return;
+    }
+    put(*bp, 1, item("minecraft:wooden_shovel"));
+    put(*bp, 2, item("minecraft:stone_shovel"));
+    put(*bp, 3, item("minecraft:diamond_pickaxe"));
+    ctx.check(onSwapKey(p) == KeyResult::Swapped && heldId(p) == "minecraft:wooden_shovel", "first press: a shovel, got " + heldId(p));
+    ctx.check(onSwapKey(p) == KeyResult::Swapped && heldId(p) == "minecraft:stone_shovel", "second press: the other shovel, got " + heldId(p));
+    ctx.check(onSwapKey(p) == KeyResult::Swapped && heldId(p) == "minecraft:wooden_shovel", "third press: back to the first, got " + heldId(p));
+    // No tool for the block.
+    bp = setup(ctx, true, item("minecraft:stick"));
+    lookDown(p, ground);
+    put(*bp, 1, item("minecraft:diamond_pickaxe"));
+    ctx.check(onSwapKey(p) == KeyResult::NoToolForBlock, "no tool works on the block");
+    // Holding a backpack.
+    auto other = ctx.createBackpack(core::Tier::Leather);
+    bp         = setup(ctx, true, ctx.backpackItem(*other));
+    ctx.check(onSwapKey(p) == KeyResult::HoldingBackpack, "holding a backpack");
 });
 
-ABP_REGISTER_SELFTEST("toolswapper.settings_menu", [](Context& ctx) {
+ABP_REGISTER_SELFTEST("toolswapper.key_entity_tools", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& p      = ctx.player();
+    auto  ground = co_await waitGround(ctx, p);
+    auto* sheep  = spawnMob(ctx, p, ground, "minecraft:sheep");
+    auto* cow    = spawnMob(ctx, p, ground, "minecraft:cow");
+    auto  sid    = sheep->getOrCreateUniqueID();
+    auto  cid    = cow->getOrCreateUniqueID();
+    co_await ctx.ticks(2);
+    auto* s = p.getLevel().fetchEntity(sid, false);
+    auto* c = p.getLevel().fetchEntity(cid, false);
+    ctx.require(s && c, "mobs present");
+    if (s->isBaby() || s->getStatusFlag(ActorFlags::Sheared)) {
+        ctx.info("the spawned sheep is a lamb / sheared: shears check skipped");
+    } else {
+        ctx.check(worksOnEntity(item("minecraft:shears"), *s), "shears on an adult unsheared sheep (type " + s->getTypeName() + ")");
+    }
+    ctx.check(worksOnEntity(item("minecraft:lead"), *s), "lead on an animal");
+    ctx.check(worksOnEntity(item("minecraft:bucket"), *c), "bucket on a cow");
+    ctx.check(!worksOnEntity(item("minecraft:bucket"), *s), "no bucket on a sheep");
+    ctx.check(!worksOnEntity(item("minecraft:diamond_pickaxe"), *c), "a pickaxe does nothing to a cow");
+    ctx.check(worksOnBlock(item("minecraft:iron_axe"), block(ctx, "minecraft:oak_log"), p, BlockPos{0, 400, 0}), "axe strips logs");
+    ctx.check(!worksOnBlock(item("minecraft:iron_axe"), block(ctx, "minecraft:stripped_oak_log"), p, BlockPos{0, 400, 0}), "not stripped logs");
+    ctx.check(worksOnBlock(item("minecraft:shears"), block(ctx, "minecraft:pumpkin"), p, BlockPos{0, 400, 0}), "shears carve pumpkins");
+    ctx.check(worksOnBlock(item("minecraft:iron_axe"), block(ctx, "minecraft:waxed_copper"), p, BlockPos{0, 400, 0}), "axe un-waxes copper");
+    if (auto* a = p.getLevel().fetchEntity(sid, false)) a->despawn();
+    if (auto* a = p.getLevel().fetchEntity(cid, false)) a->despawn();
+});
+
+// ---- settings: chest menu (selftests) and native tab actions ------------------------------------------
+
+ABP_REGISTER_SELFTEST("toolswapper.settings", [](Context& ctx) {
     auto& mm   = ui::MenuManager::get();
     auto& p    = ctx.player();
     auto  bp   = setup(ctx, true);
     auto  uc   = upgradeCtx(bp);
     auto* type = upgrade::upgradeFor(uc.state().item);
-    ctx.require(type && type->info().hasSettings, "advanced upgrade has settings");
-    auto menu = type->createSettingsMenu(p, uc.withPlayer(&p));
-    ctx.require(menu != nullptr, "settings menu");
-    ctx.require(mm.open(p, menu), "open");
+    auto  menu = type->createSettingsMenu(p, uc.withPlayer(&p));
+    ctx.require(menu != nullptr && mm.open(p, menu), "open settings menu");
     mm.forceShown(p);
-    (void)mm.simulate(
-        p,
-        {
-            Action::Take,
-            {Where::Menu,   10},
-            {Where::Cursor, 0 },
-            1
-    }
-    );
-    ctx.check(!settingsOf(uc).weapons, "weapons toggled off");
-    (void)mm.simulate(
-        p,
-        {
-            Action::Take,
-            {Where::Menu,   11},
-            {Where::Cursor, 0 },
-            1
-    }
-    );
-    ctx.check(settingsOf(uc).mode == ToolMode::OnlyTools, "mode cycled to only-tools");
-    (void)mm.simulate(
-        p,
-        {
-            Action::Take,
-            {Where::Menu,   12},
-            {Where::Cursor, 0 },
-            1
-    }
-    );
-    ctx.check(
-        settingsOf(uc).skipLowDurability != config::get<ToolSwapperConfig>().skipLowDurabilityByDefault,
-        "durability toggled"
-    );
-    (void)mm.simulate(
-        p,
-        {
-            Action::Take,
-            {Where::Menu,   13},
-            {Where::Cursor, 0 },
-            1
-    }
-    );
-    ctx.check(!settingsOf(uc).interact, "interaction swaps off");
-    ctx.check(p.mPlayerUIContainer->getItem(0).isNull(), "buttons never give items");
+    (void)mm.simulate(p, {Action::Take, {Where::Menu, 11}, {Where::Cursor, 0}, 1});
+    ctx.check(!settingsOf(uc).swapWeapon, "Do Not Swap Weapon");
+    (void)mm.simulate(p, {Action::Take, {Where::Menu, 13}, {Where::Cursor, 0}, 1});
+    ctx.check(settingsOf(uc).mode == ToolMode::OnlyTools, "Only Swap For Other Tools");
     mm.close(p);
+    auto act = [&](nlohmann::json d) {
+        for (auto const& h : net::TabActionRegistry::entries())
+            if (h.upgrade == kAdvancedId) return h.handle(p, uc.withPlayer(&p), d);
+        return false;
+    };
+    ctx.check(act({{"toolswapper", "mode"}}) && settingsOf(uc).mode == ToolMode::Off, "tab: Do Not Swap Tools");
+    ctx.check(act({{"toolswapper", "mode"}}) && settingsOf(uc).mode == ToolMode::Any, "tab: Swap Tools");
+    ctx.check(act({{"toolswapper", "weapon"}}) && settingsOf(uc).swapWeapon, "tab: Swap Weapon");
+    ctx.check(act({{"toolswapper", "allow"}}) && settingsOf(uc).filter.mode == core::FilterMode::Allow, "tab: Allow");
+    ctx.check(act({{"toolswapper", "primary"}}) && settingsOf(uc).filter.matchBy == core::MatchBy::Namespace, "tab: Match Mod");
+    p.mPlayerUIContainer->setItem(0, item("minecraft:diamond_pickaxe"));
+    ctx.check(act({{"toolswapper", "slot"}, {"index", 2}}) && settingsOf(uc).filter.ghosts[2].id == "minecraft:diamond_pickaxe", "tab: filter slot from the cursor");
+    ctx.check(p.mPlayerUIContainer->getItem(0).mCount == 1, "cursor kept");
+    p.mPlayerUIContainer->setItem(0, ItemStack::EMPTY_ITEM());
+    ctx.check(act({{"toolswapper", "slot"}, {"index", 2}}) && settingsOf(uc).filter.ghosts[2].empty(), "tab: cleared with an empty cursor");
+    nlohmann::json data;
+    for (auto const& pr : net::TabDataRegistry::entries())
+        if (pr.upgrade == kAdvancedId) data = pr.data(p, uc);
+    ctx.check(data.value("tabLabel", std::string{}) == "Tool Swap", "tab title");
+    ctx.check(data["toolswapper"]["filter"]["ghosts"].size() == 8, "8 filter slots in the tab data");
     // Settings travel with the item.
     auto removed = upgrade::remove(bp, 0, nullptr);
     ctx.require(removed.has_value(), "remove");
     ctx.require(upgrade::install(bp, 1, *removed, nullptr), "reinstall");
-    ctx.check(!settingsOf(UpgradeContext(bp, 1)).weapons, "settings kept after reinstall");
+    ctx.check(settingsOf(UpgradeContext(bp, 1)).filter.mode == core::FilterMode::Allow, "settings kept after reinstall");
 });
 
 } // namespace

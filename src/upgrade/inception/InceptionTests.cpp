@@ -10,13 +10,14 @@
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockSource.h"
 
-#include "feature/admin/Admin.h"
+#include "api/BackpackCapabilities.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "game/Storage.h"
 #include "mod/Config.h"
 #include "mod/GeneralConfig.h"
+#include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
@@ -80,8 +81,8 @@ std::optional<game::CarriedBackpack> findCarried(Player& player, std::string con
     return std::nullopt;
 }
 
-void setMode(std::shared_ptr<game::Backpack> const& bp, int slot, NestedUpgrades mode) {
-    UpgradeContext(bp, slot).settings()["nestedUpgrades"] = std::string(toString(mode));
+void setOrder(std::shared_ptr<game::Backpack> const& bp, int slot, InventoryOrder order) {
+    UpgradeContext(bp, slot).settings()["inventoryOrder"] = std::string(toString(order));
     bp->markDirty();
 }
 
@@ -99,13 +100,14 @@ ABP_REGISTER_SELFTEST("inception.allows_nesting", [](Context& ctx) {
     int at = store(ctx, *outer, *inner);
     ctx.require(at >= 0, "backpack stored in an Inception backpack");
     ctx.check(store(ctx, *outer, *outer) < 0, "never itself");
-    // Cycle: outer can't go into inner even if inner gets Inception too.
-    ctx.installUpgrade(inner, std::string(kId));
-    ctx.check(store(ctx, *inner, *outer) < 0, "cycles refused");
-    // Removal is blocked while backpacks are inside.
+    // SB: a backpack with an Inception upgrade can't go into another backpack.
+    auto incepted = ctx.createBackpack(Tier::Leather);
+    ctx.installUpgrade(incepted, std::string(kId));
+    ctx.check(store(ctx, *outer, *incepted) < 0, "a backpack with Inception is refused");
+    // Removal is blocked while backpacks are inside (SB error text).
     std::string reason;
     ctx.check(!upgrade::remove(outer, slot, nullptr, &reason).has_value(), "removal refused while not empty");
-    ctx.check(!reason.empty(), "removal reason given");
+    ctx.check(reason == "There's one or more backpacks in the backpack", "SB reason: " + reason);
     ctx.check(!outer->data().upgrades[static_cast<std::size_t>(slot)].empty(), "upgrade still installed");
     auto out = outer->inventory().extract(at, 1, kPlayer);
     ctx.check(!out.empty(), "nested backpack taken out");
@@ -121,7 +123,7 @@ ABP_REGISTER_SELFTEST("inception.nested_upgrades_work", [](Context& ctx) -> ll::
     auto&                        player = ctx.player();
     auto                         outer  = ctx.createBackpack(Tier::Iron);
     auto                         inner  = ctx.createBackpack(Tier::Leather);
-    int                          islot  = ctx.installUpgrade(outer, std::string(kId));
+    ctx.installUpgrade(outer, std::string(kId));
     ctx.installUpgrade(inner, "selftest_inception_tick");
     ctx.require(store(ctx, *outer, *inner) >= 0, "store inner");
     ctx.require(ctx.give(player, ctx.backpackItem(*outer), 2) == 2, "give outer");
@@ -143,65 +145,50 @@ ABP_REGISTER_SELFTEST("inception.nested_upgrades_work", [](Context& ctx) -> ll::
         "apples in nested backpack"
     );
 
-    // Non-storage only: our test upgrade counts as storage related.
-    config::mut<InceptionConfig>().storageUpgrades.push_back("selftest_inception_tick");
-    setMode(outer, islot, NestedUpgrades::NonStorage);
-    c = findCarried(player, inner->uuid());
-    ctx.require(c.has_value(), "still reported in non-storage mode");
-    ctx.check(!c->upgradeActive("selftest_inception_tick", "selftest_inception_tick"), "storage upgrade gated");
-    ctx.check(c->upgradeActive("feeding_like_other", "other"), "other upgrades pass");
+    // SB upgradesInContainedBackpacksAreFunctional = false: nested upgrades do nothing.
+    config::mut<InceptionConfig>().upgradesInContainedBackpacksAreFunctional = false;
+    ctx.check(!findCarried(player, inner->uuid()).has_value(), "config switch off");
     int before = test->ticks;
     co_await ctx.ticks(25);
-    ctx.check(test->ticks == before, "gated upgrade does not tick");
-    apples = data("minecraft:apple", 4);
-    ctx.check(upgrade::dispatchPickup(player, apples) == 0, "gated upgrade does not pick up");
-
-    // None: nested backpacks are just storage.
-    setMode(outer, islot, NestedUpgrades::None);
-    ctx.check(!findCarried(player, inner->uuid()).has_value(), "mode none: not reported");
-
-    // Server switch.
-    setMode(outer, islot, NestedUpgrades::All);
-    ctx.check(findCarried(player, inner->uuid()).has_value(), "mode all again");
-    config::mut<InceptionConfig>().nestedUpgradesWork = false;
-    ctx.check(!findCarried(player, inner->uuid()).has_value(), "config switch off");
+    ctx.check(test->ticks == before, "no ticks while off");
 });
 
-ABP_REGISTER_SELFTEST("inception.depth_and_requirements", [](Context& ctx) {
+// SC getInventoryForUpgradeProcessing: main + backpacks inside, in the Inception's inventory order.
+ABP_REGISTER_SELFTEST("inception.upgrade_inventories", [](Context& ctx) {
     ConfigGuard<InceptionConfig> guard;
-    ConfigGuard<GeneralConfig>   general;
-    auto&                        player = ctx.player();
-    auto                         a      = ctx.createBackpack(Tier::Iron);
-    auto                         b      = ctx.createBackpack(Tier::Iron);
-    auto                         c      = ctx.createBackpack(Tier::Leather);
-    ctx.installUpgrade(a, std::string(kId));
-    ctx.installUpgrade(b, std::string(kId));
-    ctx.require(store(ctx, *b, *c) >= 0, "c into b");
-    ctx.require(store(ctx, *a, *b) >= 0, "b into a");
-    ctx.require(ctx.give(player, ctx.backpackItem(*a), 4) == 4, "give a");
-    config::mut<InceptionConfig>().maxDepth = 2;
-    auto cc                                 = findCarried(player, c->uuid());
-    ctx.check(cc && cc->depth == 2 && cc->parent == b->uuid(), "depth 2 found");
-    config::mut<InceptionConfig>().maxDepth = 1;
-    ctx.check(findCarried(player, b->uuid()).has_value(), "depth 1 found with maxDepth 1");
-    ctx.check(!findCarried(player, c->uuid()).has_value(), "depth 2 hidden with maxDepth 1");
-    config::mut<InceptionConfig>().maxDepth = 3;
-    {
-        // The server nesting limit (admin.maxNestingDepth) caps the scan as well.
-        ConfigGuard<admin::AdminConfig> adminGuard;
-        config::mut<admin::AdminConfig>().maxNestingDepth = 1;
-        ctx.check(!findCarried(player, c->uuid()).has_value(), "depth 2 hidden by admin.maxNestingDepth=1");
-        config::mut<admin::AdminConfig>().maxNestingDepth = 0;
-        ctx.check(findCarried(player, c->uuid()).has_value(), "admin limit 0 = unlimited");
-    }
+    auto                         outer = ctx.createBackpack(Tier::Iron);
+    auto                         a     = ctx.createBackpack(Tier::Leather);
+    auto                         b     = ctx.createBackpack(Tier::Leather);
+    ctx.check(upgradeInventories(outer) == std::vector<std::shared_ptr<game::Backpack>>{outer}, "without Inception: just itself");
+    int slot = ctx.installUpgrade(outer, std::string(kId));
+    ctx.require(store(ctx, *outer, *a) >= 0 && store(ctx, *outer, *b) >= 0, "store two backpacks");
+    ctx.check(inventoryOrderOf(*outer) == InventoryOrder::MainFirst, "SB default: main first");
+    auto invs = upgradeInventories(outer);
+    ctx.check(invs.size() == 3 && invs[0] == outer && invs[1] == a && invs[2] == b, "main first, then the backpacks inside");
+    setOrder(outer, slot, InventoryOrder::InceptedFirst);
+    invs = upgradeInventories(outer);
+    ctx.check(invs.size() == 3 && invs[0] == a && invs[1] == b && invs[2] == outer, "incepted first");
+    config::mut<InceptionConfig>().upgradesUseInventoriesOfBackpacksInBackpack = false;
+    ctx.check(upgradeInventories(outer).size() == 1, "config off: only the main inventory");
+});
 
-    // Nesting allowed by the server config, but without Inception: inner upgrades stay inactive.
-    config::mut<GeneralConfig>().allowNesting = true;
-    auto plain                                = ctx.createBackpack(Tier::Leather);
-    auto d                                    = ctx.createBackpack(Tier::Leather);
-    ctx.require(store(ctx, *plain, *d) >= 0, "nesting via general config");
-    ctx.require(ctx.give(player, ctx.backpackItem(*plain), 5) == 5, "give plain");
-    ctx.check(!findCarried(player, d->uuid()).has_value(), "no Inception: nested upgrades inactive");
+// SB InceptionFluidHandler: the tanks of the backpacks inside join the outer's.
+ABP_REGISTER_SELFTEST("inception.contained_tanks", [](Context& ctx) {
+    ConfigGuard<InceptionConfig> guard;
+    auto                         outer = ctx.createBackpack(Tier::Iron);
+    auto                         inner = ctx.createBackpack(Tier::Iron);
+    ctx.installUpgrade(outer, std::string(kId));
+    ctx.installUpgrade(inner, "tank");
+    ctx.require(store(ctx, *outer, *inner) >= 0, "store inner");
+    auto innerTanks = api::backpack::fluidHandler(inner);
+    ctx.require(innerTanks != nullptr, "inner has a tank");
+    ctx.require(innerTanks->fill(api::FluidStack{"minecraft:water", 1000}, false) == 1000, "fill the inner tank");
+    auto combined = api::backpack::fluidHandler(outer);
+    ctx.require(combined != nullptr, "outer sees the inner tank");
+    ctx.check(combined->tanks() == innerTanks->tanks(), "tank count");
+    ctx.check(combined->drainAny(250, true).amount == 250, "water drainable through the outer backpack");
+    config::mut<InceptionConfig>().upgradesInContainedBackpacksAreFunctional = false;
+    ctx.check(api::backpack::fluidHandler(outer) == nullptr, "config off: no tanks");
 });
 
 ABP_REGISTER_SELFTEST("inception.assigns_uuid", [](Context& ctx) {
@@ -240,10 +227,18 @@ ABP_REGISTER_SELFTEST("inception.open_nested_gui", [](Context& ctx) -> ll::coro:
     auto b = ctx.createBackpack(Tier::Iron);
     auto c = ctx.createBackpack(Tier::Leather);
     ctx.installUpgrade(a, std::string(kId));
-    int bInc = ctx.installUpgrade(b, std::string(kId));
-    ctx.require(store(ctx, *b, *c) >= 0, "c into b");
-    int bAt = store(ctx, *a, *b);
+    // SB allows one level only (a backpack with Inception can't be stored): build the three-level
+    // chain the GUI must still cope with through the server's allowNesting option, and give b its
+    // Inception upgrade once it is inside a.
+    int bAt = -1;
+    {
+        ConfigGuard<GeneralConfig> general;
+        config::mut<GeneralConfig>().allowNesting = true;
+        ctx.require(store(ctx, *b, *c) >= 0, "c into b");
+        bAt = store(ctx, *a, *b);
+    }
     ctx.require(bAt >= 0 && bAt < ui::BackpackMenu::kPageSlots, "b into a (first page)");
+    int bInc = ctx.installUpgrade(b, std::string(kId));
     ctx.require(ctx.give(player, ctx.backpackItem(*a), 0) == 0, "give a");
     ctx.require(ui::BackpackMenu::openFor(player, {game::ItemLocation::Kind::Inventory, 0}), "open a");
     mm.forceShown(player);
@@ -374,7 +369,7 @@ ABP_REGISTER_SELFTEST("inception.settings_menu", [](Context& ctx) {
     auto& player = ctx.player();
     auto  bp     = ctx.createBackpack(Tier::Leather);
     int   slot   = ctx.installUpgrade(bp, std::string(kId));
-    ctx.check(nestedUpgradesOf(*bp) == NestedUpgrades::All, "default: all");
+    ctx.check(inventoryOrderOf(*bp) == InventoryOrder::MainFirst, "default: main first");
     auto* type = upgrade::byId(kId);
     ctx.require(type && type->info().hasSettings, "has settings");
     UpgradeContext uctx(bp, slot, &player);
@@ -382,37 +377,25 @@ ABP_REGISTER_SELFTEST("inception.settings_menu", [](Context& ctx) {
     ctx.require(menu != nullptr, "settings menu");
     ctx.require(mm.open(player, menu), "open settings");
     mm.forceShown(player);
-    (void)mm.simulate(
-        player,
-        {
-            Action::Take,
-            {Where::Menu,   13},
-            {Where::Cursor, 0 },
-            1
-    }
-    );
-    ctx.check(nestedUpgradesOf(*bp) == NestedUpgrades::NonStorage, "non-storage selected");
-    (void)mm.simulate(
-        player,
-        {
-            Action::Take,
-            {Where::Menu,   15},
-            {Where::Cursor, 0 },
-            1
-    }
-    );
-    ctx.check(nestedUpgradesOf(*bp) == NestedUpgrades::None, "none selected");
+    (void)mm.simulate(player, {Action::Take, {Where::Menu, 13}, {Where::Cursor, 0}, 1});
+    ctx.check(inventoryOrderOf(*bp) == InventoryOrder::InceptedFirst, "toggled: incepted first");
     ctx.check(
-        bp->data().upgrades[static_cast<std::size_t>(slot)].settings.value("nestedUpgrades", "") == "none",
+        bp->data().upgrades[static_cast<std::size_t>(slot)].settings.value("inventoryOrder", "") == "incepted_first",
         "persisted in settings"
     );
+    // Native tab action (the SB tab's toggle button).
+    bool handled = false;
+    for (auto const& h : net::TabActionRegistry::entries())
+        if (h.upgrade == kId) handled = h.handle(player, uctx, nlohmann::json{{"inception", "toggle"}});
+    ctx.check(handled && inventoryOrderOf(*bp) == InventoryOrder::MainFirst, "tab toggle: main first");
     auto lore = type->describe(player, uctx);
-    ctx.check(lore.size() == 2, "describe lines");
+    ctx.check(lore.size() == 1, "describe: SB tooltip");
+    (void)mm.simulate(player, {Action::Take, {Where::Menu, 13}, {Where::Cursor, 0}, 1});
     // Settings travel with the item.
     auto item = upgrade::remove(bp, slot, &player);
     ctx.require(item.has_value(), "removed (empty backpack)");
     ctx.require(upgrade::install(bp, slot, *item, &player), "reinstalled");
-    ctx.check(nestedUpgradesOf(*bp) == NestedUpgrades::None, "setting kept");
+    ctx.check(inventoryOrderOf(*bp) == InventoryOrder::InceptedFirst, "setting kept");
     mm.close(player);
 });
 

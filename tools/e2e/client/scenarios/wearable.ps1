@@ -1,6 +1,6 @@
 # U19 wearable backpacks in a real client: selftests, then the 3D backpack on the player's back
 # (third-person views), in the hand, on a husk, and opening the worn backpack (right-click on a
-# held backpack, double sneak). Camera views use /camera presets (F5 presses after chat get lost).
+# held backpack). Camera views use /camera presets (F5 presses after chat get lost).
 function Set-View([string]$preset) {
     Invoke-Chat "/camera @s set minecraft:$preset"
     Start-Sleep -Seconds 1
@@ -45,15 +45,8 @@ try {
     Close-Screen
     Invoke-Chat '/replaceitem entity @s slot.weapon.mainhand 0 air'
 
-    # Double sneak opens the worn backpack (real key presses).
-    $mark = Get-LogMark
-    Press-Key 'SHIFT' 120
-    Start-Sleep -Milliseconds 80
-    Press-Key 'SHIFT' 120
-    Wait-LogLine 'menu shown: ' 10 -Since $mark | Out-Null
-    Start-Sleep -Milliseconds 800
-    Save-Screenshot 'double-sneak-menu' | Out-Null
-    Close-Screen
+    # Double sneak (an AlleviatedBackpacks extra) is off by default now, as SB has no such gesture;
+    # the client mod's Open Backpack key (B) opens the worn backpack (companion / world scenarios).
 
     # A husk wearing a backpack (mobs render chest attachables too), seen from a third-person camera.
     Invoke-Chat '/difficulty normal'

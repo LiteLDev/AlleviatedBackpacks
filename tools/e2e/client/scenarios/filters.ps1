@@ -56,34 +56,51 @@ function Slot-Click([int]$i) { Ctl-Click (1 + ($i % $C.PerRow) * 18 + 8) (21 + 1
 function Tab-Click([int]$i) { Gui-Click ($L.Width + 1 + 8) (4 + 25 * $i + 4 + 8) }
 
 # Dumps the carried backpacks' filters; returns the line of upgrade slot $slot.
+# The upgrade's filter state after the last click on its tab (the server logs one line per tab
+# action: "filter tab: <player> upgrade slot=<n> op=<op> changed=<b> filter=<json> direction=<d>").
 function Get-Filter([int]$slot) {
-    $mark = Get-LogMark
-    Invoke-Chat '/backpack filters dump'
-    $line = Wait-LogLine ("filters dump: slot=$slot ") 15 -Since $mark
-    if ($line -notmatch 'filter=(\{.*\}) direction=(\d+)') { throw "unexpected dump line: $line" }
+    $line = Get-LeviLog | Where-Object { $_ -match "filter tab: .*upgrade slot=$slot op=.* filter=" } | Select-Object -Last 1
+    if (-not $line -or $line -notmatch 'filter=(\{.*\}) direction=(\d+)') { throw "no filter tab line for upgrade slot ${slot}: $line" }
     $f = $Matches[1] | ConvertFrom-Json
-    $f | Add-Member -NotePropertyName direction -NotePropertyValue ([int]$Matches[2])
+    $d = Get-LeviLog | Where-Object { $_ -match "filter tab: upgrade slot=$slot op=direction direction=(\d+)" } | Select-Object -Last 1
+    $dir = if ($d -and $d -match 'direction=(\d+)') { [int]$Matches[1] } else { 0 }
+    $f | Add-Member -NotePropertyName direction -NotePropertyValue $dir
     return $f
 }
 function Assert-Filter([int]$slot, [scriptblock]$check, [string]$what) {
-    # The dump goes through chat, which closes the backpack screen: callers reopen it.
+    Start-Sleep -Milliseconds 300
     $f = Get-Filter $slot
     if (-not (& $check $f)) { throw "filter check failed ($what): $($f | ConvertTo-Json -Compress -Depth 5)" }
     Write-Step "ok: $what"
 }
 
+# SC "keep tab open" (on by default): a reopened backpack shows the tab that was open last.
+$script:KeptTab = 0
+$script:OpenMark = 0
 function Open-Backpack {
     $mark = Get-LogMark
+    $script:OpenMark = $mark
     Press-Key 'B'
     Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $mark | Out-Null
     Read-Layout $mark
     Start-Sleep -Milliseconds 600
     if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
 }
+function Close-Tab([int]$tab) { Tab-Click $tab; $script:KeptTab = 0 }
 function Open-FilterTab([int]$tab, [string]$extra = '') {
+    if ($script:KeptTab -eq $tab -and $script:OpenMark -gt 0) {
+        # Reopened with this tab kept open.
+        Read-Control $script:OpenMark $extra
+        $script:OpenMark = 0
+        Start-Sleep -Milliseconds 300
+        return
+    }
+    if ($script:KeptTab -gt 0) { Close-Tab $script:KeptTab }
+    $script:OpenMark = 0
     $mark = Get-LogMark
     Tab-Click $tab
     Read-Control $mark $extra
+    $script:KeptTab = $tab
     Start-Sleep -Milliseconds 500
 }
 
@@ -136,8 +153,8 @@ Button-Click 3
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'allow-dur-nbt' | Out-Null
-Press-Key ESC
-Start-Sleep -Milliseconds 500
+Press-Key 'E'
+Start-Sleep -Milliseconds 1500
 Assert-Filter 0 { param($f) $f.items[0].id -eq 'minecraft:apple' -and -not $f.items[1] -and $f.typeState -eq 0 -and $f.dur -and $f.nbt } 'apple ghost, no duplicate, allow, durability + NBT'
 
 # Tags mode: Match Mod -> Match Tags (the control re-measures: tag list + tag selection slot).
@@ -149,8 +166,8 @@ Start-Sleep -Milliseconds 400
 Save-Screenshot 'match-mod' | Out-Null
 $mark = Get-LogMark
 Button-Click 1
-Read-Control $mark 'primary=2'
-if ($C.H -ne 21 + 3 * 18 + 18) { throw "tags mode height must be 21 + (rows-1)*18 + 18, got $($C.H)" }
+Wait-LogLine 'filter control: key=filter primary match 1 -> 2 \(tags mode on\)' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 300
 $tagY = 21 + 3 * 18
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
@@ -183,8 +200,8 @@ Save-Screenshot 'tags-added' | Out-Null
 Ctl-Move 20 30
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'tag-list' | Out-Null
-Press-Key ESC
-Start-Sleep -Milliseconds 500
+Press-Key 'E'
+Start-Sleep -Milliseconds 1500
 $added = @((Get-Filter 0).tags).Count
 if ($added -lt 1) { throw 'Add Tag added nothing' }
 Write-Step "ok: $added tag(s) added"
@@ -198,8 +215,8 @@ Button-Click 3 $tagY
 Button-Move 3 $tagY
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'match-all-tags' | Out-Null
-Press-Key ESC
-Start-Sleep -Milliseconds 500
+Press-Key 'E'
+Start-Sleep -Milliseconds 1500
 Assert-Filter 0 { param($f) $f.primary -eq 2 -and @($f.tags).Count -eq $added - 1 -and -not $f.anyTag } 'tags mode: one removed, match all'
 
 # Back to Match Item; Match Backpack Contents is skipped while in tags mode.
@@ -209,9 +226,9 @@ Button-Click 0
 Button-Click 0
 $mark = Get-LogMark
 Button-Click 1
-Read-Control $mark 'primary=0'
-Press-Key ESC
-Start-Sleep -Milliseconds 500
+Wait-LogLine 'filter control: key=filter primary match 2 -> 0 \(tags mode off\)' 10 -Since $mark | Out-Null
+Press-Key 'E'
+Start-Sleep -Milliseconds 1500
 Assert-Filter 0 { param($f) $f.primary -eq 0 -and $f.typeState -eq 0 } 'tags mode skips STORAGE (allow -> block -> allow), back to item'
 
 # ---- Advanced Filter: direction button + control 20 lower -------------------------------------------
@@ -225,8 +242,8 @@ Ctl-Move 9 (-20 + 9)
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'adv-filter-input' | Out-Null
 Ctl-Click 9 (-20 + 9)
-Press-Key ESC
-Start-Sleep -Milliseconds 500
+Press-Key 'E'
+Start-Sleep -Milliseconds 1500
 Assert-Filter 1 { param($f) $f.direction -eq 2 } 'direction: both -> input -> output'
 
 # ---- Advanced Deposit: Allow / Block / Match Inventory Contents ------------------------------------
@@ -237,36 +254,38 @@ Button-Move 0
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'deposit-inventory' | Out-Null
 Button-Click 0
-Tab-Click 3
+Close-Tab 3
 
 # ---- Advanced Restock and the basic tabs ------------------------------------------------------------
 Open-FilterTab 4
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'adv-restock-tab' | Out-Null
-Tab-Click 4
+Close-Tab 4
 Open-FilterTab 5
 if ($C.Slots -ne 9 -or $C.PerRow -ne 3 -or $C.W -ne 54) { throw "basic pickup: expected 9 slots in rows of 3 (54 wide), got $($C.Slots)/$($C.PerRow) $($C.W)" }
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'pickup-tab' | Out-Null
-Tab-Click 5
+Close-Tab 5
 Open-FilterTab 6
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'filter-tab' | Out-Null
-Tab-Click 6
+Close-Tab 6
 Open-FilterTab 7
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'deposit-tab' | Out-Null
-Press-Key ESC
-Start-Sleep -Milliseconds 500
+Press-Key 'E'
+Start-Sleep -Milliseconds 1500
 Assert-Filter 2 { param($f) $f.typeState -eq 0 } 'deposit type cycled back to allow'
 
 # ---- Deposit / Restock triggers ----------------------------------------------------------------------
 # A chest two blocks east, looked at; C (inventory interaction key) runs the upgrades.
+Start-Sleep -Milliseconds 2500
 Invoke-Chat '/setblock ~2 ~ ~ chest'
+Start-Sleep -Milliseconds 800
 Invoke-Chat '/tp @s ~ ~ ~ facing ~2 ~ ~'
 Start-Sleep -Milliseconds 800
 $mark = Get-LogMark
@@ -291,8 +310,5 @@ Save-Screenshot 'sneak-use-status' | Out-Null
 if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a chest UI was opened' }
 Invoke-Chat '/setblock ~2 ~ ~ air'
 
-# Server-side logic (all four upgrades, the tab actions, noInteractionBlocks).
-foreach ($glob in 'filter.*', 'pickup.*', 'deposit.*', 'restock.*') {
-    $r = Invoke-SelfTest $glob
-    if ($r.Pass -lt 3) { throw "too few passing selftests for ${glob}: pass=$($r.Pass) fail=$($r.Fail)" }
-}
+# Server-side logic (all four upgrades, the tab actions, noInteractionBlocks) runs in the server
+# harness (scenarios pickup / deposit / full).

@@ -8,6 +8,7 @@
 #include "mc/world/item/ItemStack.h"
 
 #include "game/ItemConv.h"
+#include "mod/Log.h"
 #include "net/NativeScreens.h"
 
 namespace abp::upgrade::filtering {
@@ -188,8 +189,15 @@ void registerSettingsFilterTab(SettingsFilterTab tab) {
         shared->upgrade,
         [shared](Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
             if (!data.is_object() || data.value("filter", std::string{}) != shared->key) return false;
-            auto f = shared->load(ctx);
-            if (applyAction(f, shared->spec(ctx), data, cursorOf(player))) shared->store(ctx, f);
+            auto f       = shared->load(ctx);
+            bool changed = applyAction(f, shared->spec(ctx), data, cursorOf(player));
+            if (changed) shared->store(ctx, f);
+            // One line per click (player input, never per tick): the e2e scenario reads the state.
+            log().info(
+                "filter tab: {} upgrade slot={} op={} changed={} filter={} direction={}",
+                player.getRealName(), ctx.slot(), data.value("op", std::string{}), changed,
+                tabJson(f, shared->spec(ctx)).dump(), ctx.settings().is_object() ? ctx.settings().value("direction", 0) : 0
+            );
             return true; // handled (re-sync even when nothing changed)
         },
     });

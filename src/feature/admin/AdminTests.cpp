@@ -18,8 +18,12 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/Level.h"
+#include "mc/server/SimulatedPlayer.h"
 
+#include "feature/admin/AccessLog.h"
 #include "feature/admin/Admin.h"
+#include "feature/admin/SbConfig.h"
+#include "feature/admin/Sbp.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
@@ -78,31 +82,6 @@ struct Restore {
     explicit Restore(T& r) : ref(r), saved(r) {}
     ~Restore() { ref = saved; }
 };
-
-// ---- rules -----------------------------------------------------------------------------------------
-
-ABP_REGISTER_SELFTEST("admin.deny_list", [](Context& ctx) {
-    auto&   cfg = config::mut<AdminConfig>();
-    Restore keep(cfg.disallowedItems);
-    auto    bp = ctx.createBackpack(Tier::Leather);
-    cfg.disallowedItems = {"dirt", "minecraft:*_wool"};
-    ctx.check(isDisallowed("minecraft:dirt"), "plain id defaults to the minecraft namespace");
-    ctx.check(isDisallowed("minecraft:red_wool"), "glob matches");
-    ctx.check(!isDisallowed("minecraft:stone"), "other items allowed");
-    auto& inv = bp->inventory();
-    ctx.check(inv.insert(data("minecraft:dirt", 5), kPlayerAccess).inserted == 0, "denied item refused (player)");
-    ctx.check(
-        inv.insert(data("minecraft:white_wool", 5), core::AccessContext{core::Source::Pickup}).inserted == 0,
-        "denied item refused (pickup)"
-    );
-    ctx.check(inv.insert(data("minecraft:stone", 5), kPlayerAccess).inserted == 5, "allowed item accepted");
-    ctx.check(
-        inv.insert(data("minecraft:dirt", 1), core::AccessContext{core::Source::Internal}).inserted == 1,
-        "internal moves bypass the deny-list"
-    );
-    cfg.disallowedItems.clear();
-    ctx.check(inv.insert(data("minecraft:dirt", 5), kPlayerAccess).inserted == 5, "deny-list change applies live");
-});
 
 class AdminTestUpgrade : public upgrade::IUpgrade {
 public:
@@ -188,21 +167,241 @@ ABP_REGISTER_SELFTEST("admin.nesting_depth", [](Context& ctx) {
     ctx.check(d->inventory().insert(itemE, kPlayerAccess).inserted == 1, "0 = unlimited");
 });
 
+// ---- rules -----------------------------------------------------------------------------------------
+
+ABP_REGISTER_SELFTEST("admin.deny_list", [](Context& ctx) {
+    auto&   cfg = config::mut<SbServerConfig>();
+    Restore keep(cfg.disallowedItems);
+    auto    bp = ctx.createBackpack(Tier::Leather);
+    cfg.disallowedItems = {"dirt", "minecraft:*_wool"};
+    ctx.check(isDisallowed("minecraft:dirt"), "plain id defaults to the minecraft namespace");
+    ctx.check(isDisallowed("minecraft:red_wool"), "glob matches");
+    ctx.check(!isDisallowed("minecraft:stone"), "other items allowed");
+    auto& inv = bp->inventory();
+    ctx.check(inv.insert(data("minecraft:dirt", 5), kPlayerAccess).inserted == 0, "denied item refused (player)");
+    ctx.check(
+        inv.insert(data("minecraft:white_wool", 5), core::AccessContext{core::Source::Pickup}).inserted == 0,
+        "denied item refused (pickup)"
+    );
+    ctx.check(inv.insert(data("minecraft:stone", 5), kPlayerAccess).inserted == 5, "allowed item accepted");
+    ctx.check(
+        inv.insert(data("minecraft:dirt", 1), core::AccessContext{core::Source::Internal}).inserted == 1,
+        "internal moves bypass the deny-list"
+    );
+    cfg.disallowedItems.clear();
+    ctx.check(inv.insert(data("minecraft:dirt", 5), kPlayerAccess).inserted == 5, "deny-list change applies live");
+});
+
+ABP_REGISTER_SELFTEST("admin.container_items", [](Context& ctx) {
+    auto&   cfg = config::mut<SbServerConfig>();
+    Restore keepDisallowed(cfg.containerItemsDisallowed);
+    Restore keepPlaced(cfg.canBePlacedInContainerItems);
+    Restore keepShulkers(config::mut<GeneralConfig>().allowShulkerBoxes);
+    config::mut<GeneralConfig>().allowShulkerBoxes = true;
+    applyRules();
+    auto bp = ctx.createBackpack(Tier::Leather);
+    // SB default: container items (shulker boxes) fit in backpacks.
+    cfg.containerItemsDisallowed = false;
+    ctx.check(bp->inventory().insert(data("minecraft:red_shulker_box", 1), kPlayerAccess).inserted == 1, "shulker box allowed by default");
+    cfg.containerItemsDisallowed = true;
+    ctx.check(isDisallowed("minecraft:undyed_shulker_box"), "containerItemsDisallowed denies shulker boxes");
+    ctx.check(bp->inventory().insert(data("minecraft:blue_shulker_box", 1), kPlayerAccess).inserted == 0, "shulker box refused");
+    ctx.check(!isDisallowed(game::backpackItemId(Tier::Iron)), "backpacks are not container items");
+    // canBePlacedInContainerItems (default false): backpacks don't go into shulker boxes.
+    auto backpack = ctx.backpackItem(*bp);
+    cfg.canBePlacedInContainerItems = false;
+    ctx.check(!itemFitsContainerItems(backpack), "backpack refused by a shulker box");
+    ctx.check(itemFitsContainerItems(game::ItemConv::make("minecraft:stone")), "stone still fits a shulker box");
+    cfg.canBePlacedInContainerItems = true;
+    ctx.check(itemFitsContainerItems(backpack), "backpack fits a shulker box when allowed");
+});
+
+ABP_REGISTER_SELFTEST("admin.slot_counts", [](Context& ctx) {
+    auto&   cfg = config::mut<SbServerConfig>();
+    Restore keep(cfg.ironBackpack.inventorySlotCount);
+    Restore keepUp(cfg.ironBackpack.upgradeSlotCount);
+    cfg.ironBackpack.inventorySlotCount = 60;
+    cfg.ironBackpack.upgradeSlotCount   = 4;
+    auto bp = ctx.createBackpack(Tier::Iron);
+    ctx.check(bp->inventory().size() == 60, "configured slot count: " + std::to_string(bp->inventory().size()));
+    ctx.check(bp->data().upgrades.size() == 4, "configured upgrade slot count");
+    bp->inventory().set(58, data("minecraft:stone", 1));
+    cfg.ironBackpack.inventorySlotCount = 54;
+    cfg.ironBackpack.upgradeSlotCount   = 2;
+    bp->rebuildHooks();
+    ctx.check(bp->inventory().size() == 60, "never shrinks over items");
+    ctx.check(bp->data().upgrades.size() == 2, "empty upgrade slots are cut");
+    bp->inventory().set(58, {});
+    bp->rebuildHooks();
+    ctx.check(bp->inventory().size() == 54, "shrinks once the cut slots are empty");
+    ctx.check(inventorySlotCount(Tier::Netherite) == 120 && upgradeSlotCount(Tier::Netherite) == 7, "SB defaults");
+    cfg.ironBackpack.inventorySlotCount = 1000;
+    ctx.check(inventorySlotCount(Tier::Iron) == 144, "clamped to SB's range");
+});
+
+ABP_REGISTER_SELFTEST("admin.max_upgrades", [](Context& ctx) {
+    auto test                   = std::make_shared<AdminTestUpgrade>();
+    test->mInfo.maxPerBackpack  = 10;
+    upgrade::ScopedUpgrade scoped(test);
+    auto&                  cfg = config::mut<SbServerConfig>();
+    Restore                keep(cfg.maxUpgradesPerStorage);
+    ctx.check(cfg.maxUpgradesPerStorage == std::vector<std::string>{"stack_upgrades|3", "furnace_upgrades|1", "jukebox_upgrades|1"}, "SB default");
+    cfg.maxUpgradesPerStorage = {"admin_test_group|2"};
+    auto bp = ctx.createBackpack(Tier::Netherite);
+    ctx.check(ctx.installUpgrade(bp, "admin_test_upgrade", 0) == 0, "first");
+    ctx.check(ctx.installUpgrade(bp, "admin_test_upgrade", 1) == 1, "second");
+    std::string reason;
+    ctx.check(!upgrade::canInstall(bp, 2, data("minecraft:structure_void", 1), nullptr, &reason), "third refused by group limit");
+    ctx.check(contains(reason, "Only 2x"), "SC's message: " + reason);
+    cfg.maxUpgradesPerStorage = {"minecraft:structure_void|1"};
+    ctx.check(!upgrade::canInstall(bp, 2, data("minecraft:structure_void", 1), nullptr), "registry name limit");
+    cfg.maxUpgradesPerStorage = {"structure_void|3"};
+    ctx.check(upgrade::canInstall(bp, 2, data("minecraft:structure_void", 1), nullptr), "within the limit");
+});
+
+ABP_REGISTER_SELFTEST("admin.enabled_items", [](Context& ctx) {
+    auto&   cfg = config::mut<ScCommonConfig>();
+    Restore keep(cfg.enabledItems);
+    bool listed = false;
+    for (auto const& e : cfg.enabledItems) listed = listed || e == "alleviatedbackpacks:leather_backpack|true";
+    ctx.check(listed, "enabledItems lists every item with |true");
+    ctx.check(isItemEnabled("alleviatedbackpacks:pickup_upgrade"), "enabled by default");
+    cfg.enabledItems = {"alleviatedbackpacks:pickup_upgrade|false"};
+    ctx.check(!isItemEnabled("alleviatedbackpacks:pickup_upgrade"), "disabled");
+    ctx.check(isItemEnabled("alleviatedbackpacks:magnet_upgrade"), "others unaffected");
+});
+
+ABP_REGISTER_SELFTEST("admin.block_lists", [](Context& ctx) {
+    auto&   cfg = config::mut<SbServerConfig>();
+    Restore keepA(cfg.noInteractionBlocks);
+    Restore keepB(cfg.noConnectionBlocks);
+    Restore keepC(cfg.allBlockConnectionsDisallowed);
+    cfg.noInteractionBlocks = {"minecraft:barrel"};
+    ctx.check(isBlockInteractionDisallowed("barrel") && !isBlockInteractionDisallowed("minecraft:chest"), "noInteractionBlocks");
+    cfg.noConnectionBlocks = {"minecraft:hopper"};
+    ctx.check(isBlockConnectionDisallowed("minecraft:hopper") && !isBlockConnectionDisallowed("minecraft:dropper"), "noConnectionBlocks");
+    cfg.allBlockConnectionsDisallowed = true;
+    ctx.check(isBlockConnectionDisallowed("minecraft:dropper"), "allBlockConnectionsDisallowed");
+});
 ABP_REGISTER_SELFTEST("admin.config_names", [](Context& ctx) {
     auto&   cfg = config::mut<AdminConfig>();
-    Restore keepItems(cfg.disallowedItems);
+    Restore keepItems(config::mut<SbServerConfig>().disallowedItems);
     Restore keepUps(cfg.disabledUpgrades);
     cfg.disabledUpgrades = {"Alleviatedbackpacks:Pickup_Upgrade"};
     ctx.check(isUpgradeDisabled("pickup", "pickup"), "item id style entry, any case");
     cfg.disabledUpgrades = {"MAGNET"};
     ctx.check(isUpgradeDisabled("magnet", "magnet") && !isUpgradeDisabled("pickup", "pickup"), "plain id");
-    cfg.disallowedItems = {"Minecraft:Bundle"};
+    config::mut<SbServerConfig>().disallowedItems = {"Minecraft:Bundle"};
     ctx.check(isDisallowed("minecraft:bundle"), "deny-list ignores case");
+    // Extras SB doesn't have are off / neutral by default.
+    AdminConfig defaults;
+    ctx.check(!defaults.keepBackpacksOnDeath && defaults.maxNestingDepth == 0 && defaults.disabledUpgrades.empty(), "extras off by default");
 });
 
-// ---- holders / list / info / stats -------------------------------------------------------------------
+// ---- access log / sbp ---------------------------------------------------------------------------------
 
-ABP_REGISTER_SELFTEST("admin.track_and_list", [](Context& ctx) -> ll::coro::CoroTask<> {
+ABP_REGISTER_SELFTEST("admin.access_log_on_open", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& player = ctx.player();
+    auto  bp     = ctx.createBackpack(Tier::Gold);
+    bp->data().mainColor   = 0xFFFF5555;
+    bp->data().accentColor = 0xFF5555FF;
+    ctx.require(ctx.give(player, ctx.backpackItem(*bp), 3) == 3, "give backpack");
+    ctx.require(ui::BackpackMenu::openFor(player, {game::ItemLocation::Kind::Inventory, 3}), "open");
+    co_await ctx.ticks(5);
+    auto rec = AccessLog::get().find(bp->uuid());
+    ctx.require(rec.has_value(), "opening logs the access");
+    ctx.check(rec->playerName == player.getRealName(), "player name");
+    ctx.check(rec->backpackItemRegistryName == "alleviatedbackpacks:gold_backpack", "item id: " + rec->backpackItemRegistryName);
+    ctx.check(rec->backpackName == "Gold Backpack", "display name: " + rec->backpackName);
+    ctx.check(rec->clothColor == 0xFFFF5555 && rec->trimColor == 0xFF5555FF, "colours");
+    ctx.check(rec->accessTime > 0 && epochMillis() - rec->accessTime < 60'000, "time");
+    ctx.check(holderOf(*bp).first.has_value(), "opening also records the holder");
+    ui::MenuManager::get().close(player);
+});
+
+ABP_REGISTER_SELFTEST("admin.access_log_cache", [](Context& ctx) {
+    auto& log_ = AccessLog::get();
+    AccessLogRecord r;
+    r.backpackUuid             = "00000000-0000-4000-8000-00000000c0de";
+    r.backpackItemRegistryName = "alleviatedbackpacks:leather_backpack";
+    r.playerName               = "CacheTester";
+    r.backpackName             = "Leather Backpack";
+    r.accessTime               = epochMillis();
+    (void)log_.playerNames(); // cache built now
+    log_.put(r);
+    ctx.check(!log_.playerNames().contains("CacheTester"), "player names are cached for 30 s (SB)");
+    log_.invalidateCache();
+    ctx.check(log_.playerNames().contains("CacheTester"), "visible after the cache refresh");
+    ctx.check(log_.logsForPlayer("CacheTester").size() == 1, "logs for the player");
+    auto back = AccessLogRecord::fromJson(r.toJson());
+    ctx.check(back && *back == r, "record JSON round trip");
+    log_.erase(r.backpackUuid);
+});
+
+ABP_REGISTER_SELFTEST("admin.sbp_list_give", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& player = ctx.player();
+    auto  bp     = ctx.createBackpack(Tier::Diamond);
+    ctx.require(ui::BackpackMenu::openBackpack(player, bp), "open");
+    co_await ctx.ticks(3);
+    ui::MenuManager::get().close(player);
+    ctx.require(AccessLog::get().contains(bp->uuid()), "logged");
+    refreshSbpSuggestions();
+
+    auto all = runCommand("sbp list");
+    ctx.check(all.ok, "sbp list succeeds: " + all.text);
+    ctx.check(contains(all.text, "Backpack Name, Colors, Last Open By, Last Open On"), "SB header: " + all.text);
+    ctx.check(contains(all.text, "Diamond Backpack") && contains(all.text, player.getRealName()), "line: " + all.text);
+    ctx.check(contains(all.text, "Cloth") && contains(all.text, "Trim"), "colour swatches");
+    auto alias = runCommand("sophisticatedbackpacks list");
+    ctx.check(alias.ok, "alias /sophisticatedbackpacks: " + alias.text);
+    auto viaBackpack = runCommand("backpack list");
+    ctx.check(viaBackpack.ok, "/backpack list still works: " + viaBackpack.text);
+
+    AccessLog::get().invalidateCache();
+    auto mine = runCommand("sbp list \"" + player.getRealName() + "\"");
+    ctx.check(mine.ok && contains(mine.text, "Diamond Backpack"), "list <playerName>: " + mine.text);
+
+    // Give to the player: an item bound to the logged uuid.
+    for (int i = 0; i < 36; ++i) game::setItemAt(player, {game::ItemLocation::Kind::Inventory, i}, ItemStack::EMPTY_ITEM());
+    auto r = runCommand("sbp give \"" + player.getRealName() + "\" " + bp->uuid());
+    ctx.check(r.ok && contains(r.text, "Gave backpack to"), "give succeeds: " + r.text);
+    int found = 0;
+    for (auto const& c : game::scanBackpacks(player)) {
+        if (c.uuid == bp->uuid()) {
+            ++found;
+            ctx.check(c.tier == Tier::Diamond, "given item has the logged item id");
+        }
+    }
+    ctx.check(found == 1, "player received an item bound to the uuid");
+    // Several targets: everybody gets one (SB), the dedup logic sorts the copies out later.
+    auto& other = ctx.spawnPlayer();
+    auto  many  = runCommand("sbp give @a " + bp->uuid());
+    ctx.check(many.ok, "several targets: " + many.text);
+    bool otherGot = false;
+    for (auto const& c : game::scanBackpacks(other)) otherGot = otherGot || c.uuid == bp->uuid();
+    ctx.check(otherGot, "second target received it");
+    auto bad = runCommand("sbp give \"" + player.getRealName() + "\" 00000000-0000-4000-8000-000000000000");
+    ctx.check(!contains(bad.text, "Gave backpack"), "unknown uuid gives nothing");
+});
+
+ABP_REGISTER_SELFTEST("admin.permissions", [](Context& ctx) {
+    auto& player = ctx.player();
+    auto& cfg    = config::mut<AdminConfig>();
+    Restore keep(cfg.commandPermissionLevel);
+    cfg.commandPermissionLevel = 4; // owner only: a simulated player never qualifies
+    auto bp = ctx.createBackpack(Tier::Leather);
+    for (std::string const& cmd : std::vector<std::string>{"backpack stats", "backpack cleanup", "backpack remove " + bp->uuid(),
+                                                           "backpack openfor " + bp->uuid(), "backpack list",
+                                                           "backpack removeNonPlayer false", "sbp list", "sbp removeNonPlayer false"}) {
+        auto r = runCommand(cmd, &player);
+        ctx.check(!r.ok, cmd + " must be refused for non-operators: " + r.text);
+    }
+    ctx.check(game::Storage::get().find(bp->uuid()) != nullptr, "nothing removed by a refused command");
+    ctx.check(runCommand("backpack stats").ok, "console may run admin commands");
+    ctx.check(runCommand("sbp list").ok, "console may run /sbp");
+});
+
+ABP_REGISTER_SELFTEST("admin.info_and_stats", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
     auto  held   = ctx.createBackpack(Tier::Gold);
     auto  loose  = ctx.createBackpack(Tier::Copper);
@@ -212,58 +411,12 @@ ABP_REGISTER_SELFTEST("admin.track_and_list", [](Context& ctx) -> ll::coro::Coro
     auto rec = holderOf(*held);
     ctx.require(rec.first && rec.last, "holder recorded");
     ctx.check(rec.last->name == player.getRealName(), "last holder is the player");
-    ctx.check(rec.lastSeen > 0, "last seen set");
     ctx.check(playerAccessed(*held) && !playerAccessed(*loose), "access flags");
-
-    auto all = runCommand("backpack list");
-    ctx.check(all.ok, "list succeeds: " + all.text);
-    ctx.check(contains(all.text, held->uuid()) && contains(all.text, loose->uuid()), "list shows both backpacks");
-    ctx.check(contains(all.text, player.getRealName()), "list shows the holder");
-    auto mine = runCommand("backpack list \"" + player.getRealName() + "\"");
-    ctx.check(mine.ok && contains(mine.text, held->uuid()), "list <holder> shows the held backpack");
-    ctx.check(!contains(mine.text, loose->uuid()), "list <holder> hides others");
-
     auto info = runCommand("backpack info " + held->uuid().substr(0, 13));
     ctx.check(info.ok, "info by uuid prefix: " + info.text);
     ctx.check(contains(info.text, "1/81") && contains(info.text, " 7 "), "info shows fill: " + info.text);
-
     auto st = runCommand("backpack stats");
     ctx.check(st.ok && contains(st.text, "gold="), "stats: " + st.text);
-    auto s = stats();
-    ctx.check(s.stored >= 2 && s.neverAccessed >= 1, "stats counts");
-});
-
-// ---- give / remove / openfor / permissions ---------------------------------------------------------------
-
-ABP_REGISTER_SELFTEST("admin.give_by_uuid", [](Context& ctx) {
-    auto& player = ctx.player();
-    auto  bp     = ctx.createBackpack(Tier::Diamond);
-    auto  r      = runCommand("backpack give \"" + player.getRealName() + "\" " + bp->uuid());
-    ctx.check(r.ok, "give succeeds: " + r.text);
-    bool found = false;
-    for (auto const& c : game::scanBackpacks(player)) {
-        if (c.uuid == bp->uuid()) {
-            found = true;
-            ctx.check(c.tier == Tier::Diamond, "given item has the backpack's tier");
-        }
-    }
-    ctx.check(found, "player received an item bound to the uuid");
-    auto bad = runCommand("backpack give \"" + player.getRealName() + "\" 00000000-0000-4000-8000-000000000000");
-    ctx.check(!bad.ok, "unknown uuid refused");
-    auto shortId = runCommand("backpack give \"" + player.getRealName() + "\" ab");
-    ctx.check(!shortId.ok, "too short uuid refused");
-    (void)ctx.spawnPlayer();
-    auto many = runCommand("backpack give @a " + bp->uuid());
-    ctx.check(!many.ok, "several targets refused (copies share storage): " + many.text);
-});
-
-ABP_REGISTER_SELFTEST("admin.record_on_open", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto& player = ctx.player();
-    auto  bp     = ctx.createBackpack(Tier::Leather);
-    ctx.require(ui::BackpackMenu::openBackpack(player, bp), "open");
-    co_await ctx.ticks(8);
-    ctx.check(holderOf(*bp).first.has_value(), "opening a backpack records the player at once");
-    ui::MenuManager::get().close(player);
 });
 
 ABP_REGISTER_SELFTEST("admin.remove", [](Context& ctx) {
@@ -274,21 +427,6 @@ ABP_REGISTER_SELFTEST("admin.remove", [](Context& ctx) {
     ctx.check(r.ok, "remove succeeds: " + r.text);
     ctx.check(game::Storage::get().find(uuid) == nullptr, "storage gone");
     ctx.check(!runCommand("backpack remove " + uuid).ok, "second remove fails");
-});
-
-ABP_REGISTER_SELFTEST("admin.permissions", [](Context& ctx) {
-    auto& player = ctx.player();
-    auto& cfg    = config::mut<AdminConfig>();
-    Restore keep(cfg.commandPermissionLevel);
-    cfg.commandPermissionLevel = 4; // owner only: a simulated player never qualifies
-    auto bp = ctx.createBackpack(Tier::Leather);
-    for (std::string const& cmd : std::vector<std::string>{"backpack list", "backpack stats", "backpack removenonplayer", "backpack cleanup",
-                            "backpack remove " + bp->uuid(), "backpack openfor " + bp->uuid()}) {
-        auto r = runCommand(cmd, &player);
-        ctx.check(!r.ok, cmd + " must be refused for non-operators: " + r.text);
-    }
-    ctx.check(game::Storage::get().find(bp->uuid()) != nullptr, "nothing removed by a refused command");
-    ctx.check(runCommand("backpack stats").ok, "console may run admin commands");
 });
 
 ABP_REGISTER_SELFTEST("admin.openfor", [](Context& ctx) -> ll::coro::CoroTask<> {
@@ -310,30 +448,36 @@ ABP_REGISTER_SELFTEST("admin.openfor", [](Context& ctx) -> ll::coro::CoroTask<> 
     ctx.check(mm.shownItem(player, 0).getTypeName() == "minecraft:emerald", "contents visible to the admin");
     co_await ctx.ticks(8);
     ctx.check(!holderOf(*bp).first.has_value(), "inspecting does not make the admin a holder");
+    ctx.check(!AccessLog::get().contains(bp->uuid()), "nor an access log entry");
     mm.close(player);
     ctx.check(!runCommand("backpack openfor " + bp->uuid()).ok, "console can't open a GUI");
 });
 
 // ---- maintenance ---------------------------------------------------------------------------------------
 
-ABP_REGISTER_SELFTEST("admin.removenonplayer", [](Context& ctx) -> ll::coro::CoroTask<> {
+ABP_REGISTER_SELFTEST("admin.remove_non_player", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player  = ctx.player();
-    auto  held    = ctx.createBackpack(Tier::Leather);
+    auto  opened  = ctx.createBackpack(Tier::Leather);
     auto  mobLoot = ctx.createBackpack(Tier::Leather);
+    auto  empty   = ctx.createBackpack(Tier::Leather);
     mobLoot->inventory().insert(data("minecraft:bone", 4), core::AccessContext{core::Source::Internal});
-    ctx.require(ctx.give(player, ctx.backpackItem(*held), 5) == 5, "give backpack");
-    co_await ctx.ticks(config::get<AdminConfig>().holderScanInterval + 5);
-    ctx.require(playerAccessed(*held), "held backpack recorded");
-    // Taken out of the inventory again: still player-owned.
-    game::setItemAt(player, {game::ItemLocation::Kind::Inventory, 5}, ItemStack::EMPTY_ITEM());
-    auto heldId = held->uuid();
-    auto mobId  = mobLoot->uuid();
-    held.reset();
+    ctx.require(ui::BackpackMenu::openBackpack(player, opened), "open");
+    co_await ctx.ticks(3);
+    ui::MenuManager::get().close(player);
+    auto openedId = opened->uuid();
+    auto mobId    = mobLoot->uuid();
+    auto emptyId  = empty->uuid();
+    opened.reset();
     mobLoot.reset();
-    auto r = runCommand("backpack removenonplayer");
-    ctx.check(r.ok, "removenonplayer succeeds: " + r.text);
-    ctx.check(game::Storage::get().find(mobId) == nullptr, "never-carried backpack removed");
-    ctx.check(game::Storage::get().find(heldId) != nullptr, "player backpack kept");
+    empty.reset();
+    auto r = runCommand("sbp removeNonPlayer true");
+    ctx.check(r.ok && contains(r.text, "non player backpacks"), "removeNonPlayer true: " + r.text);
+    ctx.check(game::Storage::get().find(emptyId) == nullptr, "empty never-opened backpack removed");
+    ctx.check(game::Storage::get().find(mobId) != nullptr, "never-opened backpack with items kept (onlyWithEmptyInventory)");
+    r = runCommand("sbp removeNonPlayer false");
+    ctx.check(r.ok, "removeNonPlayer false: " + r.text);
+    ctx.check(game::Storage::get().find(mobId) == nullptr, "never-opened backpack with items removed");
+    ctx.check(game::Storage::get().find(openedId) != nullptr, "opened backpack kept");
 });
 
 ABP_REGISTER_SELFTEST("admin.cleanup", [](Context& ctx) {
@@ -355,8 +499,8 @@ ABP_REGISTER_SELFTEST("admin.cleanup", [](Context& ctx) {
 // ---- config reload -------------------------------------------------------------------------------------
 
 ABP_REGISTER_SELFTEST("admin.reload", [](Context& ctx) {
-    auto path = config::configDir() / "admin.json";
-    ctx.require(std::filesystem::exists(path), "config/admin.json exists");
+    auto path = config::configDir() / "sophisticatedbackpacks-server.json";
+    ctx.require(std::filesystem::exists(path), "config/sophisticatedbackpacks-server.json exists");
     std::string original;
     {
         std::ifstream in(path, std::ios::binary);
@@ -365,7 +509,8 @@ ABP_REGISTER_SELFTEST("admin.reload", [](Context& ctx) {
         original = ss.str();
     }
     auto j = nlohmann::json::parse(original, nullptr, false);
-    ctx.require(j.is_object(), "admin.json is JSON");
+    ctx.require(j.is_object(), "the server config is JSON");
+    ctx.check(j.contains("entityBackpackAdditions") && j.contains("nerfs") && j.contains("maxUpgradesPerStorage"), "SB sections present");
     j["disallowedItems"] = {"minecraft:cobweb"};
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);

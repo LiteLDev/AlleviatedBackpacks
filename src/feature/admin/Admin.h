@@ -17,37 +17,51 @@ class Backpack;
 
 namespace abp::admin {
 
-/// `config/admin.json`: server rules and admin commands.
+/// `config/admin.json`: AlleviatedBackpacks' own admin settings. Sophisticated Backpacks' server
+/// rules (disallowed items, slot counts, nerfs, ...) live in `sophisticatedbackpacks-server.json`
+/// (see SbConfig.h); the keys here are extras SB doesn't have, all off / neutral by default.
 struct AdminConfig {
-    int version = 1;
-    /// Minimum command permission level for the admin sub-commands of `/backpack` (list, give by
-    /// uuid, remove, removenonplayer, openfor, info <uuid>, stats, cleanup):
-    /// 0 = any player, 1 = operators (default), 2 = admin, 3 = host, 4 = owner/console.
+    int version = 2;
+    /// Minimum command permission level for the admin extras of `/backpack` (info <uuid>, remove,
+    /// openfor, stats, cleanup): 0 = any player, 1 = operators (default), 2 = admin, 3 = host,
+    /// 4 = owner/console. `/sbp` always needs operator rights (SB: op level 2).
     int commandPermissionLevel = 1;
-    /// Items that can't be put into backpacks (by players, pickup, automation or upgrades).
-    /// Item ids or globs (`*`, `?`); ids without a namespace mean "minecraft:".
-    /// Example: ["minecraft:bundle", "minecraft:*_shulker_box", "somemod:*"]. Default: none (as SB).
+    /// Deprecated (kept so existing deny-lists keep working): merged with SB's `disallowedItems` in
+    /// `sophisticatedbackpacks-server.json`, where new entries belong.
     std::vector<std::string> disallowedItems{};
     /// Upgrade ids (or groups) that are disabled on this server: they can't be installed and
-    /// installed ones stop working (no ticks, no pickups, no filters) until re-enabled.
+    /// installed ones stop working (no ticks, no pickups, no filters) until re-enabled. Not in SB
+    /// (Sophisticated Core's `enabledItems` disables crafting instead); default: none.
     std::vector<std::string> disabledUpgrades{};
     /// Keep backpacks on death: carried backpacks are not dropped and come back on respawn.
-    /// Default off (as SB). Ignored when the keepInventory game rule is on.
+    /// Not in SB; default off. Ignored when the keepInventory game rule is on.
     bool keepBackpacksOnDeath = false;
-    /// Max levels of backpacks inside backpacks when nesting is allowed (Inception upgrade or
-    /// `general.allowNesting`). 1 = a backpack may hold backpacks that hold none. 0 = unlimited.
-    int maxNestingDepth = 3;
-    /// Ticks between scans that record which player carries which backpack (for `/backpack list`
-    /// and `/backpack removenonplayer`).
+    /// Max levels of backpacks inside backpacks (Inception upgrade or `general.allowNesting`).
+    /// Not in SB (no limit there); default 0 = unlimited.
+    int maxNestingDepth = 0;
+    /// Ticks between scans that record which player carries which backpack (`/backpack info`).
     int holderScanInterval = 20;
 };
 
 // ---- rules ----------------------------------------------------------------------------------------
 
-/// True if `itemId` matches the configured deny-list.
+/// True if `itemId` may not go into backpacks: SB `disallowedItems` (ids, or globs `*`/`?`; no
+/// namespace means "minecraft:"), or a container item (shulker box) while
+/// `containerItemsDisallowed` is on.
 [[nodiscard]] bool isDisallowed(std::string_view itemId);
 /// True if the upgrade id or group is disabled by config.
 [[nodiscard]] bool isUpgradeDisabled(std::string_view id, std::string_view group);
+/// SB `maxUpgradesPerStorage`: false (and `reason`, SC's "Only %dx %s can be used in %s") when one
+/// more upgrade (item id `upgradeItemId`, group `group`) would exceed a configured maximum.
+[[nodiscard]] bool withinMaxUpgrades(
+    game::Backpack const& backpack,
+    std::string_view      upgradeItemId,
+    std::string_view      group,
+    Player*               player,
+    std::string*          reason
+);
+/// "Iron Backpack" (the item name of a tier, in `player`'s language when given).
+[[nodiscard]] std::string backpackDisplayName(core::Tier tier, Player const* player = nullptr);
 /// How many levels of backpacks the backpack `uuid` contains (0 = none). Stops counting above `limit`.
 [[nodiscard]] int nestedDepth(std::string const& uuid, int limit);
 /// Rebuilds the hooks of every loaded backpack (after a rules change).
@@ -71,12 +85,13 @@ struct HolderRecord {
 void recordHolder(game::Backpack& backpack, Player& player);
 [[nodiscard]] HolderRecord holderOf(game::Backpack const& backpack);
 /// The backpack is being inspected by an admin (`/backpack openfor`): viewing it in the GUI does not
-/// make the admin a holder.
+/// make the admin a holder, nor an access log entry.
 void markInspected(std::string const& uuid);
+[[nodiscard]] bool isInspected(std::string const& uuid);
 /// Opens `backpack`'s GUI for `player` after `ticks` server ticks (lets the chat screen that ran
 /// the command close first; a container opened while chat is still up is ignored by the client).
 void openLater(Player& player, std::shared_ptr<game::Backpack> backpack, std::string title, int ticks);
-/// A player has carried this backpack (or it existed before access tracking started).
+/// A player has opened this backpack (SB access log), carried it, or it existed before tracking.
 [[nodiscard]] bool playerAccessed(game::Backpack const& backpack);
 
 // ---- queries / maintenance ------------------------------------------------------------------------
@@ -102,14 +117,21 @@ resolveUuid(std::string const& input, std::string* errorKey = nullptr, std::stri
 /// Every stored backpack (optionally only those whose first/last holder is `holderName`, case-insensitive).
 [[nodiscard]] std::vector<Summary> listBackpacks(std::string const& holderName = {});
 
-/// Removes stored backpacks no player ever carried (mob or otherwise spawned ones; SB's
-/// "removenonplayer"). Returns the removed uuids.
-std::vector<std::string> removeNonPlayer();
+/// SB `/sbp removeNonPlayer <onlyWithEmptyInventory>`: removes stored backpacks no player ever
+/// opened (no access log record), with `onlyWithEmptyInventory` only those holding nothing (no
+/// items, no upgrades, no other data). Linked-storage groups and backpacks in use are kept.
+/// Returns the removed uuids.
+std::vector<std::string> removeNonPlayer(bool onlyWithEmptyInventory = false);
 /// Removes stored backpacks that hold nothing (no items, no upgrades, default colours) and that
 /// nobody is using right now. Items bound to them get fresh storage on next open. Returns the uuids.
 std::vector<std::string> cleanupEmpty();
 /// Uuids carried right now by online players.
 [[nodiscard]] std::vector<std::string> carriedNow();
+
+/// Storage uuids that maintenance must never delete (e.g. linked-storage groups). Providers are
+/// registered by other units at static init.
+using ProtectedUuidProvider = std::vector<std::string> (*)();
+void addProtectedUuidProvider(ProtectedUuidProvider provider);
 
 struct Stats {
     std::size_t stored = 0;

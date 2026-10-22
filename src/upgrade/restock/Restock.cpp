@@ -2,6 +2,7 @@
 // upgrade's filter lets through from that container into the backpack.
 
 #include <algorithm>
+#include <limits>
 
 #include "mc/world/Container.h"
 #include "mc/world/actor/player/Player.h"
@@ -61,6 +62,7 @@ public:
             .nameFallback = advanced ? "Advanced Restock Upgrade" : "Restock Upgrade",
             .tier         = advanced ? UpgradeTier::Advanced : UpgradeTier::Basic,
             .group        = "restock",
+            .maxPerBackpack = std::numeric_limits<int>::max(), // SB: no limit
             .hasSettings  = true,
         };
     }

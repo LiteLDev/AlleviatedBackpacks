@@ -124,6 +124,7 @@ private:
     int                      mSelectedToRemove = 0;
 
     float mLastHeight   = -1;
+    int   mLastPrimary  = -1;
     bool  mSizeChanged  = false;
 };
 

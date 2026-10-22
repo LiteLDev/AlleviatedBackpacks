@@ -66,6 +66,11 @@ TypeGate& typeGate() {
     return gate;
 }
 
+InstallGate& installGate() {
+    static InstallGate gate;
+    return gate;
+}
+
 std::vector<std::pair<std::string, RuleBuilder>>& ruleBuilders() {
     static std::vector<std::pair<std::string, RuleBuilder>> builders;
     return builders;
@@ -163,6 +168,8 @@ void IUpgrade::openSettings(Player& player, UpgradeContext const& ctx) {
 
 void setTypeGate(TypeGate gate) { typeGate() = std::move(gate); }
 
+void setInstallGate(InstallGate gate) { installGate() = std::move(gate); }
+
 bool typeAllowed(IUpgrade const& upgrade) {
     auto const& gate = typeGate();
     return !gate || gate(upgrade);
@@ -238,6 +245,7 @@ bool canInstall(
         why = message(player, "abp.upgrade.error.max", "This backpack already has the maximum of this upgrade.");
         return false;
     }
+    if (auto const& gate = installGate(); gate && !gate(backpack, *type, player, why)) return false;
     return type->canInstallItem(UpgradeContext(backpack, slot, player), item.withCount(1), why);
 }
 
