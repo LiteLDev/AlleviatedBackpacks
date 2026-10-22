@@ -176,7 +176,8 @@ Gui-Move 100 3
 Shot 'basic-void-tab'
 Tab-Click 7
 $mark = Get-LogMark
-Press-Key 'E'
+# ESC, not E: the E key also reaches the game after the native screen closed (emote wheel).
+Press-Key ESC
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 2000
 Save-Screenshot 'closed' | Out-Null
