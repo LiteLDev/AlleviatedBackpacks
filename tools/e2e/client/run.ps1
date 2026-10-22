@@ -79,9 +79,16 @@ $scenarioFile = Join-Path $PSScriptRoot "scenarios/$Scenario.ps1"
 if (-not (Test-Path $scenarioFile)) { throw "Unknown scenario: $scenarioFile" }
 if (-not $ModDir) { $ModDir = Join-Path $script:RepoRoot "bin/client/$script:ModName" }
 $script:Unit = $Scenario
+# The output folder is fixed once the game lock (and so the instance slot) is ours: slot 1 keeps
+# out/<scenario>, slots 2.. use out/<scenario>-slot<N> so parallel runs of one scenario don't collide.
 $outDir = Join-Path $script:OutRoot $Scenario
-if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
-New-Item -ItemType Directory -Force $outDir | Out-Null
+function Set-RunOutDir {
+    $script:Unit = if ($script:InstanceSlot -gt 1) { "$Scenario-slot$($script:InstanceSlot)" } else { $Scenario }
+    $dir = Join-Path $script:OutRoot $script:Unit
+    if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    return $dir
+}
 
 $failures = [System.Collections.Generic.List[string]]::new()
 $script:Mode   = $Mode
@@ -102,7 +109,9 @@ function Start-RemoteHost {
     $env:ABP_E2E_HOST_OWNER_PID = "$PID"
     $serverRun = Join-Path $PSScriptRoot '../server/run.ps1'
     $harnessLog = Join-Path $outDir 'host-harness.log'
-    $script:HostProc = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', $serverRun, '-Scenario', 'client-host', '-Quiet', '-TimeoutSec', '7200') `
+    # Own server output folder per client run (out/client-host-<unit>), so parallel remote runs don't collide.
+    $script:HostOutName = "client-host-$script:Unit"
+    $script:HostProc = Start-Process pwsh -ArgumentList @('-NoProfile', '-File', $serverRun, '-Scenario', 'client-host', '-OutName', $script:HostOutName, '-Quiet', '-TimeoutSec', '7200') `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $harnessLog -RedirectStandardError (Join-Path $outDir 'host-harness.err')
     Write-Step "starting the BDS host (pid $($script:HostProc.Id))"
     $ready = Join-Path $script:HostDir 'ready.json'
@@ -128,7 +137,7 @@ function Start-RemoteHost {
     }
     $info = Get-Content $ready -Raw | ConvertFrom-Json
     if (-not $info.port) { throw "bad $ready" }
-    $script:HostLog = Join-Path $PSScriptRoot '../server/out/client-host/server.log'
+    $script:HostLog = Join-Path $PSScriptRoot "../server/out/$script:HostOutName/server.log"
     Write-Step "BDS host ready on port $($info.port) (slot $($info.slot))"
     return $info
 }
@@ -150,6 +159,7 @@ try {
     while ($true) {
         $left = if ($LockTimeoutMinutes -gt 0) { [Math]::Max(1, [int][Math]::Ceiling(($lockDeadline - (Get-Date)).TotalMinutes)) } else { 0 }
         Enter-E2ELock -TimeoutMinutes $left -Slots $slots
+        $outDir = Set-RunOutDir
         if (-not $remote) { break }
         try { $hostInfo = Start-RemoteHost } catch { Exit-E2ELock; throw }
         if ($hostInfo) { break }
@@ -250,7 +260,7 @@ try {
         } else {
             Request-HostStop
             if (-not $hp.WaitForExit(120000)) { $hp.Kill($true); $failures.Add('BDS host did not stop') }
-            elseif ($hp.ExitCode -ne 0) { $failures.Add("BDS host failed (exit $($hp.ExitCode), see tools/e2e/server/out/client-host/)") }
+            elseif ($hp.ExitCode -ne 0) { $failures.Add("BDS host failed (exit $($hp.ExitCode), see tools/e2e/server/out/$script:HostOutName/)") }
         }
         Remove-Item Env:ABP_E2E_HOST_DIR, Env:ABP_E2E_HOST_OWNER_PID -ErrorAction SilentlyContinue
     }

@@ -32,6 +32,7 @@ param(
     [string[]]$Property = @(),         # extra server.properties overrides: -Property gamemode=creative,difficulty=easy
     [string]$ModDir,                   # default: <repo>/bin/server/AlleviatedBackpacks
     [int]$Slot = -1,                   # force a specific slot
+    [string]$OutName,                  # output folder name under out/ (default: the scenario name)
     [switch]$Quiet                     # do not echo server output
 )
 $ErrorActionPreference = 'Stop'
@@ -41,7 +42,8 @@ $script:EchoOutput = -not $Quiet
 $scenarioFile = Join-Path $PSScriptRoot "scenarios/$Scenario.ps1"
 if (-not (Test-Path $scenarioFile)) { throw "Unknown scenario: $scenarioFile" }
 if (-not $ModDir) { $ModDir = Join-Path $script:RepoRoot "bin/server/$script:ModName" }
-$outDir = Join-Path $PSScriptRoot "out/$Scenario"
+if (-not $OutName) { $OutName = $Scenario }
+$outDir = Join-Path $PSScriptRoot "out/$OutName"
 if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $script:Unit = $Scenario
@@ -109,7 +111,7 @@ try {
         $crashDirs = @(Join-Path $script:SlotDir 'logs\crash') | Where-Object { Test-Path $_ }
         $crashFiles = @($crashDirs | ForEach-Object { Get-ChildItem $_ -Recurse -File })
         if ($crashFiles) {
-            $failures.Add("CrashLogger wrote $($crashFiles.Count) crash file(s) (copied to out/$Scenario/crash)")
+            $failures.Add("CrashLogger wrote $($crashFiles.Count) crash file(s) (copied to out/$OutName/crash)")
             New-Item -ItemType Directory -Force (Join-Path $outDir 'crash') | Out-Null
             $crashFiles | Copy-Item -Destination (Join-Path $outDir 'crash')
         }

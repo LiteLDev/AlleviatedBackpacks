@@ -493,7 +493,7 @@ function Start-LogSession {
     $script:LogPos = if (Test-Path $script:LogFile) { (Get-Item $script:LogFile).Length } else { 0L }
 }
 
-# Remote modes: the BDS console log (tools/e2e/server/out/client-host/server.log) is merged into
+# Remote modes: the BDS console log (tools/e2e/server/out/client-host-<unit>/server.log) is merged into
 # the session log (lines prefixed "[host] "), so scenarios wait for server-side lines the same
 # way in every mode.
 $script:HostLog    = $null
