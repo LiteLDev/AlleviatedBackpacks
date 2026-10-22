@@ -178,7 +178,6 @@ V-Click 'container:0' -Right
 Wait-LogLine 'key action: .* stash at container:0: 10 moved' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 600
 Save-Screenshot 'chest-stashed' | Out-Null
-V-Click 'inventory:0'                       # A back into its slot
 Start-Sleep -Milliseconds 300
 # Cursor item onto the backpack in the chest (never opened: SB assumes space).
 V-Click 'inventory:4'                       # diamonds
@@ -256,8 +255,17 @@ $mark = Get-LogMark
 V-Click 'inventory:3' -Right
 Wait-LogLine 'key action: .* stash at inventory:3: 16 moved' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 400
-V-Click 'inventory:0'
-Start-Sleep -Milliseconds 300
+# Fresh items again (placing a wearable backpack back by click equips it in this setup; not ours).
+Press-Key 'E'
+Start-Sleep -Milliseconds 800
+Invoke-Chat '/clear @s'
+$mark = Get-LogMark
+Invoke-Chat '/backpack input setup'
+Wait-LogLine 'input setup: A=' 15 -Since $mark | Out-Null
+Press-Key '9'
+$mark = Get-LogMark
+Open-Inventory
+Read-VanillaSlots $mark
 # B over A: opens it from the inventory; B again goes back to the inventory screen.
 V-Move 'inventory:0'
 Start-Sleep -Milliseconds 300
