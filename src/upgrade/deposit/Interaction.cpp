@@ -5,7 +5,10 @@
 // those upgrades against that inventory instead of the normal use: neither the container nor the
 // backpack GUI opens. The player sees "Deposited N stacks" / "Restocked N stacks" above the hotbar.
 
+#include <algorithm>
 #include <chrono>
+#include <string>
+#include <vector>
 #include <cstdint>
 #include <unordered_map>
 
@@ -20,6 +23,7 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockSource.h"
+#include "mc/world/level/block/Block.h"
 
 #include "game/BackpackItem.h"
 #include "game/Storage.h"
@@ -35,12 +39,15 @@ namespace abp::upgrade::transfer {
 
 /// `config/container_interaction.json`
 struct InteractionConfig {
-    int  version = 1;
+    int  version = 2;
     /// Like the Java mod, only sneak + use runs Deposit / Restock (a plain use opens the
     /// container as usual). false: any use of the backpack on a container runs them.
     bool requireSneak = true;
     /// Minimum time between two runs for one player (holding the use button repeats the use).
     int cooldownMs = 300;
+    /// SB `noInteractionBlocks`: blocks that inventory interaction upgrades can't interact with,
+    /// e.g. "minecraft:shulker_box" (default: none).
+    std::vector<std::string> noInteractionBlocks{};
 };
 
 namespace {
@@ -52,6 +59,15 @@ bool hasInteractionUpgrade(std::shared_ptr<game::Backpack> const& bp) {
 }
 
 } // namespace
+
+bool interactionDisallowed(Block const& block) {
+    auto const& list = config::get<InteractionConfig>().noInteractionBlocks;
+    if (list.empty()) return false;
+    auto name = block.getTypeName();
+    return std::find(list.begin(), list.end(), name) != list.end();
+}
+
+bool interactionDisallowed(BlockSource& region, BlockPos const& pos) { return interactionDisallowed(region.getBlock(pos)); }
 
 class ContainerInteraction {
 public:
@@ -99,6 +115,8 @@ public:
         if (!uuid || !game::Storage::get().available()) return false;
         auto bp = game::Storage::get().find(*uuid);
         if (!bp || !hasInteractionUpgrade(bp)) return false;
+        // SB InventoryInteractionHelper: no interaction with blocks in noInteractionBlocks.
+        if (interactionDisallowed(player.getDimensionBlockSource(), ev.blockPos())) return false;
         auto container = player.getDimensionBlockSource().tryGetContainer(ev.blockPos());
         if (!container) return false;
 
@@ -179,8 +197,8 @@ ABP_REGISTER_SELFTEST("deposit.use_on_container", [](Context& ctx) -> ll::coro::
     auto const& last = module.lastResult();
     ctx.check(last.handled && last.deposited.stacks == 2 && last.restocked.stacks == 1, "result counts");
     ctx.check(
-        last.message.find("2") != std::string::npos && last.message.find("1") != std::string::npos,
-        "message mentions the stack counts: " + last.message
+        last.message.find("1") != std::string::npos && last.message.find("restocked") != std::string::npos,
+        "the last upgrade's status message (SB shows each in turn): " + last.message
     );
     ctx.check(ui::MenuManager::get().current(sp) == nullptr, "the backpack GUI did not open");
     ctx.check(game::isBackpack(sp.getInventory().getItem(0)), "the backpack stays in hand");

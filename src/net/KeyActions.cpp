@@ -77,6 +77,8 @@ bool openAt(Player& player, nlohmann::json const& body) {
 bool interact(Player& player) {
     auto hit = player.traceRay(kReach, false, true);
     if (hit.mType != HitResultType::Tile) return false;
+    // SB InventoryInteractionHelper: no interaction with blocks in noInteractionBlocks.
+    if (upgrade::transfer::interactionDisallowed(player.getDimensionBlockSource(), hit.mBlock)) return false;
     auto container = player.getDimensionBlockSource().tryGetContainer(hit.mBlock);
     if (!container) return false;
     for (auto const& [carried, bp] : ranked(player)) {

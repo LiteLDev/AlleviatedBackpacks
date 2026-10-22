@@ -8,7 +8,9 @@
 
 #include "mc/world/actor/player/Player.h"
 
+#include "game/Backpack.h"
 #include "game/ItemConv.h"
+#include "net/NativeScreens.h"
 #include "mod/I18n.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
@@ -40,12 +42,12 @@ void setDirection(UpgradeContext const& ctx, Direction d) {
 std::string directionName(Player& player, Direction d) {
     switch (d) {
     case Direction::Input:
-        return trFor(player, "abp.filter_upgrade.direction.input", "Input only");
+        return trFor(player, "abp.filter_upgrade.direction.input", "Input");
     case Direction::Output:
-        return trFor(player, "abp.filter_upgrade.direction.output", "Output only");
+        return trFor(player, "abp.filter_upgrade.direction.output", "Output");
     case Direction::Both:
     default:
-        return trFor(player, "abp.filter_upgrade.direction.both", "Input and output");
+        return trFor(player, "abp.filter_upgrade.direction.both", "Input & Output");
     }
 }
 
@@ -103,17 +105,22 @@ public:
     void attach(UpgradeContext const& ctx, core::BackpackInventory& inv) override {
         auto filter = filtering::load(ctx, mInfo.tier);
         auto dir    = directionOf(ctx);
+        // SC FilterUpgradeWrapper: a ContentsFilterLogic (STORAGE = items already in the backpack).
+        auto passes = [filter, weak = std::weak_ptr<game::Backpack>(ctx.backpackPtr())](core::ItemStackData const& item) {
+            if (!filter.filterByStorage) return filter.passes(item, &filtering::matcher());
+            auto bp = weak.lock();
+            return bp && filtering::matchesContents(filter, *bp, item);
+        };
         if (dir != Direction::Output) {
-            inv.addInsertFilter(ctx.hookOwner(), kPriority, [filter](core::InsertQuery const& q) {
+            inv.addInsertFilter(ctx.hookOwner(), kPriority, [passes](core::InsertQuery const& q) {
                 if (q.ctx.source != core::Source::Automation) return core::InsertVerdict::Allow;
-                return filter.passes(q.stack, &game::ItemConv::tags()) ? core::InsertVerdict::Allow
-                                                                       : core::InsertVerdict::Deny;
+                return passes(q.stack) ? core::InsertVerdict::Allow : core::InsertVerdict::Deny;
             });
         }
         if (dir != Direction::Input) {
-            inv.addExtractFilter(ctx.hookOwner(), kPriority, [filter](core::ExtractQuery const& q) {
+            inv.addExtractFilter(ctx.hookOwner(), kPriority, [passes](core::ExtractQuery const& q) {
                 if (q.ctx.source != core::Source::Automation) return true;
-                return filter.passes(q.stack, &game::ItemConv::tags());
+                return passes(q.stack);
             });
         }
     }
@@ -171,3 +178,45 @@ public:
 
 ABP_REGISTER_UPGRADE(abp::upgrade::filter::FilterUpgrade);
 ABP_REGISTER_UPGRADE(abp::upgrade::filter::AdvancedFilterUpgrade);
+
+// ---- native tab (client: direction button at +3,+24, FilterTab "filter" at +3,+44) --------------
+
+namespace abp::upgrade::filter {
+namespace {
+UpgradeTier tierOf(UpgradeContext const& ctx) {
+    auto* type = upgradeFor(ctx.state().item);
+    return type ? type->info().tier : UpgradeTier::Basic;
+}
+
+[[maybe_unused]] bool const kTabRegistered = [] {
+    filtering::registerSettingsFilterTab(filtering::SettingsFilterTab{
+        .upgrade = "filter",
+        .key     = "filter",
+        .spec    = [](UpgradeContext const& ctx) { return filtering::specFor("filter", tierOf(ctx)); },
+        .load    = [](UpgradeContext const& ctx) { return filtering::load(ctx, tierOf(ctx)); },
+        .store   = [](UpgradeContext const& ctx, core::Filter const& f) { filtering::store(ctx, tierOf(ctx), f); },
+    });
+    return true;
+}();
+} // namespace
+} // namespace abp::upgrade::filter
+
+ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{
+    "filter",
+    [](Player& player, abp::upgrade::UpgradeContext const& ctx) {
+        using namespace abp::upgrade;
+        auto j         = filtering::tabTexts(player, "filter", filter::tierOf(ctx) == UpgradeTier::Advanced);
+        j["direction"] = static_cast<int>(filter::directionOf(ctx));
+        return j;
+    },
+});
+ABP_REGISTER_TAB_ACTION(abp::net::TabActionHandler{
+    "filter",
+    [](Player&, abp::upgrade::UpgradeContext const& ctx, nlohmann::json const& data) {
+        using namespace abp::upgrade::filter;
+        if (!data.is_object() || data.value("op", std::string{}) != "direction") return false;
+        // SC Direction.next(): BOTH -> INPUT -> OUTPUT.
+        setDirection(ctx, static_cast<Direction>((static_cast<int>(directionOf(ctx)) + 1) % 3));
+        return true;
+    },
+});

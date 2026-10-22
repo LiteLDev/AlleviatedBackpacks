@@ -1,4 +1,8 @@
 {
   "abp.upgrade.pickup.name": "Pickup Upgrade",
-  "abp.upgrade.advanced_pickup.name": "Advanced Pickup Upgrade"
+  "abp.upgrade.advanced_pickup.name": "Advanced Pickup Upgrade",
+  "abp.pickup.tab": "Pickup",
+  "abp.pickup.tab.tooltip": "Pickup Settings",
+  "abp.pickup.tab.advanced": "Adv. Pickup",
+  "abp.pickup.tab.advanced.tooltip": "Advanced Pickup Settings"
 }
