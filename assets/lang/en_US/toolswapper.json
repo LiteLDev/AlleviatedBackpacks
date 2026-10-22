@@ -1,4 +1,5 @@
 {
+  "abp.toolswapper.error.exists": "There's already Tool Swapper Upgrade in another upgrade slot",
   "abp.toolswapper.name": "Tool Swapper Upgrade",
   "abp.toolswapper.advanced.name": "Advanced Tool Swapper Upgrade",
   "abp.toolswapper.tooltip": "§7Automatically swaps item in player's hand for the one effective on the block/entity when these are left clicked.",

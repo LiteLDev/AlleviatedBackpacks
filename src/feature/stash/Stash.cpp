@@ -12,6 +12,7 @@
 #include "mc/world/item/ItemStack.h"
 
 #include "feature/gui/Gui.h"
+#include "feature/linked/Linked.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -20,6 +21,7 @@
 #include "mod/Log.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
+#include "upgrade/inception/Inception.h"
 
 namespace abp::feature::stash {
 
@@ -139,9 +141,16 @@ void putBack(Player& player, Location const& loc, ItemStack const& item) {
 
 bool sameType(core::ItemStackData const& a, core::ItemStackData const& b) { return !a.empty() && !b.empty() && a.id == b.id; }
 
-/// Inserts `item` into the backpack; returns how many went in (or were voided).
+/// Inserts `item` into the backpack; returns how many went in (or were voided). SB `stash` /
+/// `getItemStashable` insert through getInventoryForUpgradeProcessing: with an Inception upgrade
+/// the backpacks stored inside take what doesn't fit (in the upgrade's inventory order).
 int insert(Player* player, game::Backpack& bp, core::ItemStackData const& item, bool simulate) {
     if (item.empty()) return 0;
+    if (auto shared = game::Storage::get().find(bp.uuid()); shared && shared.get() == &bp) {
+        int n = upgrade::inception::insertForUpgrades(shared, item, access(player), simulate);
+        if (!simulate && n > 0) bp.markDirty();
+        return n;
+    }
     auto r = bp.inventory().insert(item, access(player), simulate);
     if (!simulate && (r.inserted > 0 || r.voided > 0)) bp.markDirty();
     return item.count - r.remainder.count;
@@ -304,11 +313,20 @@ Result stashableInto(Player* player, ItemStack const& backpackItem, core::ItemSt
     return stashable(player, *bp, item);
 }
 
+namespace {
+/// Vanilla runs the carried item's `overrideStackedOnOther` first: an Ender Linker on the cursor
+/// links the backpack in the slot (SC EnderLinkerItem) instead of being stashed into it.
+bool linkerOntoBackpack(ItemStack const& held, core::ItemStackData const& inSlot) {
+    return linked::isLinker(held) && inSlot.count == 1 && game::isBackpack(inSlot);
+}
+} // namespace
+
 Result overlay(Player& player, Location const& loc) {
     ItemStack held = cursorOf(player);
     if (held.isNull() || lockedSlot(player, loc)) return Result::NoSpace;
     auto inSlot = itemAt(player, loc);
     if (inSlot.empty()) return Result::NoSpace;
+    if (linkerOntoBackpack(held, inSlot)) return Result::NoSpace;
     // SC: a backpack (count 1) in the slot first, then the backpack on the cursor.
     if (inSlot.count == 1 && game::isBackpack(inSlot)) {
         return stashableInto(&player, game::ItemConv::toStack(inSlot, 1), game::ItemConv::toData(held));
@@ -319,6 +337,7 @@ Result overlay(Player& player, Location const& loc) {
 
 int rightClick(Player& player, Location const& loc) {
     if (!game::Storage::get().available()) return 0;
+    if (linkerOntoBackpack(cursorOf(player), itemAt(player, loc))) return 0; // the linker links instead
     // Vanilla order (AbstractContainerMenu.doClick): the carried item's override first.
     int moved = stashSlotIntoCursor(player, loc);
     if (moved <= 0) moved = stashCursorIntoSlot(player, loc);

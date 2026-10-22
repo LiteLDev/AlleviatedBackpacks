@@ -29,6 +29,7 @@
 #include "game/ItemConv.h"
 #include "mod/Config.h"
 #include "mod/Module.h"
+#include "upgrade/inception/Inception.h"
 
 namespace abp::placed {
 
@@ -60,8 +61,12 @@ LL_TYPE_INSTANCE_HOOK(
     if (config::get<PlacedConfig>().hopperAutomation && attachedFace != 1) {
         auto target = neighbor(blockOf(position), attachedFace);
         if (auto bp = PlacedBackpacks::get().backpackAt(region, target)) {
-            // Vanilla hoppers move one item per transfer.
-            return pullFromContainer(fromContainer, bp->inventory(), 1, attachedFace, kAutomation) > 0;
+            // Vanilla hoppers move one item per transfer. SB getInventoryForInputOutput: with
+            // Inception the backpacks inside take it when the first inventory doesn't.
+            for (auto const& inv : upgrade::inception::upgradeInventories(bp)) {
+                if (pullFromContainer(fromContainer, inv->inventory(), 1, attachedFace, kAutomation) > 0) return true;
+            }
+            return false;
         }
     }
     return origin(region, fromContainer, position, attachedFace);
@@ -81,7 +86,10 @@ LL_TYPE_INSTANCE_HOOK(
     if (config::get<PlacedConfig>().hopperAutomation) {
         auto above = neighbor(blockOf(pos), 1);
         if (auto bp = PlacedBackpacks::get().backpackAt(region, above)) {
-            return pushToContainer(bp->inventory(), toContainer, 1, 0, kAutomation) > 0;
+            for (auto const& inv : upgrade::inception::upgradeInventories(bp)) {
+                if (pushToContainer(inv->inventory(), toContainer, 1, 0, kAutomation) > 0) return true;
+            }
+            return false;
         }
     }
     return origin(region, toContainer, pos);
@@ -112,8 +120,7 @@ LL_TYPE_INSTANCE_HOOK(
                 static std::mt19937 rng{std::random_device{}()};
                 int  slot = filled[std::uniform_int_distribution<std::size_t>(0, filled.size() - 1)(rng)];
                 auto data = game::ItemConv::toData(container->getItem(slot)).withCount(1);
-                auto r    = bp->inventory().insert(data, kAutomation);
-                bool ok   = r.inserted + r.voided > 0;
+                bool ok   = upgrade::inception::insertForUpgrades(bp, data, kAutomation) > 0;
                 if (ok) container->removeItem(slot, 1);
                 region.getLevel().broadcastLevelEvent(
                     ok ? SharedTypes::Legacy::LevelEvent::SoundClick : SharedTypes::Legacy::LevelEvent::SoundClickFail,

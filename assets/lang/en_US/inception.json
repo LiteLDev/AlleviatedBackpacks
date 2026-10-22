@@ -1,4 +1,5 @@
 {
+  "abp.inception.error.exists": "There's already Inception Upgrade in another upgrade slot",
   "abp.inception.name": "Inception Upgrade",
   "abp.inception.tooltip": "§7Makes it possible to put backpacks into the backpack",
   "abp.inception.tab": "Inception",

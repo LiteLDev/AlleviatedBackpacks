@@ -82,7 +82,8 @@ ABP_REGISTER_SELFTEST("stack.recipes_loaded", [](Context& ctx) {
     std::set<std::string> ids;
     for (auto const& [tag, recipes] : *level->getRecipes().mRecipes) {
         for (auto const& [id, recipe] : recipes) {
-            if (id.starts_with("alleviatedbackpacks:stack_")) ids.insert(id);
+            // SC upgrade_clear recipes (recipes/clear/) are counted elsewhere.
+            if (id.starts_with("alleviatedbackpacks:stack_") && !id.ends_with("_clear")) ids.insert(id);
         }
     }
     std::vector<std::string> expected;

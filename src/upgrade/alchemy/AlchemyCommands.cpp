@@ -89,6 +89,42 @@ void setup(Player& player, CommandOutput& output) {
     output.success("alchemy setup: gave iron backpack " + bp->uuid());
 }
 
+/// GX-2 e2e: SC's applyTo loop in one check. Filter 0 = splash Swiftness, filter 1 = Fire
+/// Resistance, both "Keep Active"; storage slot 0 = the potion, slot 1 = the splash potion. One
+/// check throws the splash (filter 0 reaches slot 1) and then also takes the potion (filter 1
+/// visits slot 0 after the exit check of filter 0's loop).
+void splashSetup(Player& player, CommandOutput& output) {
+    auto bp = game::Storage::get().create(core::Tier::Iron);
+    if (!bp) {
+        output.error("could not create a backpack");
+        return;
+    }
+    int slot = -1;
+    for (int s = 0; s < static_cast<int>(bp->data().upgrades.size()) && slot < 0; ++s) {
+        if (bp->data().upgrades[static_cast<std::size_t>(s)].empty() && upgrade::install(bp, s, item(kBasicItem), &player)) slot = s;
+    }
+    if (slot < 0) {
+        output.error("could not install the alchemy upgrade");
+        return;
+    }
+    upgrade::UpgradeContext ctx(bp, slot, &player);
+    (void)setFilter(ctx, 0, item(kSplashPotion, 14));
+    (void)setFilter(ctx, 1, item(kPotion, 12));
+    auto s                 = settingsOf(ctx);
+    s.filters[0].condition = Condition::Always;
+    s.filters[1].condition = Condition::Always;
+    writeSettings(ctx, s);
+    bp->inventory().set(0, item(kPotion, 12));
+    bp->inventory().set(1, item(kSplashPotion, 14));
+    bp->markDirty();
+    game::Storage::get().save(*bp, true);
+    auto stack = game::makeBackpackItem(core::Tier::Iron, bp->uuid());
+    if (!player.add(stack)) player.drop(stack, false);
+    player.sendInventory(false);
+    log().info("alchemy splashsetup: gave iron backpack {}", bp->uuid());
+    output.success("alchemy splashsetup: gave iron backpack " + bp->uuid());
+}
+
 void status(Player& player, CommandOutput& output) {
     std::string effects;
     for (auto const& e : player.getAllEffects()) {
@@ -120,6 +156,9 @@ void status(Player& player, CommandOutput& output) {
 ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
     cmd.overload().text("alchemy").text("setup").execute([](CommandOrigin const& origin, CommandOutput& output) {
         if (auto* p = playerOf(origin, output)) setup(*p, output);
+    });
+    cmd.overload().text("alchemy").text("splashsetup").execute([](CommandOrigin const& origin, CommandOutput& output) {
+        if (auto* p = playerOf(origin, output)) splashSetup(*p, output);
     });
     cmd.overload().text("alchemy").text("status").execute([](CommandOrigin const& origin, CommandOutput& output) {
         if (auto* p = playerOf(origin, output)) status(*p, output);

@@ -252,6 +252,7 @@ SlotError installError(Player& p, ui::BackpackMenu& menu, int slot, core::ItemSt
     }
     if (!conflicting.empty()) return {reason, conflicting};
     if (static_cast<int>(same.size()) >= info.maxPerBackpack) {
+        if (!info.existsKey.empty()) return {trFor(p, info.existsKey, info.existsFallback), same};
         return {
             trFor(p, "abp.mainscreen.error.add.only_x_upgrades_allowed", "Only {0}x {1} can be used in {2}", info.maxPerBackpack, name, storage),
             same

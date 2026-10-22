@@ -1,0 +1,12 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:everlasting_upgrade_clear"
+    },
+    "tags": ["crafting_table"],
+    "ingredients": [{ "item": "alleviatedbackpacks:everlasting_upgrade" }],
+    "unlock": [{ "item": "alleviatedbackpacks:everlasting_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:everlasting_upgrade", "count": 1 }
+  }
+}

@@ -1,4 +1,5 @@
 {
+  "abp.everlasting.error.exists": "另一插槽中已存在永恒升级",
   "abp.everlasting.name": "永恒升级",
   "abp.everlasting.describe1": "§7背包变得坚不可摧",
   "abp.everlasting.describe2": "§7不会消失，也不会掉入虚空"

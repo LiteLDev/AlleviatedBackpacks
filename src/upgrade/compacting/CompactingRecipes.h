@@ -87,6 +87,10 @@ struct Compaction {
     core::ItemStackData result;          ///< count = items produced by one craft
     int                 inputs     = 0;  ///< items consumed by one craft
     bool                reversible = false; ///< one result crafts back into exactly `inputs` items (SC "uncraftable")
+    /// SC `CompactingResult.getRemainingItems` (Java `Recipe.getRemainingItems`): what one craft
+    /// leaves behind, e.g. 4 glass bottles for a honey block. Bedrock lists them as the recipe's
+    /// extra results; without those, each consumed item's `craftingRemainingItem`.
+    std::vector<core::ItemStackData> remaining;
 };
 
 /// SC `getCompactingResult(stack, shape)`: the crafting result of `item` laid out as `shape`

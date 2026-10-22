@@ -96,3 +96,15 @@ TEST(Comparator, MatchesScAnalogSignal) {
     pearls.insert(ItemStackData::of("minecraft:ender_pearl", 8, 16), player);
     EXPECT_EQ(comparatorSignal(pearls), 8); // 8 / 16
 }
+
+TEST(Comparator, CombinedInventoriesCountEverySlot) {
+    // GX-2: Inception's combined IO handler (main + backpacks inside) is one big inventory.
+    using namespace abp::core;
+    AccessContext const player{Source::Player};
+    BackpackInventory main(2), inner(2);
+    main.insert(ItemStackData::of("minecraft:stone", 128), player); // main full
+    EXPECT_EQ(comparatorSignal(std::vector<BackpackInventory const*>{&main, &inner}), 8); // 2 of 4 slots: floor(7) + 1
+    EXPECT_EQ(comparatorSignal(std::vector<BackpackInventory const*>{&inner}), 0);
+    EXPECT_EQ(comparatorSignal(std::vector<BackpackInventory const*>{}), 0);
+    EXPECT_EQ(comparatorSignal(std::vector<BackpackInventory const*>{&main}), comparatorSignal(main));
+}

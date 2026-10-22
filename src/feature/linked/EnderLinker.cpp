@@ -5,8 +5,8 @@
 //   overrideOtherStackedOnMe). Works on the player inventory and on backpack storage slots.
 // - In the world: use the linker on a placed backpack (SC's onItemUseFirst on a block endpoint).
 //
-// SC's third way, crafting the linker with a storage, needs NBT-dependent recipe results, which
-// Bedrock's data-driven recipes can't express; the screen click covers the same cases.
+// SC's third way, crafting the linker with a storage (`ender_linker_endpoint`), is in
+// EnderLinkerCrafting.cpp (multi-result recipes + a craft hook that links the delivered results).
 
 #include <unordered_map>
 

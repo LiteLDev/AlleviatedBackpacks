@@ -61,8 +61,9 @@ struct CompactingSettings {
 
 /// SC `CompactingDefinition`: what one craft of `item` makes and how many it takes.
 struct CompactingDefinition {
-    core::ItemStackData result;
-    int                 count = 0;
+    core::ItemStackData              result;
+    int                              count = 0;
+    std::vector<core::ItemStackData> remaining; ///< SC CompactingResult.getRemainingItems (GX-2)
 };
 
 /// SC `getCompactingDefinition(stack, upgradeItem, shouldCompactNonUncraftable)`.

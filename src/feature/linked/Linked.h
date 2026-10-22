@@ -84,6 +84,9 @@ public:
     /// described in the header. Both stacks are changed in place; on success with a bound linker +
     /// unlinked backpack the linker is used up (count 0). `owner` is the acting player's uuid.
     LinkResult link(std::string const& owner, ItemStack& linker, ItemStack& endpoint);
+    /// (GX-2) The result `link` would have, without linking anything (SC canAddEndpoint /
+    /// getAddEndpointResult, used by the crafting recipe).
+    [[nodiscard]] LinkResult checkLink(ItemStack const& linker, ItemStack const& endpoint) const;
 
     /// SB's creative placement: a new secondary endpoint of `endpoint`'s group (nullopt when
     /// `endpoint` is not linked or its group is gone).

@@ -14,6 +14,7 @@
 #include "core/Filter.h"
 #include "core/ItemStackData.h"
 #include "upgrade/IUpgrade.h"
+#include "upgrade/filter/FilterTab.h"
 
 class BlockPos;
 class Player;
@@ -30,6 +31,14 @@ inline constexpr int              kBasicSlots    = 6;  ///< SB refillUpgrade.fil
 inline constexpr int              kAdvancedSlots = 12; ///< SB advancedRefillUpgrade.filterSlots
 inline constexpr int              kCooldownTicks = 5;  ///< SB COOLDOWN
 inline constexpr float            kPlacedRange   = 3;  ///< SB REFILL_RANGE (placed backpacks)
+
+/// SB's `refillUpgrade` / `advancedRefillUpgrade` config sections (`config/refill.json`); filterSlots
+/// 1..20, slotsInRow 1..6.
+struct RefillConfig {
+    int                              version               = 1;
+    filtering::FilteredUpgradeConfig refillUpgrade         = {kBasicSlots, 3};
+    filtering::FilteredUpgradeConfig advancedRefillUpgrade = {kAdvancedSlots, 4};
+};
 
 /// Where a filter slot's item is refilled to (SB TargetSlot; the basic tier always uses `Any`).
 enum class Target : int {

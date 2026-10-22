@@ -1,0 +1,12 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:tool_swapper_upgrade_clear"
+    },
+    "tags": ["crafting_table"],
+    "ingredients": [{ "item": "alleviatedbackpacks:tool_swapper_upgrade" }],
+    "unlock": [{ "item": "alleviatedbackpacks:tool_swapper_upgrade" }],
+    "result": { "item": "alleviatedbackpacks:tool_swapper_upgrade", "count": 1 }
+  }
+}

@@ -9,6 +9,7 @@
 //                                    row 4  filler
 //                                    row 5  controls
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -60,7 +61,8 @@ public:
     : Menu(std::move(title), advanced ? Rows::Six : Rows::Three),
       mCtx(std::move(ctx)),
       mAdvanced(advanced),
-      mSlots(slotsFor(advanced)) {}
+      // The phase-1 chest layout only fits SB's default counts (6 / 12).
+      mSlots(std::min(slotsFor(advanced), advanced ? kAdvancedSlots : kBasicSlots)) {}
 
     void build(Player& player) override {
         auto filler = [](std::string_view id) { return std::make_shared<ui::StaticSlot>(ui::icon(id, " ")); };

@@ -412,7 +412,7 @@ std::string groupDisplayName(std::string_view group, Player* player) {
 
 std::string backpackDisplayName(core::Tier tier, Player const* player) {
     static constexpr std::string_view kNames[] =
-        {"Leather Backpack", "Copper Backpack", "Iron Backpack", "Gold Backpack", "Diamond Backpack", "Netherite Backpack"};
+        {"Backpack", "Copper Backpack", "Iron Backpack", "Gold Backpack", "Diamond Backpack", "Netherite Backpack"};
     auto i   = static_cast<std::size_t>(tier);
     auto key = "abp.admin.backpack_name." + std::string(core::tierInfo(tier).id);
     auto fb  = i < std::size(kNames) ? kNames[i] : std::string_view("Backpack");

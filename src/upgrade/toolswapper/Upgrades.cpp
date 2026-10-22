@@ -65,7 +65,7 @@ public:
                 [ctx = mCtx](ui::ClickContext const& c) {
                     ui::FilterMenu::Options opts;
                     opts.onBack = [ctx](Player& back) { ui::MenuManager::get().open(back, std::make_shared<SettingsMenu>(trFor(back, "abp.toolswapper.tab", "Tool Swap"), ctx)); };
-                    ui::MenuManager::get().open(c.player, ui::FilterMenu::forUpgrade(c.player, ctx, "filter", kFilterSlots, opts));
+                    ui::MenuManager::get().open(c.player, ui::FilterMenu::forUpgrade(c.player, ctx, "filter", filterSlots(), opts));
                 }
             )
         );
@@ -106,6 +106,8 @@ public:
             .tier         = UpgradeTier::Basic,
             .group        = std::string(kGroup),
             .hasSettings  = false, // SB: the basic one has no settings tab
+            .existsKey      = "abp.toolswapper.error.exists",
+            .existsFallback = "There's already Tool Swapper Upgrade in another upgrade slot",
         };
         return i;
     }
@@ -123,6 +125,8 @@ public:
             .tier         = UpgradeTier::Advanced,
             .group        = std::string(kGroup),
             .hasSettings  = true,
+            .existsKey      = "abp.toolswapper.error.exists",
+            .existsFallback = "There's already Tool Swapper Upgrade in another upgrade slot",
         };
         return i;
     }
@@ -143,20 +147,30 @@ nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
         {"toolswapper",
          {{"swapWeapon", s.swapWeapon},
           {"mode", std::string(toString(s.mode))},
+          // Phase-1 / selftest view of the filter; the native tab uses "filter" below.
           {"filter",
            {{"allow", s.filter.mode == core::FilterMode::Allow},
             {"primary", static_cast<int>(s.filter.matchBy)},
             {"durability", s.filter.matchDurability},
             {"nbt", s.filter.matchNbt},
-            {"slotsInRow", kSlotsInRow},
+            {"slotsInRow", filterSlotsInRow()},
             {"ghosts", std::move(ghosts)}}}}},
+        {"filter", filtering::tabJson(s.filter, filterSpec())},
         {"tabLabel", trFor(player, "abp.toolswapper.tab", "Tool Swap")},
         {"tabTooltip", trFor(player, "abp.toolswapper.tab.tooltip", "Advanced Tool Swapper Settings")},
     };
 }
 
 bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
-    if (!isAdvanced(ctx) || !data.contains("toolswapper")) return false;
+    if (!isAdvanced(ctx)) return false;
+    if (data.is_object() && data.value("filter", std::string{}) == "filter") {
+        // The shared filter control (FilterControl): SC FilterLogicControl.Advanced incl. TAGS.
+        auto s = settingsOf(ctx);
+        if (!filtering::applyAction(s.filter, filterSpec(), data, filtering::cursorOf(player))) return false;
+        setFilter(ctx, s.filter);
+        return true;
+    }
+    if (!data.contains("toolswapper")) return false;
     auto op = data.value("toolswapper", std::string{});
     auto s  = settingsOf(ctx);
     log().info("tool swapper: {} tab action {}", player.getRealName(), op);

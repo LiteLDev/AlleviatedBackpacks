@@ -1,4 +1,5 @@
 {
+  "abp.toolswapper.error.exists": "另一插槽中已存在工具替换升级",
   "abp.toolswapper.name": "工具切换升级",
   "abp.toolswapper.advanced.name": "高级工具切换升级",
   "abp.toolswapper.tooltip": "§7左键点击方块/实体时，自动将手中的物品换成对其有效的工具。",

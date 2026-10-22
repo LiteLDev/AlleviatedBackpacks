@@ -31,6 +31,7 @@
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "game/Storage.h"
+#include "mod/Config.h"
 #include "mod/I18n.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
@@ -211,8 +212,14 @@ int refillOne(Player& player, UpgradeContext const& ctx, core::ItemStackData con
 Target nextTarget(Target t) { return static_cast<Target>((static_cast<int>(t) + 1) % kTargetCount); }
 Target previousTarget(Target t) { return static_cast<Target>((static_cast<int>(t) + kTargetCount - 1) % kTargetCount); }
 
-int slotsFor(bool advanced) { return advanced ? kAdvancedSlots : kBasicSlots; }
-int slotsInRow(bool advanced) { return advanced ? 4 : 3; }
+int slotsFor(bool advanced) {
+    auto const& c = config::get<RefillConfig>();
+    return std::clamp((advanced ? c.advancedRefillUpgrade : c.refillUpgrade).filterSlots, 1, 20);
+}
+int slotsInRow(bool advanced) {
+    auto const& c = config::get<RefillConfig>();
+    return std::clamp((advanced ? c.advancedRefillUpgrade : c.refillUpgrade).slotsInRow, 1, 6);
+}
 
 Settings load(UpgradeContext const& ctx, int slots) {
     Settings s;
@@ -668,3 +675,5 @@ ABP_REGISTER_MODULE(abp::upgrade::refill::RefillPickBlock);
 ABP_REGISTER_MODULE(abp::upgrade::refill::RefillTicker);
 ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{"refill", &abp::upgrade::refill::tabData});
 ABP_REGISTER_TAB_ACTION(abp::net::TabActionHandler{"refill", &abp::upgrade::refill::tabAction});
+
+ABP_REGISTER_CONFIG("refill", abp::upgrade::refill::RefillConfig);

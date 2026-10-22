@@ -78,6 +78,12 @@ struct BlockLocation {
 
 [[nodiscard]] BlockLocation locationOf(BlockSource const& region, BlockPos const& pos);
 
+/// GX-2 (EntityGriefing.cpp): true while a Wither or the Ender Dragon breaks blocks on this thread
+/// (SB BackpackBlock.canEntityDestroy is false for Everlasting backpacks).
+[[nodiscard]] bool entityBreakingBlocks();
+/// SB `hasEverlastingUpgrade(world, pos)`: the backpack placed at `pos` has an Everlasting upgrade.
+[[nodiscard]] bool everlastingAt(BlockSource const& region, BlockPos const& pos);
+
 /// One placed backpack: where it is and which backpack (uuid) it shows.
 struct PlacedEntry {
     BlockLocation       loc;

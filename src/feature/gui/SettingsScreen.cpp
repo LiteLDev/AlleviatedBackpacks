@@ -237,7 +237,7 @@ bool slotAction(Player&, game::Backpack& bp, std::string const& what, json const
 }
 
 bool itemDisplayAction(game::Backpack& bp, json const& body) {
-    if (config::get<GuiConfig>().itemDisplayDisabled) return false;
+    if (itemDisplayDisabled()) return false;
     auto op  = body.value("op", std::string{});
     int  idx = body.value("index", -1);
     if (op == "select") return selectItemDisplaySlot(bp, idx);
@@ -286,7 +286,6 @@ void settingsScreenOpened(Player& player, game::Backpack&) {
 }
 
 nlohmann::json settingsScreenJson(Player& player, game::Backpack& backpack) {
-    auto const& cfg = config::get<GuiConfig>();
     json        j   = json::object();
     auto        it  = gStates.find(keyOf(player));
     bool        storageCtx = it != gStates.end() && it->second.storageContext;
@@ -301,8 +300,8 @@ nlohmann::json settingsScreenJson(Player& player, game::Backpack& backpack) {
     j["keepTabOpen"]             = settingValue(player, backpack, MainSetting::KeepTabOpen);
     j["keepSearchPhrase"]        = settingValue(player, backpack, MainSetting::KeepSearchPhrase);
     j["searchPhrase"]            = searchPhrase(player, backpack);
-    j["showAnotherPlayerCanOpen"] = cfg.allowOpeningOtherPlayerBackpacks;
-    j["itemDisplayEnabled"]      = !cfg.itemDisplayDisabled;
+    j["showAnotherPlayerCanOpen"] = otherPlayerOpeningAllowed();
+    j["itemDisplayEnabled"]      = !itemDisplayDisabled();
     j["noSortColor"]             = noSortColor(backpack);
     j["memoryIgnoreNbt"]         = memoryIgnoresNbt(backpack);
     auto d                       = itemDisplay(backpack);
@@ -342,7 +341,7 @@ bool handleSettingsScreenAction(Player& player, game::Backpack& bp, nlohmann::js
     if (what == "main" || what == "option") {
         auto setting = mainSettingByKey(body.value("name", std::string{}));
         if (!setting) return false;
-        if (*setting == MainSetting::AnotherPlayerCanOpen && !config::get<GuiConfig>().allowOpeningOtherPlayerBackpacks) return false;
+        if (*setting == MainSetting::AnotherPlayerCanOpen && !otherPlayerOpeningAllowed()) return false;
         // SC toggleBooleanSetting.
         if (!s.storageContext) setPlayerSetting(player, *setting, !playerSettingOrDefault(player, *setting));
         else setStorageSetting(player, bp, *setting, !settingValue(player, bp, *setting));

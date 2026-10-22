@@ -40,6 +40,11 @@ struct UpgradeInfo {
     std::vector<std::string> conflicts;
     bool                     hasSettings = false; ///< show a settings button on the upgrades page
     bool                     toggleable  = true;  ///< show an on/off toggle
+    /// SB's conflict message when another upgrade of this group is already installed (e.g.
+    /// "There's already Inception Upgrade in another upgrade slot"). Empty = the generic
+    /// "Only Nx ... can be used in ..." message.
+    std::string existsKey;
+    std::string existsFallback;
 
     [[nodiscard]] std::string const& groupOrId() const { return group.empty() ? id : group; }
 };

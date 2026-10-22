@@ -269,3 +269,22 @@ TEST(CookingLogic, AutoFuelFilter) {
     EXPECT_EQ(s.fuel.id, "coal");
     EXPECT_EQ(inv.at(0).count, 8);
 }
+
+TEST(CookingLogic, AutoUsesInceptionInventoryChain) {
+    // GX-2: SC getInventoryForUpgradeProcessing with Inception: input and fuel come from the
+    // backpacks inside too, output goes there when the main inventory is full.
+    BackpackInventory main(1), inner(4);
+    main.set(0, item("dirt", 64));
+    inner.set(2, item("raw_iron", 2));
+    inner.set(3, item("coal", 1));
+    CookState s;
+    auto      e = env();
+    AutoEnv   a{main};
+    a.chain = {&main, &inner};
+    runAuto(s, e, a, 1);
+    EXPECT_EQ(s.input.count, 2) << "input pulled from the inner backpack";
+    EXPECT_TRUE(s.burning()) << "the coal from the inner backpack burns";
+    runAuto(s, e, a, 900);
+    EXPECT_EQ(inner.count([](ItemStackData const& x) { return x.id == "iron_ingot"; }), 2) << "output pushed into the inner backpack";
+    EXPECT_EQ(main.at(0).id, "dirt");
+}

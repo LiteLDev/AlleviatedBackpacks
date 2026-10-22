@@ -166,9 +166,27 @@ bool Filter::hasGhost(ItemStackData const& item) const {
     });
 }
 
+bool tagLess(std::string_view a, std::string_view b) {
+    auto split = [](std::string_view t) -> std::pair<std::string_view, std::string_view> {
+        auto colon = t.find(':');
+        if (colon == std::string_view::npos) return {"minecraft", t};
+        return {t.substr(0, colon), t.substr(colon + 1)};
+    };
+    auto [an, ap] = split(a);
+    auto [bn, bp] = split(b);
+    if (ap != bp) return ap < bp;
+    if (an != bn) return an < bn;
+    return a < b; // "x" and "minecraft:x" name the same tag; keep a strict weak order anyway
+}
+
+void sortTags(std::vector<std::string>& tags) {
+    std::sort(tags.begin(), tags.end(), [](std::string const& a, std::string const& b) { return tagLess(a, b); });
+    tags.erase(std::unique(tags.begin(), tags.end()), tags.end());
+}
+
 bool Filter::addTag(std::string const& tag) {
     if (tag.empty()) return false;
-    auto it = std::lower_bound(tags.begin(), tags.end(), tag);
+    auto it = std::lower_bound(tags.begin(), tags.end(), tag, [](std::string const& a, std::string const& b) { return tagLess(a, b); });
     if (it != tags.end() && *it == tag) return false;
     tags.insert(it, tag);
     return true;
@@ -186,8 +204,7 @@ bool Filter::hasTag(std::string_view tag) const {
 }
 
 std::vector<std::string> Filter::tagsToAdd(std::vector<std::string> itemTags) const {
-    std::sort(itemTags.begin(), itemTags.end());
-    itemTags.erase(std::unique(itemTags.begin(), itemTags.end()), itemTags.end());
+    sortTags(itemTags);
     std::erase_if(itemTags, [&](std::string const& t) { return t.empty() || hasTag(t); });
     return itemTags;
 }

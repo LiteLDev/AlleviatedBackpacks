@@ -19,6 +19,7 @@
 
 #include "core/Filter.h"
 #include "upgrade/IUpgrade.h"
+#include "upgrade/filter/FilterTab.h"
 
 class Actor;
 class Block;
@@ -49,7 +50,14 @@ struct ToolSwapperConfig {
     int version = 2;
     /// Master switch for the Tool Swapper hooks.
     bool enabled = true;
+    /// SB `toolSwapperUpgrade` section: filterSlots (1..20, default 8), slotsInRow (1..6, default 4).
+    filtering::FilteredUpgradeConfig toolSwapperUpgrade = {kFilterSlots, kSlotsInRow};
 };
+/// Configured filter slot count / slots per row (clamped to SB's ranges).
+[[nodiscard]] int filterSlots();
+[[nodiscard]] int filterSlotsInRow();
+/// The advanced Tool Swapper's filter control (SC FilterLogicControl.Advanced, Allow / Block).
+[[nodiscard]] filtering::FilterSpec filterSpec();
 
 /// Effective settings of one installed Tool Swapper (basic: defaults).
 struct Settings {

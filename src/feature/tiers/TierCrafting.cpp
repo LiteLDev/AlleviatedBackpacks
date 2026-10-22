@@ -245,6 +245,25 @@ bool onConsumed(CraftHandlerBase& handler, FullContainerName const& container, i
         carryUpgradeData(handler, inputs);
         return true;
     }
+    // SB BackpackUpgradeRecipe / SmithingBackpackUpgradeRecipe don't match a linked endpoint that
+    // isn't its group's primary (its storage can't grow).
+    if (auto const& gate = game::Storage::get().tierGrowthGate(); gate && pending.craft->source) {
+        auto from = game::backpackTierOf(*pending.craft->source);
+        bool up   = false;
+        forEachResult(handler, [&](ItemStackBase& result) {
+            auto to = game::backpackTierOf(result.getTypeName());
+            if (from && to && static_cast<int>(*to) > static_cast<int>(*from)) up = true;
+        });
+        if (up) {
+            std::shared_ptr<game::Backpack> bp;
+            if (auto uuid = game::backpackUuid(*pending.craft->source)) bp = game::Storage::get().find(*uuid);
+            if (bp && !gate(*pending.craft->source, *bp)) {
+                log().debug("backpack tier craft rejected: linked secondary endpoint");
+                dropPending(&handler);
+                return false;
+            }
+        }
+    }
     int applied = 0;
     forEachResult(handler, [&](ItemStackBase& stack) {
         if (!isBackpackStack(stack)) return;

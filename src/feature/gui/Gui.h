@@ -38,6 +38,12 @@ struct GuiConfig {
     bool        defaultKeepHotbar    = true;
 };
 
+/// Effective SB `allowOpeningOtherPlayerBackpacks`: off when either sophisticatedbackpacks-server.json
+/// (SB's own key) or the older gui.json copy turns it off.
+[[nodiscard]] bool otherPlayerOpeningAllowed();
+/// Effective SB `itemDisplayDisabled` (either file).
+[[nodiscard]] bool itemDisplayDisabled();
+
 /// The GUI options. Resolution: backpack override -> player's global setting -> server default.
 struct Options {
     core::SortBy sortBy = core::SortBy::Name;

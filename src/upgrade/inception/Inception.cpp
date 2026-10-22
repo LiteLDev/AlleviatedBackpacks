@@ -211,6 +211,25 @@ std::vector<std::shared_ptr<game::Backpack>> upgradeInventories(std::shared_ptr<
     return out;
 }
 
+int insertForUpgrades(
+    std::shared_ptr<game::Backpack> const& backpack,
+    core::ItemStackData const&             item,
+    core::AccessContext const&             access,
+    bool                                   simulate
+) {
+    if (item.empty()) return 0;
+    int  taken = 0;
+    auto rest  = item;
+    for (auto const& bp : upgradeInventories(backpack)) {
+        if (rest.empty() || rest.count <= 0) break;
+        auto r  = bp->inventory().insert(rest, access, simulate);
+        int  n  = r.inserted + r.voided;
+        taken  += n;
+        rest    = rest.withCount(rest.count - n);
+    }
+    return taken;
+}
+
 std::vector<int> backpackSlots(game::Backpack& backpack) {
     std::vector<int> out;
     auto const&      inv = backpack.inventory();
@@ -445,6 +464,8 @@ public:
             .nameFallback = "Inception Upgrade",
             .hasSettings  = true,
             .toggleable   = false,
+            .existsKey      = "abp.inception.error.exists",
+            .existsFallback = "There's already Inception Upgrade in another upgrade slot",
         };
         return info;
     }
