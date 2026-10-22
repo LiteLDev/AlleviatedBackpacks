@@ -64,6 +64,9 @@ using ExtractListenerFn = std::function<void(int slot, ItemStackData const& orig
 /// Slots that `insert()` should try first for `stack` (e.g. memory slots), in order. Filters still
 /// apply; slots out of range are ignored.
 using SlotPreferenceFn = std::function<std::vector<int>(ItemStackData const& stack)>;
+/// Whether `slot` is infinite (Infinity upgrade): extracting from it hands out items without
+/// ever depleting the slot.
+using InfiniteSlotFn = std::function<bool(int slot)>;
 
 struct InsertResult {
     ItemStackData remainder; ///< what could not be inserted (empty when all went in or was voided)
@@ -127,6 +130,9 @@ public:
     /// `checkInsert` as `insertInto` asks it (`InsertQuery::direct`).
     [[nodiscard]] InsertVerdict checkDirectInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const;
     [[nodiscard]] bool canExtract(int slot, int amount, AccessContext const& ctx) const;
+    /// True if an infinite-slot hook claims `slot` (extraction does not deplete it; the amount
+    /// handed out is not limited by the stored count).
+    [[nodiscard]] bool isInfinite(int slot) const;
 
     // ---- hooks -------------------------------------------------------------------------------
     void addInsertFilter(std::string owner, int priority, InsertFilterFn fn);
@@ -140,9 +146,11 @@ public:
     void addExtractListener(std::string owner, ExtractListenerFn fn);
     /// Preferred slots for automatic placement: `insert()` fills them before any other slot.
     void addSlotPreference(std::string owner, int priority, SlotPreferenceFn fn);
+    /// Marks slots as infinite (see `InfiniteSlotFn`).
+    void addInfiniteSlots(std::string owner, InfiniteSlotFn fn);
     /// Removes every hook registered with `owner`.
     void removeHooks(std::string const& owner);
-    /// Removes all filters, limit modifiers and slot preferences (listeners stay).
+    /// Removes all filters, limit modifiers, slot preferences and infinite-slot hooks (listeners stay).
     void clearFilters();
     /// Removes every hook (filters, modifiers, listeners) not owned by `keepOwner`.
     void clearHooksExcept(std::string_view keepOwner);
@@ -174,6 +182,7 @@ private:
     std::vector<Hook<SlotPreferenceFn>> mPreferences;
     std::vector<Hook<InsertListenerFn>>  mInsertListeners;
     std::vector<Hook<ExtractListenerFn>> mExtractListeners;
+    std::vector<Hook<InfiniteSlotFn>>    mInfinite;
 
     void notifyInserted(std::vector<int> const& slots, AccessContext const& ctx);
 };

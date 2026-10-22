@@ -2,7 +2,10 @@
   "abp.upgrade.smithing.name": "锻造升级",
   "abp.smithing.title": "锻造",
   "abp.smithing.open": "锻造",
-  "abp.smithing.help_title": "锻造",
-  "abp.smithing.help1": "§7锻造模板、基础物品和材料",
-  "abp.smithing.help2": "§7将装备升级为下界合金或添加盔甲纹饰"
+  "abp.smithing.missing_template": "放入锻造模板",
+  "abp.smithing.error": "无法以此方式升级物品",
+  "abp.smithing.netherite.base": "放入钻石盔甲、武器或工具",
+  "abp.smithing.netherite.addition": "放入下界合金锭",
+  "abp.smithing.trim.base": "放入一件盔甲",
+  "abp.smithing.trim.addition": "放入锭或晶体"
 }

@@ -1,0 +1,8 @@
+{
+  "abp_alchemy_upgrade": {
+    "textures": "textures/items/alchemy_upgrade"
+  },
+  "abp_advanced_alchemy_upgrade": {
+    "textures": "textures/items/advanced_alchemy_upgrade"
+  }
+}
