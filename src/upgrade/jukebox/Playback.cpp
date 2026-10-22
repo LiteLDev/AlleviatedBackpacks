@@ -9,6 +9,7 @@
 #include "ll/api/service/Bedrock.h"
 
 #include "mc/legacy/ActorUniqueID.h"
+#include "mc/world/actor/Actor.h"
 #include "mc/network/MinecraftPacketIds.h"
 #include "mc/network/MinecraftPackets.h"
 #include "mc/network/packet/PlaySoundPacket.h"
@@ -42,6 +43,16 @@ Player* findPlayer(std::int64_t key) {
 }
 
 std::int64_t keyOf(Player const& p) { return p.getOrCreateUniqueID().rawID; }
+
+/// Any living entity (a mob wearing the backpack), or nullptr.
+Actor* findEntity(std::int64_t key) {
+    auto level = ll::service::getLevel();
+    if (!level) return nullptr;
+    ActorUniqueID id;
+    id.rawID = key;
+    auto* a  = level->fetchEntity(id, false);
+    return a && a->isAlive() && !a->mRemoved ? a : nullptr;
+}
 
 bool carries(Player& player, std::string const& uuid) {
     for (auto const& [c, bp] : game::carriedBackpacks(player, false, true))
@@ -84,6 +95,7 @@ void Service::uninstall() {
     for (auto& [key, p] : mPlaybacks) stopSounds(p);
     mPlaybacks.clear();
     mReported.clear();
+    mCarriers.clear();
     if (mTick) ll::event::EventBus::getInstance().removeListener(mTick);
     mTick = nullptr;
 }
@@ -112,6 +124,10 @@ bool Service::play(UpgradeContext const& ctx, Player* starter, std::optional<int
     // a carried one is attached to its carrier (SC: the menu's entity).
     if (auto at = placedAt(uuid)) {
         p.where = Emitter{std::nullopt, at->first, at->second};
+    } else if (auto carrier = reportedCarrier(uuid); carrier && findEntity(*carrier)) {
+        // Worn by a mob: attached to it (SB wrapper.play(livingEntity)).
+        auto* a = findEntity(*carrier);
+        p.where = Emitter{*carrier, static_cast<int>(a->getDimensionId()), a->getPosition()};
     } else if (auto r = reported(uuid)) {
         p.where = Emitter{std::nullopt, r->dim, r->pos};
     } else {
@@ -162,6 +178,7 @@ void Service::stopAll(std::string const& uuid) {
         }
     }
     mReported.erase(uuid);
+    mCarriers.erase(uuid);
 }
 
 bool Service::next(UpgradeContext const& ctx) {
@@ -220,6 +237,16 @@ std::optional<std::int64_t> Service::emitterEntity(std::string const& uuid, int 
 
 void Service::tickPlaced(std::shared_ptr<game::Backpack> const& backpack, int dim, Vec3 const& pos) {
     if (backpack) mReported[backpack->uuid()] = Reported{dim, pos, mNow};
+}
+
+void Service::tickCarrier(std::shared_ptr<game::Backpack> const& backpack, std::int64_t entity) {
+    if (backpack) mCarriers[backpack->uuid()] = Carrier{entity, mNow};
+}
+
+std::optional<std::int64_t> Service::reportedCarrier(std::string const& uuid) const {
+    auto it = mCarriers.find(uuid);
+    if (it == mCarriers.end() || mNow - it->second.lastSeen > 40) return std::nullopt;
+    return it->second.entity;
 }
 
 std::optional<Service::Reported> Service::reported(std::string const& uuid) const {
@@ -315,10 +342,15 @@ void Service::spawnNotes(Playback const& p) const {
 
 std::optional<Service::Emitter> Service::locate(Playback const& p, bool deep) const {
     if (p.where.entity) {
-        auto* pl = findPlayer(*p.where.entity);
-        if (!pl || !pl->isAlive()) return std::nullopt;
-        if (deep && (!carries(*pl, p.uuid) || placedAt(p.uuid))) return std::nullopt;
-        return Emitter{p.where.entity, static_cast<int>(pl->getDimensionId()), pl->getPosition()};
+        if (auto* pl = findPlayer(*p.where.entity)) {
+            if (!pl->isAlive()) return std::nullopt;
+            if (deep && (!carries(*pl, p.uuid) || placedAt(p.uuid))) return std::nullopt;
+            return Emitter{p.where.entity, static_cast<int>(pl->getDimensionId()), pl->getPosition()};
+        }
+        // A mob wearing it: alive and still reported as the wearer.
+        auto* a = findEntity(*p.where.entity);
+        if (!a || reportedCarrier(p.uuid) != p.where.entity || placedAt(p.uuid)) return std::nullopt;
+        return Emitter{p.where.entity, static_cast<int>(a->getDimensionId()), a->getPosition()};
     }
     if (auto at = placedAt(p.uuid)) return Emitter{std::nullopt, at->first, at->second};
     if (auto r = reported(p.uuid)) return Emitter{std::nullopt, r->dim, r->pos};
@@ -337,7 +369,10 @@ std::optional<UpgradeContext> Service::validContext(Playback const& p) const {
 
 void Service::tick() {
     ++mNow;
-    if (mNow % 100 == 0) std::erase_if(mReported, [&](auto const& e) { return mNow - e.second.lastSeen > 100; });
+    if (mNow % 100 == 0) {
+        std::erase_if(mReported, [&](auto const& e) { return mNow - e.second.lastSeen > 100; });
+        std::erase_if(mCarriers, [&](auto const& e) { return mNow - e.second.lastSeen > 100; });
+    }
     if (mPlaybacks.empty()) return;
     auto const& cfg = config::get<JukeboxConfig>();
     for (auto it = mPlaybacks.begin(); it != mPlaybacks.end();) {

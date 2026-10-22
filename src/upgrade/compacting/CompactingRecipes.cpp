@@ -12,6 +12,7 @@
 
 #include "mc/deps/core/string/HashedString.h"
 #include "mc/deps/nbt/CompoundTag.h"
+#include "mc/world/item/Item.h"
 #include "mc/world/item/ItemInstance.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/item/SaveContext.h"
@@ -57,12 +58,42 @@ core::ItemStackData toData(ItemInstance const& inst) {
     return game::ItemConv::toData(game::ItemConv::make(inst.getTypeName(), 1, inst.getAuxValue()));
 }
 
-/// The single result of a plain crafting recipe, or nullptr.
+/// The (first) result of a plain crafting recipe, or nullptr. Bedrock recipes that leave containers
+/// behind (honey bottles, buckets) list them as further results: see `extraResults`.
 ItemInstance const* singleResult(Recipe const& recipe) {
     if (recipe.isMultiRecipe()) return nullptr; // data-driven results are fine: all JSON recipes have them
     auto const& results = recipe.getResultItems();
-    if (results.size() != 1 || results.front().isNull() || results.front().mCount < 1) return nullptr;
+    if (results.empty() || results.front().isNull() || results.front().mCount < 1) return nullptr;
     return &results.front();
+}
+
+/// The recipe's results after the first (Bedrock's form of Java's crafting remainders).
+std::vector<core::ItemStackData> extraResults(Recipe const& recipe) {
+    std::vector<core::ItemStackData> out;
+    auto const&                      results = recipe.getResultItems();
+    for (std::size_t i = 1; i < results.size(); ++i) {
+        auto const& r = results[i];
+        if (r.isNull() || r.mCount < 1) continue;
+        auto d = toData(r);
+        if (d.empty()) continue;
+        d.count = r.mCount;
+        out.push_back(std::move(d));
+    }
+    return out;
+}
+
+/// SC RecipeHelper `recipe.getRemainingItems(craftingInventory)`: the recipe's extra results, or
+/// else (Java's default) one `craftingRemainingItem` of the item per filled cell.
+std::vector<core::ItemStackData> remainingItems(Recipe const& recipe, ItemStack const& stack, int cells) {
+    auto extra = extraResults(recipe);
+    if (!extra.empty()) return extra;
+    Item const* type = stack.mItem.get();
+    if (!type || !type->mCraftingRemainingItem) return {};
+    Item const& left = *type->mCraftingRemainingItem;
+    auto        d    = game::ItemConv::toData(game::ItemConv::make(left.mFullName->getString(), 1));
+    if (d.empty()) return {};
+    d.count = cells;
+    return {d};
 }
 
 bool sameKind(core::ItemStackData const& a, core::ItemStackData const& b) { return a.id == b.id && a.aux == b.aux; }
@@ -146,7 +177,7 @@ std::optional<Compaction> lookup(Recipes const& recipes, core::ItemStackData con
         if (result.empty()) return;
         result.count = out->mCount;
         bool       rev = isReversible(recipes, result.withCount(1), item, shape.count);
-        Compaction c{result, shape.count, rev};
+        Compaction c{result, shape.count, rev, remainingItems(recipe, stack, shape.count)};
         if (rev) reversible = c;
         else if (!first) first = c;
     });

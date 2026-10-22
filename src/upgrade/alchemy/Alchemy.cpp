@@ -48,6 +48,7 @@
 #include "mod/Module.h"
 #include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/inception/Inception.h"
 
 ABP_REGISTER_CONFIG("alchemy", abp::upgrade::alchemy::AlchemyConfig);
 
@@ -235,7 +236,7 @@ void useEffects(Actor& target, Kind kind) {
     }
 }
 
-void addEffect(Actor& target, Effect const& e, float scale) {
+void addEffect(Actor& target, Effect const& e, float scale, bool splashed = false) {
     auto const* type = mobEffect(e.id);
     if (!type) return;
     if (type->isInstantaneous()) {
@@ -243,18 +244,78 @@ void addEffect(Actor& target, Effect const& e, float scale) {
         return;
     }
     int duration = scale >= 1.f ? e.duration : static_cast<int>(scale * static_cast<float>(e.duration) + 0.5f);
-    if (duration <= 20 && scale < 1.f) return; // SC ThrownPotion: too short to matter
+    if (splashed && duration <= 20) return; // ThrownPotion.applySplash: `endsWithin(20)` is skipped
     MobEffectInstance inst(static_cast<uint>(e.id), EffectDuration{duration});
     inst.mAmplifier = e.amplifier;
     target.addEffect(inst);
 }
 
-/// SC splash definition `startUsing`: a splash potion thrown at the target's eyes.
+} // namespace
+
+/// Where SC's splash definition puts its ThrownPotion: `(x + bbWidth / 2, y + eyeHeight,
+/// z + bbWidth / 2)` of the target (feet position, Java's slightly off-centre offset kept).
+Vec3 splashImpact(Actor& target) {
+    auto        feet = target.getFeetPos();
+    auto        eye  = target.getEyePos();
+    auto const& b    = target.getAABB();
+    float       half = (b.max.x - b.min.x) / 2.f;
+    return Vec3{feet.x + half, eye.y, feet.z + half};
+}
+
+std::vector<SplashHit> splashHits(Vec3 const& impact, std::vector<std::pair<Actor*, Vec3>> const& candidates, Actor const* hit) {
+    // ThrownPotion.applySplash: living entities whose box meets the potion's box (0.25 x 0.25,
+    // feet at the impact) inflated by (4, 2, 4); within 4 blocks (squared distance to the entity's
+    // feet < 16) the strength is 1 for the entity hit, else 1 - distance / 4.
+    std::vector<SplashHit> out;
+    for (auto const& [a, feet] : candidates) {
+        float dx = feet.x - impact.x, dy = feet.y - impact.y, dz = feet.z - impact.z;
+        float d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 >= 16.f) continue;
+        out.push_back(SplashHit{a, a == hit ? 1.f : 1.f - std::sqrt(d2) / 4.f});
+    }
+    return out;
+}
+
+namespace {
+
+/// SC splash definition `startUsing`: a ThrownPotion created at the target and hit on it at once
+/// (`onHit` with an EntityHitResult): the throw sound, the splash (effects with fall-off), the
+/// splash particles in the potion's colour and the glass break sound.
 void splash(Actor& target, core::ItemStackData const& stack) {
     auto  effects = itemEffects(stack);
     auto& level   = target.getLevel();
-    auto  eye     = target.getEyePos();
-    level.playSound(SharedTypes::Legacy::LevelSoundEvent::Throw, target.getPosition(), 0.5f, 0.4f / (nextFloat() * 0.4f + 0.8f));
+    auto  feet    = target.getFeetPos();
+    auto const& tb = target.getAABB();
+    float half    = (tb.max.x - tb.min.x) / 2.f;
+    // SPLASH_POTION_THROW at (x + w/2, y, z + w/2), volume 0.5, pitch 0.4 / (r * 0.4 + 0.8).
+    level.playSound(
+        SharedTypes::Legacy::LevelSoundEvent::Throw,
+        Vec3{feet.x + half, feet.y, feet.z + half},
+        0.5f,
+        0.4f / (nextFloat() * 0.4f + 0.8f)
+    );
+    auto impact = splashImpact(target);
+    if (!effects.empty()) {
+        constexpr float kPotionHalf = 0.125f; // ThrownPotion is 0.25 x 0.25
+        AABB box{
+            Vec3{impact.x - kPotionHalf - 4.f, impact.y - 2.f, impact.z - kPotionHalf - 4.f},
+            Vec3{impact.x + kPotionHalf + 4.f, impact.y + 0.25f + 2.f, impact.z + kPotionHalf + 4.f}
+        };
+        std::vector<std::pair<Actor*, Vec3>> candidates;
+        for (auto* a : livingIn(target.getDimensionBlockSource(), box)) candidates.emplace_back(a, a->getFeetPos());
+        // Bedrock's splash potions last 3/4 of the drinkable ones (the potion's own data).
+        float mul = MobEffectInstance::splashDurationMultiplier();
+        for (auto const& h : splashHits(impact, candidates, &target)) {
+            for (auto const& e : effects) {
+                auto const* type = mobEffect(e.id);
+                if (!type) continue;
+                Effect scaled = e;
+                if (!type->isInstantaneous()) scaled.duration = static_cast<int>(static_cast<float>(e.duration) * mul);
+                addEffect(*h.actor, scaled, h.scale, true);
+            }
+        }
+    }
+    // levelEvent(2002) at the potion: splash particles in the potion colour + the break sound.
     std::vector<MobEffectInstance> instances;
     for (auto const& e : effects) {
         MobEffectInstance inst(static_cast<uint>(e.id), EffectDuration{e.duration});
@@ -262,29 +323,8 @@ void splash(Actor& target, core::ItemStackData const& stack) {
         instances.push_back(inst);
     }
     int color = static_cast<int>(MobEffectInstance::getAverageColorValue(instances).toARGB());
-    level.broadcastLevelEvent(SharedTypes::Legacy::LevelEvent::ParticlesPotionSplash, eye, color, nullptr);
-    if (effects.empty()) return;
-    // ThrownPotion.applySplash: living entities in the box (4, 2, 4) around the impact, effect
-    // strength falling off with the distance (full strength for the entity hit).
-    auto const& b   = target.getAABB();
-    AABB        box{Vec3{b.min.x - 4, b.min.y - 2, b.min.z - 4}, Vec3{b.max.x + 4, b.max.y + 2, b.max.z + 4}};
-    float       mul = MobEffectInstance::splashDurationMultiplier();
-    auto targets = livingIn(target.getDimensionBlockSource(), box);
-    if (std::find(targets.begin(), targets.end(), &target) == targets.end()) targets.push_back(&target); // the entity hit
-    for (auto* a : targets) {
-        auto  p  = a->getPosition();
-        float dx = p.x - eye.x, dy = p.y - eye.y, dz = p.z - eye.z;
-        float d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 >= 16.f && a != &target) continue;
-        float scale = a == &target ? 1.f : 1.f - std::sqrt(d2) / 4.f;
-        for (auto const& e : effects) {
-            auto const* type = mobEffect(e.id);
-            if (!type) continue;
-            Effect scaled = e;
-            if (!type->isInstantaneous()) scaled.duration = static_cast<int>(static_cast<float>(e.duration) * mul);
-            addEffect(*a, scaled, scale);
-        }
-    }
+    level.broadcastLevelEvent(SharedTypes::Legacy::LevelEvent::ParticlesPotionSplash, impact, color, nullptr);
+    level.playSound(SharedTypes::Legacy::LevelSoundEvent::Glass, impact, 1.0f, nextFloat() * 0.1f + 0.9f);
 }
 
 bool isZombieVillager(Actor& a) {
@@ -369,13 +409,14 @@ core::ItemStackData finishUsing(Kind kind, core::ItemStackData const& stack, Act
     return {};
 }
 
-/// Puts a leftover into the backpack (SC `insertItem`); what doesn't fit drops at the target.
-void returnToBackpack(game::Backpack& bp, core::ItemStackData const& left, Actor* near) {
-    if (left.empty()) return;
-    auto r = bp.inventory().insert(left, core::AccessContext{core::Source::Upgrade, nullptr});
-    bp.markDirty();
-    if (r.remainder.empty() || !near) return;
-    ItemStack rest = game::ItemConv::toStack(r.remainder);
+/// Puts a leftover into the storage (SC `getInventoryForUpgradeProcessing().insertItem`: with
+/// Inception the backpacks inside too); what doesn't fit goes to the target player.
+void returnToBackpack(std::shared_ptr<game::Backpack> const& bp, core::ItemStackData const& left, Actor* near) {
+    if (left.empty() || !bp) return;
+    int taken = inception::insertForUpgrades(bp, left, core::AccessContext{core::Source::Upgrade, nullptr});
+    bp->markDirty();
+    if (taken >= left.count || !near) return;
+    ItemStack rest = game::ItemConv::toStack(left.withCount(left.count - taken));
     if (near->isPlayer()) {
         auto& p = static_cast<Player&>(*near);
         if (p.addAndRefresh(rest) || rest.isNull() || rest.mCount <= 0) return;
@@ -385,7 +426,7 @@ void returnToBackpack(game::Backpack& bp, core::ItemStackData const& left, Actor
 
 void finish(Application& app) {
     Actor* target = findActor(app.target);
-    auto&  bp     = *app.backpack;
+    auto&  bp     = app.backpack;
     if (!target) {
         returnToBackpack(bp, app.stack, nullptr); // target gone: the item goes back
         return;
@@ -394,43 +435,59 @@ void finish(Application& app) {
     returnToBackpack(bp, finishUsing(app.kind, app.stack, *target), target);
 }
 
-/// SC `applyTo` for one target. Returns true when an item was taken.
+/// SC `applyTo` for one target, loop for loop: every filter attribute in order (the loop never
+/// stops early); for a matching one whose item definition can apply, the processing inventory
+/// (with Inception the backpacks inside too) is iterated slot by slot, and the "applying" exit
+/// check runs AFTER each slot. So a filter that matches after another one started an application
+/// still handles the first slot it visits: when that slot holds a matching item it is taken as
+/// well and its application replaces the running one (SC overwrites `stackBeingAplied`; a splash
+/// potion was already thrown in `startUsing`). Returns true when an application runs afterwards.
 bool applyTo(UpgradeContext const& ctx, Settings const& s, Actor& target) {
-    auto state = stateOf(target);
-    auto& bp   = ctx.backpack();
-    auto& inv  = bp.inventory();
+    auto state    = stateOf(target);
+    auto key      = keyOf(ctx);
+    bool applying = gApplications.contains(key);
+    auto invs     = inception::upgradeInventories(ctx.backpackPtr());
     for (auto const& f : s.filters) {
         if (f.filter.empty() || !test(f.condition, state, f.value)) continue;
         auto kind = kindOf(f.filter.id);
         if (kind == Kind::None || !canApply(kind, target, f.filter, s)) continue;
         auto filterEffects = itemEffects(f.filter);
-        for (int i = 0; i < inv.size(); ++i) {
-            auto const& stack = inv.at(i);
-            if (stack.empty() || !accepts(kind, stack.id)) continue; // cheap check before the effects
-            if (!stackMatches(kind, stack, itemEffects(stack), f.filter, filterEffects, s.matchAll, s.matchDuration, s.matchAmplifier)) {
-                continue;
+        bool exit          = false;
+        for (auto const& bp : invs) {
+            auto& inv = bp->inventory();
+            for (int i = 0; i < inv.size() && !exit; ++i) {
+                auto const& stack = inv.at(i);
+                if (!stack.empty() && accepts(kind, stack.id)
+                    && stackMatches(kind, stack, itemEffects(stack), f.filter, filterEffects, s.matchAll, s.matchDuration, s.matchAmplifier)) {
+                    auto taken = inv.extract(i, 1, core::AccessContext{core::Source::Upgrade, nullptr});
+                    if (!taken.empty()) {
+                        bp->markDirty();
+                        Application app;
+                        app.backpack = ctx.backpackPtr();
+                        app.slot     = ctx.slot();
+                        app.target   = target.getOrCreateUniqueID();
+                        app.stack    = taken.withCount(1);
+                        app.kind     = kind;
+                        if (kind == Kind::SplashPotion) {
+                            splash(target, app.stack); // SC startUsing: thrown and hit right away
+                            app.useDuration = 1;
+                        } else {
+                            app.useDuration = useDurationOf(app.stack);
+                        }
+                        app.remaining = app.useDuration;
+                        if (app.remaining > 0) {
+                            if (applying) log().debug("alchemy upgrade: {} replaces the running application", app.stack.id);
+                            applying           = true;
+                            gApplications[key] = std::move(app);
+                        }
+                    }
+                }
+                exit = applying; // SC: `() -> applying`, checked after the slot
             }
-            auto taken = inv.extract(i, 1, core::AccessContext{core::Source::Upgrade, nullptr});
-            if (taken.empty()) continue;
-            bp.markDirty();
-            Application app;
-            app.backpack = ctx.backpackPtr();
-            app.slot     = ctx.slot();
-            app.target   = target.getOrCreateUniqueID();
-            app.stack    = taken.withCount(1);
-            app.kind     = kind;
-            if (kind == Kind::SplashPotion) {
-                splash(target, app.stack);
-                app.useDuration = 1;
-            } else {
-                app.useDuration = useDurationOf(app.stack);
-            }
-            app.remaining = app.useDuration;
-            gApplications[keyOf(ctx)] = std::move(app);
-            return true;
+            if (exit) break;
         }
     }
-    return false;
+    return applying;
 }
 
 bool runCheck(UpgradeContext const& ctx, std::vector<Actor*> const& targets) {
@@ -486,7 +543,7 @@ void abortApplications() {
     gApplications.clear();
     for (auto& [key, app] : apps) {
         try {
-            returnToBackpack(*app.backpack, app.stack, nullptr);
+            returnToBackpack(app.backpack, app.stack, nullptr);
             game::Storage::get().save(*app.backpack);
         } catch (std::exception const& e) {
             log().error("alchemy upgrade: returning {} failed: {}", app.stack.id, e.what());
@@ -525,7 +582,7 @@ public:
         if (it == gApplications.end()) return;
         auto app = std::move(it->second);
         gApplications.erase(it);
-        returnToBackpack(*app.backpack, app.stack, findActor(app.target));
+        returnToBackpack(app.backpack, app.stack, findActor(app.target));
     }
 
     void onPlacedTick(PlacedTickContext const& tick) override {

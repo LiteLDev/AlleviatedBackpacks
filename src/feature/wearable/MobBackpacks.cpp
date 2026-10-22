@@ -21,12 +21,19 @@
 #include <cmath>
 #include <exception>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/entity/MobDieEvent.h"
 #include "ll/api/event/world/ServerLevelTickEvent.h"
 #include "ll/api/event/world/SpawnMobEvent.h"
+#include "ll/api/memory/Hook.h"
 #include "ll/api/service/Bedrock.h"
+
+#include "mc/entity/components_json_legacy/ExplodeComponent.h"
+#include "mc/entity/components_json_legacy/TransformationComponent.h"
+#include "mc/legacy/ActorUniqueID.h"
+#include "mc/world/effect/MobEffectIds.h"
 
 #include "mc/deps/nbt/CompoundTag.h"
 #include "mc/deps/shared_types/legacy/Difficulty.h"
@@ -259,13 +266,22 @@ float baseMaxHealth(Mob& mob) {
     return ref.mPtr ? ref.mPtr->mDefaultMaxValue : static_cast<float>(mob.getMaxHealth());
 }
 
-void raiseHealth(Mob& mob, int minDifficulty) {
-    if (!additions().buffHealth) return;
+/// SB raiseHealth: the BACKPACK_BEARER_HEALTH_BONUS modifier (+ base * minDifficulty). Returns the
+/// bonus added (0 = none), which the worn item remembers for conversions.
+float raiseHealth(Mob& mob, int minDifficulty) {
+    if (!additions().buffHealth) return 0.f;
     float base     = baseMaxHealth(mob);
     float addition = base * static_cast<float>(minDifficulty);
     auto& attrs    = attributesOf(mob);
     if (addition > 0.1f) (void)attrs.setMaxValue(SharedAttributes::HEALTH(), base + addition);
     (void)attrs.setCurrentValue(SharedAttributes::HEALTH(), static_cast<float>(mob.getMaxHealth()));
+    return addition > 0.1f ? addition : 0.f;
+}
+
+/// The health bonus recorded in a worn mob backpack (0 if none).
+float healthBonusOf(ItemStack const& stack) {
+    if (stack.isNull() || !stack.mUserData || !stack.mUserData->contains(kMobHealthBonusKey, Tag::Type::Float)) return 0.f;
+    return static_cast<float>((*stack.mUserData)[kMobHealthBonusKey]);
 }
 
 std::string armorId(int material, std::string_view piece) {
@@ -541,10 +557,13 @@ bool equipMob(Mob& mob, std::optional<core::Tier> forcedTier, std::optional<bool
             if (!rest.table.empty()) setPendingLoot(backpack, rest);
         }
     }
-    mob.setArmor(ArmorSlot::Torso, backpack);
     // Health before the potions: Bedrock's health boost effect then adds on top of the raised max
-    // (SB's attribute modifier and health boost add up the same way).
-    raiseHealth(mob, minD);
+    // (SB's attribute modifier and health boost add up the same way). The worn item remembers the
+    // bonus: SB moves its modifier to the mob a converting mob turns into.
+    if (float bonus = raiseHealth(mob, minD); bonus > 0.f) {
+        setUserData(backpack, [&](CompoundTag& tag) { tag.putFloat(std::string(kMobHealthBonusKey), bonus); });
+    }
+    mob.setArmor(ArmorSlot::Torso, backpack);
     applyPotions(mob, std::max(minD, nextInt(kMaxDifficulty + 1)), minD);
     if (c.equipWithArmor) {
         auto  ranges  = core::armorRanges(tier);
@@ -601,10 +620,174 @@ bool handleMobDeath(Mob& mob, Player* killer) {
     setUserData(item, [](CompoundTag& tag) {
         tag.remove(kMobWornKey);
         tag.remove(kMobJukeboxKey);
+        tag.remove(kMobHealthBonusKey);
     });
     mob.drop(item, false);
     return true;
 }
+
+// ---- GX-2: conversions and creepers --------------------------------------------------------------------
+
+void transferToConversion(std::int64_t sourceId, std::string const& sourceType, Mob& outcome, ItemStack const& backpack, float sourceHealth, float sourceMaxHealth) {
+    // SB copySpawnedBackpackData: the flags (here: in the worn item) go with the backpack, which
+    // Java's convertTo copies with the equipment.
+    outcome.setArmor(ArmorSlot::Torso, backpack);
+    outcome.sendArmor(std::bitset<5>{0b00100});
+    // SB transferHealthBonus: the bonus modifier goes to the outcome; its health keeps the ratio.
+    if (float bonus = healthBonusOf(backpack); bonus > 0.f && sourceMaxHealth > 0.f) {
+        float ratio = sourceHealth / sourceMaxHealth;
+        float base  = baseMaxHealth(outcome);
+        auto& attrs = attributesOf(outcome);
+        (void)attrs.setMaxValue(SharedAttributes::HEALTH(), base + bonus);
+        float max = static_cast<float>(outcome.getMaxHealth());
+        (void)attrs.setCurrentValue(SharedAttributes::HEALTH(), std::min(max, max * ratio));
+    }
+    // SB: the jukebox stops on the old mob and plays again from the new one (onLivingUpdate).
+    if (auto uuid = game::backpackUuid(backpack)) {
+        auto& mobs = jukeboxMobs();
+        auto  it   = mobs.find(sourceId);
+        if (it != mobs.end()) {
+            auto data = it->second;
+            mobs.erase(it);
+            upgrade::jukebox::Service::get().stopAll(*uuid);
+            data.pos                                     = outcome.getPosition();
+            mobs[outcome.getOrCreateUniqueID().rawID] = data;
+        }
+    }
+    log().info("wearable: {} converted into {}; its backpack and health bonus went along", sourceType, outcome.getTypeName());
+}
+
+namespace {
+CreeperStrip gLastStrip;
+
+/// Java's BENEFICIAL category: not harmful and not one of the neutral omens.
+bool isBeneficial(uint id) {
+    if (id == 0 || id >= static_cast<uint>(MobEffectIds::Count)) return false;
+    auto const& type = MobEffect::mMobEffects()[static_cast<MobEffectIds>(id)];
+    if (!type || type->mIsHarmful) return false;
+    auto e = static_cast<MobEffectIds>(id);
+    return e != MobEffectIds::BadOmen && e != MobEffectIds::TrialOmen && e != MobEffectIds::RaidOmen;
+}
+} // namespace
+
+int stripBeneficialEffects(Mob& creeper) {
+    if (!isMobWorn(creeper.getArmor(ArmorSlot::Torso))) return 0; // SB hasSpawnedBackpack
+    std::vector<uint> remove;
+    int               kept = 0;
+    for (auto const& e : creeper.getAllEffects()) {
+        if (isBeneficial(e.mId)) remove.push_back(e.mId);
+        else if (e.mId != 0) ++kept;
+    }
+    for (auto id : remove) creeper.removeEffect(static_cast<int>(id));
+    gLastStrip = {static_cast<int>(remove.size()), kept};
+    if (!remove.empty()) log().info("wearable: exploding creeper lost {} beneficial effect(s) (SB)", remove.size());
+    return static_cast<int>(remove.size());
+}
+
+CreeperStrip lastCreeperStrip() { return gLastStrip; }
+
+namespace {
+
+// LL_TYPE_INSTANCE_HOOK declares an unused counter in manual-registration mode.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-variable"
+
+/// SB LivingConversionEvent.Pre/Post: Bedrock converts mobs through the transformation component
+/// (zombie -> drowned, husk -> zombie, piglin -> zombified piglin, ...). The backpack leaves the
+/// source first (so `drop_equipment` doesn't drop it and the copy can't duplicate it) and is put
+/// on the new mob, with the health bonus.
+LL_TYPE_INSTANCE_HOOK(
+    AbpMobConversionHook,
+    ll::memory::HookPriority::Normal,
+    TransformationComponent,
+    &TransformationComponent::transformIfAble,
+    void,
+    ::Actor& actor,
+    bool     shouldRemove
+) {
+    // Only around the moment it converts (cheap while the conversion delay still runs, should the
+    // game call this every tick).
+    if (mDelayTicks > 1 || actor.isPlayer() || actor.getLevel().isClientSide() || !actor.hasCategory(ActorCategory::Mob)) {
+        origin(actor, shouldRemove);
+        return;
+    }
+    ItemStack worn = actor.getArmor(ArmorSlot::Torso);
+    if (!game::isBackpack(worn) || !isMobWorn(worn)) {
+        origin(actor, shouldRemove);
+        return;
+    }
+    auto&                            source = static_cast<Mob&>(actor);
+    float                            health = static_cast<float>(source.getHealth());
+    float                            max    = static_cast<float>(source.getMaxHealth());
+    auto                             at     = source.getPosition();
+    auto                             dim    = source.getDimensionId();
+    auto                             self   = source.getOrCreateUniqueID().rawID;
+    auto                             type   = source.getTypeName();
+    auto&                            level  = source.getLevel();
+    std::unordered_set<std::int64_t> before;
+    auto& region = source.getDimensionBlockSource();
+    AABB  box{Vec3{at.x - 3, at.y - 3, at.z - 3}, Vec3{at.x + 3, at.y + 3, at.z + 3}};
+    for (auto* a : region.getEntities(box, 0.f)) {
+        if (a) before.insert(a->getOrCreateUniqueID().rawID);
+    }
+    source.setArmor(ArmorSlot::Torso, ItemStack::EMPTY_ITEM());
+    origin(actor, shouldRemove); // `source` may be removed now: only ids from here on
+    Mob*  outcome = nullptr;
+    float best    = 0.f;
+    if (auto d = level.getDimension(dim).lock()) {
+        auto& bs = d->getBlockSourceFromMainChunkSource();
+        for (auto* a : bs.getEntities(box, 0.f)) {
+            if (!a || a->isPlayer() || !a->isAlive() || !a->hasCategory(ActorCategory::Mob)) continue;
+            auto id = a->getOrCreateUniqueID().rawID;
+            if (id == self || before.contains(id)) continue;
+            // The new mob the transformation spawned where the old one stood: the nearest new one.
+            auto  p = a->getPosition();
+            float d = (p.x - at.x) * (p.x - at.x) + (p.y - at.y) * (p.y - at.y) + (p.z - at.z) * (p.z - at.z);
+            if (!outcome || d < best) {
+                outcome = static_cast<Mob*>(a);
+                best    = d;
+            }
+        }
+    }
+    if (outcome) {
+        transferToConversion(self, type, *outcome, worn, health, max);
+        return;
+    }
+    // No conversion happened (not able yet): the source keeps its backpack.
+    auto* still = level.fetchEntity(ActorUniqueID{self}, false);
+    if (still && still->isAlive() && still->getArmor(ArmorSlot::Torso).isNull()) {
+        still->setArmor(ArmorSlot::Torso, worn);
+    } else if (!still || !still->isAlive()) {
+        // Gone without a new mob found: the storage stays (a jukebox mob's is cleaned up by the
+        // jukebox tick as for any mob that left; others have none).
+        log().warn("wearable: {} transformed but no new mob was found for its backpack", type);
+    }
+}
+
+/// SB EntityMobGriefingEvent for creepers (explodeCreeper): the beneficial effects go before the
+/// explosion, so the lingering cloud only carries the harmful ones.
+LL_TYPE_INSTANCE_HOOK(
+    AbpCreeperExplodeHook,
+    ll::memory::HookPriority::Normal,
+    ExplodeComponent,
+    &ExplodeComponent::explode,
+    void,
+    ::Actor&      actor,
+    ::Vec3 const& explosionPosition
+) {
+    if (!actor.getLevel().isClientSide() && actor.getEntityTypeId() == ActorType::Creeper) {
+        try {
+            (void)stripBeneficialEffects(static_cast<Mob&>(actor));
+        } catch (std::exception const& e) {
+            log().error("wearable: creeper effect strip failed: {}", e.what());
+        }
+    }
+    origin(actor, explosionPosition);
+}
+
+#pragma clang diagnostic pop
+
+} // namespace
 
 namespace {
 
@@ -663,8 +846,12 @@ public:
             if (consumePendingLoot(stack)) game::setItemAt(player, *bm->source(), stack);
         };
         mObserver = ui::MenuManager::get().addObserver(std::move(o));
+        AbpMobConversionHook::hook();
+        AbpCreeperExplodeHook::hook();
     }
     void uninstall() {
+        AbpCreeperExplodeHook::unhook();
+        AbpMobConversionHook::unhook();
         auto& bus = ll::event::EventBus::getInstance();
         for (auto& l : mListeners) bus.removeListener(l);
         mListeners.clear();
@@ -697,7 +884,7 @@ private:
         if (mTicks % 10 == 0) tickJukeboxMobs(level);
     }
 
-    /// Jukebox mobs play at their position (SB onLivingUpdate); a mob that left the level loses
+    /// Jukebox mobs play attached to themselves (SB onLivingUpdate + play(livingEntity)); a mob that left the level loses
     /// its backpack's storage, unless it converted (the new mob wears the same backpack).
     static void tickJukeboxMobs(Level& level) {
         auto&                                          mobs = jukeboxMobs();
@@ -712,7 +899,8 @@ private:
                 it->second.dim = static_cast<int>(actor->getDimensionId());
                 if (auto bp = game::Storage::get().find(uuid)) {
                     auto& jukebox = upgrade::jukebox::Service::get();
-                    jukebox.tickPlaced(bp, it->second.dim, it->second.pos);
+                    // SB wrapper.play(livingEntity): the music is attached to the mob.
+                    jukebox.tickCarrier(bp, it->first);
                     if (!jukebox.playing(uuid, 0)) (void)jukebox.play(upgrade::UpgradeContext(bp, 0), nullptr);
                 }
                 ++it;

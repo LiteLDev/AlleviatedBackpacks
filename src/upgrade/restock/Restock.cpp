@@ -17,6 +17,7 @@
 #include "upgrade/deposit/ContainerTransfer.h"
 #include "upgrade/deposit/TestSupport.h"
 #include "upgrade/filter/FilterCommon.h"
+#include "upgrade/inception/Inception.h"
 
 namespace abp::upgrade::restock {
 
@@ -25,7 +26,6 @@ transfer::Result run(UpgradeContext const& ctx, Container& container, int face, 
     // backpack); every inserted chunk (at most a max stack) counts as one stack.
     transfer::Result out;
     auto&            backpack = ctx.backpack();
-    auto&            inv      = backpack.inventory();
     auto             filter   = transfer::loadFilter(ctx, advanced);
     core::AccessContext const access{core::Source::Upgrade, ctx.player()};
     int                       size = container.getContainerSize();
@@ -37,8 +37,8 @@ transfer::Result run(UpgradeContext const& ctx, Container& container, int face, 
         int left = data.count;
         while (left > 0) {
             int  chunk = std::min(std::max(1, data.maxStack), left);
-            auto r     = inv.insert(data.withCount(chunk), access);
-            int  moved = r.inserted + r.voided;
+            // SC: into getInventoryForUpgradeProcessing (with Inception the backpacks inside too).
+            int moved = inception::insertForUpgrades(ctx.backpackPtr(), data.withCount(chunk), access);
             if (moved <= 0) break;
             container.removeItem(s, moved);
             ++out.stacks;

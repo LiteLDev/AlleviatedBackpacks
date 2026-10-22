@@ -106,6 +106,9 @@ public:
     int quickMoveToStorage(Player& player, ItemStack const& stack);
     /// Where the open backpack item sits on the player (nullopt when not bound to an item).
     [[nodiscard]] std::optional<game::ItemLocation> const& source() const { return mSource; }
+    /// (Additive, GX-2) The backpack item this menu was opened from: the carried item at
+    /// `source()`; a placed backpack's menu reports the placed item. Empty if none (commands).
+    [[nodiscard]] virtual core::ItemStackData openedItem(Player& player) const;
 
     [[nodiscard]] std::shared_ptr<game::Backpack> const& backpack() const { return mBackpack; }
     [[nodiscard]] View                                   view() const { return mView; }

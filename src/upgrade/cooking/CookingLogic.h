@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <vector>
 
 #include "nlohmann/json.hpp"
 
@@ -285,13 +286,46 @@ struct AutoEnv {
     core::AccessContext      access{core::Source::Upgrade};
     /// Called after output was pushed into the storage (SC tryPushingXpToTanks).
     std::function<void(CookState&)> pushXp;
+    /// SC getInventoryForUpgradeProcessing with Inception: the inventories in processing order
+    /// (empty = just `inventory`).
+    std::vector<core::BackpackInventory*> chain{};
+
+    [[nodiscard]] std::vector<core::BackpackInventory*> inventories() const {
+        return chain.empty() ? std::vector<core::BackpackInventory*>{&inventory} : chain;
+    }
 };
 
 namespace detail {
 
 inline int insertAmount(AutoEnv const& a, core::ItemStackData const& stack, bool simulate) {
-    auto r = a.inventory.insert(stack, a.access, simulate);
-    return r.inserted + r.voided;
+    int  moved = 0;
+    auto rest  = stack;
+    for (auto* inv : a.inventories()) {
+        if (rest.count <= 0) break;
+        auto r  = inv->insert(rest, a.access, simulate);
+        int  n  = r.inserted + r.voided;
+        moved  += n;
+        rest    = rest.withCount(rest.count - n);
+    }
+    return moved;
+}
+
+/// SC InventoryHelper.extractFromInventory over the processing inventories, in order.
+inline core::ItemStackData extractAcross(
+    AutoEnv const&                                         a,
+    std::function<bool(core::ItemStackData const&)> const& same,
+    int                                                    count,
+    bool                                                   simulate
+) {
+    core::ItemStackData got;
+    for (auto* inv : a.inventories()) {
+        int want = count - (got.empty() ? 0 : got.count);
+        if (want <= 0) break;
+        auto e = inv->extractMatching(same, want, a.access, simulate);
+        if (e.empty()) continue;
+        got = got.empty() ? e : got.withCount(got.count + e.count);
+    }
+    return got;
 }
 
 /// SC tryPushingOutput().
@@ -319,9 +353,12 @@ inline void tryPushingOutput(CookState& s, CookEnv const& env, AutoEnv const& a)
 inline bool tryPulling(core::ItemStackData& slot, std::function<bool(core::ItemStackData const&)> const& valid, AutoEnv const& a) {
     core::ItemStackData toExtract;
     if (slot.empty()) {
-        for (int i = 0; i < a.inventory.size() && toExtract.empty(); ++i) {
-            auto const& st = a.inventory.at(i);
-            if (!st.empty() && valid(st)) toExtract = st.withCount(std::max(st.maxStack, 1));
+        for (auto* inv : a.inventories()) {
+            for (int i = 0; i < inv->size() && toExtract.empty(); ++i) {
+                auto const& st = inv->at(i);
+                if (!st.empty() && valid(st)) toExtract = st.withCount(std::max(st.maxStack, 1));
+            }
+            if (!toExtract.empty()) break;
         }
         if (toExtract.empty()) return true;
     } else if (slot.count >= std::max(slot.maxStack, 1) || !valid(slot)) {
@@ -330,8 +367,8 @@ inline bool tryPulling(core::ItemStackData& slot, std::function<bool(core::ItemS
         toExtract = slot.withCount(std::max(slot.maxStack, 1) - slot.count);
     }
     auto same = [&](core::ItemStackData const& x) { return x.sameItem(toExtract); };
-    if (a.inventory.extractMatching(same, toExtract.count, a.access, true).empty()) return true;
-    auto got = a.inventory.extractMatching(same, toExtract.count, a.access, false);
+    if (extractAcross(a, same, toExtract.count, true).empty()) return true;
+    auto got = extractAcross(a, same, toExtract.count, false);
     if (got.empty()) return true;
     int have = slot.empty() ? 0 : slot.count;
     slot     = got.withCount(got.count + have);

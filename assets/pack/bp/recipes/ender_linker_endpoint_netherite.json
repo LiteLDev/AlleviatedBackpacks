@@ -1,0 +1,28 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:ender_linker_endpoint_netherite"
+    },
+    "tags": [
+      "crafting_table"
+    ],
+    "ingredients": [
+      {
+        "item": "alleviatedbackpacks:ender_linker"
+      },
+      {
+        "item": "alleviatedbackpacks:netherite_backpack"
+      }
+    ],
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:ender_linker"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:ender_linker",
+      "count": 1
+    }
+  }
+}

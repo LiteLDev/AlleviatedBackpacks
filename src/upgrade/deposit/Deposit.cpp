@@ -17,6 +17,7 @@
 #include "upgrade/deposit/ContainerTransfer.h"
 #include "upgrade/deposit/TestSupport.h"
 #include "upgrade/filter/FilterCommon.h"
+#include "upgrade/inception/Inception.h"
 
 namespace abp::upgrade::deposit {
 
@@ -24,13 +25,15 @@ transfer::Result run(UpgradeContext const& ctx, Container& container, int face, 
     // SB DepositUpgradeWrapper.depositToHandler: InventoryHelper.transfer(backpack -> filtered
     // container); every inserted chunk (at most a max stack) counts as one stack.
     transfer::Result out;
-    auto&            inv    = ctx.backpack().inventory();
     auto             filter = transfer::loadFilter(ctx, advanced);
     // INVENTORY: the container's unique stacks, captured once before the transfer.
     auto reference = filter.filterByInventory ? transfer::distinctItems(container) : std::vector<core::ItemStackData>{};
     core::AccessContext const access{core::Source::Upgrade, ctx.player()};
     core::AccessContext const internal{core::Source::Internal, ctx.player()};
-    for (int i = 0; i < inv.size(); ++i) {
+    // SC getInventoryForUpgradeProcessing: with Inception also the backpacks inside, in order.
+    for (auto const& source : inception::upgradeInventories(ctx.backpackPtr()))
+    for (int i = 0, n = source->inventory().size(); i < n; ++i) {
+        auto& inv = source->inventory();
         auto stack = inv.at(i);
         if (stack.empty() || !filter.matchesContents(stack, reference, &filtering::matcher())) continue;
         int maxStack = std::max(1, stack.maxStack);

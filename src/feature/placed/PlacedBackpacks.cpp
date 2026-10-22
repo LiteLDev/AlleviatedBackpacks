@@ -58,6 +58,7 @@
 #include "mod/Module.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/inception/Inception.h"
 #include "upgrade/jukebox/Jukebox.h"
 
 ABP_REGISTER_CONFIG("placed", abp::placed::PlacedConfig);
@@ -200,6 +201,11 @@ public:
       mLoc(loc) {}
 
     [[nodiscard]] BlockLocation const& loc() const { return mLoc; }
+
+    [[nodiscard]] core::ItemStackData openedItem(Player&) const override {
+        auto e = PlacedBackpacks::get().at(mLoc);
+        return e ? e->item : core::ItemStackData{};
+    }
 
     void onTick(Player& player) override {
         auto e = PlacedBackpacks::get().at(mLoc);
@@ -715,7 +721,11 @@ BlockParts PlacedBackpacks::partsFor(BlockLocation const& loc, game::Backpack& b
 
 int PlacedBackpacks::comparatorSignal(BlockSource& region, BlockPos const& pos) {
     auto bp = backpackAt(region, pos);
-    return bp ? core::comparatorSignal(bp->inventory()) : 0;
+    if (!bp) return 0;
+    // SB getInventoryForInputOutput: with Inception the backpacks inside count too.
+    std::vector<core::BackpackInventory const*> invs;
+    for (auto const& b : upgrade::inception::upgradeInventories(bp)) invs.push_back(&b->inventory());
+    return core::comparatorSignal(invs);
 }
 
 bool PlacedBackpacks::useFluidContainer(Player& player, BlockPos const& pos) {
@@ -780,7 +790,7 @@ void PlacedBackpacks::maintain(BlockSource& region, PlacedEntry const& e, std::s
         }
     }
     // Comparators next to it re-read the fill level when it changes.
-    int signal = core::comparatorSignal(bp->inventory());
+    int signal = comparatorSignal(region, pos); // with Inception: the backpacks inside too
     if (auto it = mSignals.find(e.loc); it == mSignals.end() || it->second != signal) {
         mSignals[e.loc] = signal;
         region.updateNeighborsAt(pos);
@@ -852,8 +862,9 @@ void PlacedBackpacks::onBlockChanged(BlockSource& region, BlockPos const& pos, B
         auto it = mEntries.find(loc);
         if (it == mEntries.end()) return;
         auto entry = it->second;
-        // SB: Everlasting gives the block bedrock's blast resistance: explosions don't break it.
-        if (tExploding > 0) {
+        // SB: Everlasting gives the block bedrock's blast resistance: explosions don't break it;
+        // nor do the Wither and the Ender Dragon (canEntityDestroy, see EntityGriefing.cpp).
+        if (tExploding > 0 || entityBreakingBlocks()) {
             if (auto bp = game::Storage::get().find(entry.uuid); bp && hasEverlasting(*bp)) {
                 mRestore.push_back({entry, &previous});
                 return;

@@ -83,6 +83,33 @@ bool handleMobDeath(Mob& mob, Player* killer);
 /// Shared RNG of the unit (server thread).
 [[nodiscard]] std::mt19937& rng();
 
+// ---- GX-2: conversions and creepers (SB handleLivingConversion / removeBeneficialEffects) -------
+
+/// User-data key of a worn mob backpack: the max health bonus its wearer got (SB's
+/// BACKPACK_BEARER_HEALTH_BONUS modifier; float).
+inline constexpr std::string_view kMobHealthBonusKey = "abp_mob_health_bonus";
+
+/// SB handleLivingConversion: the mob `sourceId` (wearing a mob backpack) turned into `outcome`.
+/// The outcome wears the backpack with its flags (and its jukebox keeps playing from it) and gets
+/// the health bonus, keeping the health ratio. Called by the transformation hook.
+void transferToConversion(
+    std::int64_t       sourceId,
+    std::string const& sourceType,
+    Mob&               outcome,
+    ItemStack const&   backpack,
+    float              sourceHealth,
+    float              sourceMaxHealth
+);
+/// SB removeBeneficialEffects: a creeper that spawned with a backpack loses its beneficial
+/// effects when it explodes (before its effect cloud is made). Returns how many were removed.
+int stripBeneficialEffects(Mob& creeper);
+/// The last creeper explosion the hook saw (selftests): effects removed / kept.
+struct CreeperStrip {
+    int removed = -1;
+    int kept    = -1;
+};
+[[nodiscard]] CreeperStrip lastCreeperStrip();
+
 // ---- chest loot (SB inject tables) ----------------------------------------------------------------
 
 /// "loot_tables/chests/x.json" -> "chests/x".
