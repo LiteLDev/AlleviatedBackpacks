@@ -58,6 +58,10 @@ std::unordered_map<std::string, Clock::time_point> gWanted;   ///< uuid -> last 
 
 std::thread::id gClientThread;
 
+// Transforms of client-only display entities (setEntityXf).
+std::shared_mutex                                gXfMutex;
+std::unordered_map<Actor const*, EntityXf>       gXf;
+
 // Accent colour by main colour (24 bit) of the backpacks rendered recently: the cloth tint
 // (changeColor) comes from the item colour, which the server keeps equal to the main colour, so
 // the draw call of a backpack can be recognised by it and given its accent (changeColor2) even
@@ -104,6 +108,14 @@ float argOf(RenderParams& params, std::vector<ExpressionNode> const& args, std::
 
 bool isDisplayEntity(Actor const& actor) { return actor.getTypeName() == kDisplayEntityId; }
 
+/// Ticks (20 per second) since the client started, wrapped (at a multiple of every flipbook's
+/// frames x ticks per frame) to keep the float exact.
+double animationTicks() {
+    static auto const start = Clock::now();
+    double t = std::chrono::duration<double>(Clock::now() - start).count() * 20.0;
+    return std::fmod(t, 20.0 * 32.0 * 16.0 * 10.0);
+}
+
 /// The item the attachable being rendered stands for.
 ItemStack const* itemOf(RenderParams const& params) {
     if (params.mItemStackBasePtr && !params.mItemStackBasePtr->isNull()) return static_cast<ItemStack const*>(params.mItemStackBasePtr);
@@ -136,6 +148,7 @@ float field(ModelSnapshot const* s, ModelField f, RenderParams const& params) {
     switch (f) {
     case ModelField::Known: return s ? 1.0f : 0.0f;
     case ModelField::Context: return static_cast<float>(contextOf(params));
+    case ModelField::AnimTicks: return static_cast<float>(animationTicks());
     default: break;
     }
     if (!s) return 0;
@@ -154,12 +167,34 @@ float field(ModelSnapshot const* s, ModelField f, RenderParams const& params) {
     case ModelField::HasDisplay: return m.display ? 1.0f : 0.0f;
     case ModelField::DisplayRot: return m.display ? static_cast<float>(m.display->rotation) : 0.0f;
     case ModelField::DisplayZ: return m.display ? static_cast<float>(m.display->zOffset) : 0.0f;
+    case ModelField::LeftR:
+    case ModelField::LeftG:
+    case ModelField::LeftB:
+    case ModelField::RightR:
+    case ModelField::RightG:
+    case ModelField::RightB: {
+        bool        left = f == ModelField::LeftR || f == ModelField::LeftG || f == ModelField::LeftB;
+        auto const& tank = left ? m.left : m.right;
+        if (!tank) return 1.0f;
+        int shift = 16 - 8 * (static_cast<int>(f) - static_cast<int>(left ? ModelField::LeftR : ModelField::RightR));
+        return static_cast<float>((fluidSpriteTint(*tank) >> shift) & 0xFF) / 255.0f;
+    }
     default: return 0;
     }
 }
 
 MolangScriptArg const& modelQuery(RenderParams& params, std::vector<ExpressionNode> const& args) {
     int n = static_cast<int>(argOf(params, args, 0));
+    if (n >= kEntityXfField && n < kEntityXfField + 8) {
+        std::optional<EntityXf> xf;
+        if (params.mActor) {
+            std::shared_lock lock(gXfMutex);
+            if (auto it = gXf.find(params.mActor); it != gXf.end()) xf = it->second;
+        }
+        if (!xf) return ret(params, 0.0f);
+        float const v[8] = {1.0f, xf->px, xf->py, xf->pz, xf->rx, xf->ry, xf->rz, xf->scale};
+        return ret(params, v[n - kEntityXfField]);
+    }
     if (n >= 30) {
         auto& pose = model::debugPose((n - 30) / 8);
         int   k    = (n - 30) % 8;
@@ -174,6 +209,7 @@ MolangScriptArg const& modelQuery(RenderParams& params, std::vector<ExpressionNo
 // ---- tint ------------------------------------------------------------------------------------------
 struct Tint {
     mce::Color main, accent;
+    mce::Color leftFluid{1, 1, 1, 1}, rightFluid{1, 1, 1, 1}; ///< tank fluid sprite tints (GX-1)
 };
 thread_local std::vector<Tint> tTint; ///< colours of the backpack attachable(s) being set up / drawn
 
@@ -186,7 +222,10 @@ std::optional<Tint> tintFor(ItemStack const& item) {
     auto snap = modelFor(item);
     std::uint32_t main   = snap ? snap->mainColor : core::render::kDefaultMainColor;
     std::uint32_t accent = snap ? snap->accentColor : core::render::kDefaultAccentColor;
-    return Tint{toColor(main), toColor(accent)};
+    Tint t{toColor(main), toColor(accent)};
+    if (snap && snap->model.left) t.leftFluid = toColor(fluidSpriteTint(*snap->model.left));
+    if (snap && snap->model.right) t.rightFluid = toColor(fluidSpriteTint(*snap->model.right));
+    return t;
 }
 
 struct TintScope {
@@ -203,6 +242,24 @@ struct TintScope {
 };
 
 } // namespace
+
+void setEntityXf(Actor const* displayEntity, std::optional<EntityXf> xf) {
+    std::unique_lock lock(gXfMutex);
+    if (xf) gXf[displayEntity] = *xf;
+    else gXf.erase(displayEntity);
+}
+
+std::uint32_t fluidSpriteTint(core::render::TankModel const& tank) {
+    using core::render::FluidLook;
+    switch (core::render::fluidLook(tank.fluid)) {
+    case FluidLook::Water:
+    case FluidLook::Milk:
+    case FluidLook::Potion:
+        return tank.color;
+    default:
+        return 0xFFFFFFFF;
+    }
+}
 
 std::optional<ModelSnapshot> modelFor(std::string const& uuid) {
     want(uuid);
@@ -279,6 +336,31 @@ LL_STATIC_HOOK(
     float                  uvRot1,
     float                  uvRot2
 ) {
+    {
+        static std::unordered_set<std::uint64_t> seen;
+        std::uint64_t key = (tTint.empty() ? 1ull : 2ull) + 10 * static_cast<std::uint64_t>(std::lround(uvAnim.x * 4.f)) + 1000 * static_cast<std::uint64_t>(std::lround(uvAnim.w * 64.f))
+                          + 1000000 * static_cast<std::uint64_t>(std::lround(overlay.r * 20.f)) + 100000000ull * static_cast<std::uint64_t>(std::lround(overlay.g * 20.f));
+        if (seen.size() < 40 && seen.insert(key).second) {
+            log().info("tint debug: scope {} change {:.3f},{:.3f},{:.3f},{:.3f} uvAnim {:.3f},{:.3f},{:.3f},{:.3f} overlay {:.3f},{:.3f},{:.3f},{:.3f}", tTint.size(), changeColor.r, changeColor.g,
+                       changeColor.b, changeColor.a, uvAnim.x, uvAnim.y, uvAnim.z, uvAnim.w, overlay.r, overlay.g, overlay.b, overlay.a);
+        }
+    }
+    if (!tTint.empty()) {
+        // Tank fluid controllers: their uv_anim U offset is 2 (left tank) or 3 (right tank); their
+        // entity_alphatest_change_color material multiplies the sprite by the fluid's tint.
+        auto const& t = tTint.back();
+        if (uvAnim.x > 1.5f && uvAnim.x < 3.5f) {
+            auto const& fluid = uvAnim.x < 2.5f ? t.leftFluid : t.rightFluid;
+            return origin(entityConstants, renderContext, tileLightColor, tileLightColorUV, blockLightColor, overlay, fluid, changeColor2, glintColor, glintUVScale, uvAnim, uvOffset1, uvOffset2, uvRot1, uvRot2);
+        }
+        // Their overlay colour (alpha 0: no visible overlay) carries the tank side too:
+        // g 0.75, b 0.125, r 0.5 (left) / 0.75 (right).
+        if (overlay.a < 0.01f && std::abs(overlay.g - 0.75f) < 0.02f && std::abs(overlay.b - 0.125f) < 0.02f) {
+            auto const&      fluid = overlay.r < 0.625f ? t.leftFluid : t.rightFluid;
+            mce::Color const none{0.f, 0.f, 0.f, 0.f};
+            return origin(entityConstants, renderContext, tileLightColor, tileLightColorUV, blockLightColor, none, fluid, changeColor2, glintColor, glintUVScale, uvAnim, uvOffset1, uvOffset2, uvRot1, uvRot2);
+        }
+    }
     if (!tTint.empty()) {
         // entity_alphatest_multicolor_tint: texture red = cloth (main colour), green = border
         // (accent colour), like SB's tint indexes 0 and 1.

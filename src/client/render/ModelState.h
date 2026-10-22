@@ -18,6 +18,7 @@
 
 #include "core/render/BackpackModel.h"
 
+class Actor;
 class ItemStackBase;
 
 namespace abp::client::render {
@@ -51,7 +52,33 @@ enum class ModelField : int {
     HasDisplay  = 12, ///< an item display is set
     DisplayRot  = 13, ///< item display rotation (degrees)
     DisplayZ    = 14, ///< item display z offset (item pixels, SC -16..16)
+    // GX-1: tank fluids drawn with the fluid's own still sprite (flipbook frame + tint).
+    AnimTicks   = 15, ///< client animation ticks (20 per second) for flipbook frames
+    LeftR       = 16, ///< left tank fluid tint, red 0..1 (white for untinted sprites)
+    LeftG       = 17,
+    LeftB       = 18,
+    RightR      = 19,
+    RightG      = 20,
+    RightB      = 21,
 };
+
+/// GX-1: the attachable's xf bone transform of a client-only display entity (dropped backpacks,
+/// item frames: SB's "ground" / "fixed" display transforms), read by the "placed" animation
+/// through `query.abp_model(80 + k)`: k 0 = set, 1..3 position (model pixels), 4..6 rotation
+/// (degrees), 7 scale.
+inline constexpr int kEntityXfField = 80;
+struct EntityXf {
+    float px = 0, py = 0, pz = 0;
+    float rx = 0, ry = 0, rz = 0;
+    float scale = 1;
+};
+/// Sets (or with nullopt clears) the transform of `displayEntity`. Thread safe.
+void setEntityXf(Actor const* displayEntity, std::optional<EntityXf> xf);
+
+/// Tint of a tank fluid's still sprite (NeoForge fluid types): water's colour, milk / potion
+/// colours on the grey water sprite; lava and our own sprites (honey, powder snow, experience)
+/// untinted. ARGB.
+[[nodiscard]] std::uint32_t fluidSpriteTint(core::render::TankModel const& tank);
 
 /// Entity id of the placed-backpack display entity.
 inline constexpr std::string_view kDisplayEntityId = "alleviatedbackpacks:backpack_display";

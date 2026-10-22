@@ -80,6 +80,9 @@ public:
 
     /// Textured quad from a resource-pack path such as "textures/ui/arrow", multiplied by `tint`.
     void texture(std::string const& path, Rect const& r, float alpha = 1, Layer layer = Layer::Foreground, Color tint = Color{});
+    /// Part of a texture: `uv` is the source rectangle in texture fractions (0..1), e.g. one frame
+    /// of a flipbook strip.
+    void textureUV(std::string const& path, Rect const& r, Rect const& uv, float alpha = 1, Layer layer = Layer::Foreground, Color tint = Color{});
 
     /// Replay all recorded commands in layer order.
     void flush();

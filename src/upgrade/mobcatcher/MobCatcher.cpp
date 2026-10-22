@@ -3,6 +3,7 @@
 // slot blocking and the data the client overlay draws.
 
 #include "upgrade/mobcatcher/MobCatcher.h"
+#include "upgrade/mobcatcher/CaptureEffect.h"
 
 #include <algorithm>
 #include <cctype>
@@ -208,6 +209,15 @@ bool skipDataId(int id) {
 
 /// The entity's synched data (what an AddActorPacket carries: variant, colours, flags, ...), so the
 /// client's display copy looks like the captured mob. [[id, type, value], ...]
+/// The entity's actor properties (e.g. `minecraft:climate_variant` of cows and chickens): the
+/// "properties" compound of its saved NBT (PropertyComponent::addAdditionalSaveData) as base64
+/// binary NBT, "" when it has none. The client applies them to the display copy (GX-1; SB loads
+/// the whole entity NBT into its preview entity).
+std::string propertiesOf(CompoundTag const& tag) {
+    if (!tag.contains("properties", Tag::Type::Compound)) return {};
+    return core::base64Encode(tag.at("properties").get<CompoundTag>().toBinaryNbt());
+}
+
 nlohmann::json syncedData(Actor& actor) {
     nlohmann::json arr = nlohmann::json::array();
     try {
@@ -581,6 +591,43 @@ constexpr int                                    kUseCooldownTicks = 10;
 std::int64_t                                     gTick = 0;
 std::unordered_map<std::int64_t, std::int64_t>   gLastUse; ///< player -> tick of the last capture use
 
+/// Capture effect endings (SB finishEffect) due once the clients' shrink animation is over.
+struct EndEffect {
+    std::int64_t player;
+    Vec3         at;
+    std::int64_t due;
+};
+std::vector<EndEffect> gEndEffects;
+int                    gCaptureTicksOverride = 0;
+
+/// SB MobCatcherCaptureEffectPayload to the companion players within 64 blocks; returns the
+/// animation's length in ticks.
+int sendCaptureEffect(Player& player, Actor& target, nlohmann::json const& look, Vec3 const& collapse) {
+    int  ticks = gCaptureTicksOverride > 0 ? gCaptureTicksOverride : kCaptureAnimationTicks;
+    auto pos   = target.getPosition();
+    if (target.hasCategory(ActorCategory::Mob)) pos = target.getFeetPos();
+    float yaw = target.getRotation().y;
+    if (auto* mob = Mob::tryGetFromEntity(target.getEntityContext(), false)) yaw = mob->getYBodyRotation();
+    nlohmann::json body{
+        {"type",     target.getTypeName()                                },
+        {"data",     look.value("data", nlohmann::json::array())         },
+        {"pos",      {pos.x, pos.y, pos.z}                               },
+        {"collapse", {collapse.x, collapse.y, collapse.z}                },
+        {"yaw",      yaw                                                 },
+        {"pitch",    target.getRotation().x                              },
+        {"size",     {look.value("bbWidth", 0.6f), look.value("bbHeight", 1.8f)}},
+        {"ticks",    ticks                                               },
+    };
+    if (look.contains("properties")) body["properties"] = look["properties"];
+    auto dim = player.getDimensionId();
+    player.getLevel().forEachPlayer([&](Player& other) {
+        if (other.getDimensionId() != dim || other.getPosition().distanceTo(pos) > kCaptureEffectRange) return true;
+        if (net::hasCompanion(other)) net::send(other, MobCaptureEffectPacket{body});
+        return true;
+    });
+    return ticks;
+}
+
 /// The held backpack and its best catcher, if the player can capture with it.
 std::shared_ptr<game::Backpack> heldCatcherBackpackImpl(Player& player, bool* advanced = nullptr) {
     auto const& held = player.getSelectedItem();
@@ -637,6 +684,17 @@ bool onUseTowardMob(Player& player) {
 void serve(Level& level) {
     ++gTick;
     gSeenThisTick.clear();
+    if (!gEndEffects.empty()) {
+        std::vector<EndEffect> due;
+        std::erase_if(gEndEffects, [&](EndEffect const& e) {
+            if (e.due > gTick) return false;
+            due.push_back(e);
+            return true;
+        });
+        for (auto const& e : due) {
+            if (auto* player = level.getPlayer(ActorUniqueID{e.player})) captureEffect(*player, e.at);
+        }
+    }
     if (gPending.empty()) return;
     auto pending = std::move(gPending);
     gPending.clear();
@@ -707,6 +765,7 @@ public:
     void uninstall() {
         gInstalled = false;
         gPending.clear();
+        gEndEffects.clear();
         gSeenThisTick.clear();
         gLastUse.clear();
         auto& bus = ll::event::EventBus::getInstance();
@@ -726,6 +785,8 @@ private:
 } // namespace
 
 // ---- public API -----------------------------------------------------------------------------------------
+
+void setCaptureAnimationTicksForTests(int ticks) { gCaptureTicksOverride = std::max(0, ticks); }
 
 std::shared_ptr<game::Backpack> heldCatcherBackpack(Player& player, bool* advanced) {
     return heldCatcherBackpackImpl(player, advanced);
@@ -818,11 +879,15 @@ CaptureResult capture(Player& player, std::shared_ptr<game::Backpack> const& bac
         {"columns",  cols                                                           },
         {"data",     syncedData(target)                                             },
     };
+    if (auto props = propertiesOf(tag); !props.empty()) m.look["properties"] = std::move(props);
     auto effectAt = collapsePosition(player, target);
     mobs.push_back(m);
     saveCapturedMobs(*backpack, mobs);
+    // SB: the capture effect payload (the clients' shrink animation), then the entity is discarded;
+    // the effect's poof / pop follow when the animation is over.
+    int animationTicks = sendCaptureEffect(player, target, m.look, effectAt);
     target.despawn();
-    captureEffect(player, effectAt);
+    gEndEffects.push_back({player.getOrCreateUniqueID().rawID, effectAt, gTick + animationTicks});
     pushRenderInfo(player, *backpack);
     log().info("mob catcher: {} captured {} into {} at slot {} ({}x{}, cost {})", player.getRealName(), m.entityType, backpack->uuid(), m.slot, m.width, m.height, cost);
     return {true, trFor(player, "abp.mobcatcher.status.captured", "Captured {}", mobName(m))};

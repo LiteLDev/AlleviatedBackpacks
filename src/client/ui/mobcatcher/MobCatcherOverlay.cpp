@@ -103,6 +103,12 @@ struct EntityCache {
             log().warn("mob catcher: unable to create render entity for captured mob {} ({})", mob.displayName, mob.entityType);
             return nullptr;
         }
+        // Actor properties (climate variants, ...): SB loads the whole entity NBT into the copy.
+        if (auto props = mob.look.value("properties", std::string{}); !props.empty()) {
+            if (render::applyProperties(e->actor(), props) && logged.insert(mob.id + "#props").second) {
+                log().info("mob catcher: applied the properties of captured mob {} ({})", mob.displayName, mob.entityType);
+            }
+        }
         return entities.emplace(mob.id, std::move(e)).first->second.get();
     }
 

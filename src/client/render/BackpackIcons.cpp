@@ -3,11 +3,16 @@
 #include "client/render/BackpackIcons.h"
 
 #include <string>
+#include <vector>
 
 #include "ll/api/memory/Hook.h"
 
 #include "mc/client/gui/controls/UIControl.h"
+#include "mc/client/gui/controls/renderers/IInventoryItemRendererRenderContext.h"
+#include "mc/client/gui/controls/renderers/InventoryItemRenderOwnerData.h"
 #include "mc/client/gui/controls/renderers/InventoryItemRenderer.h"
+#include "mc/client/gui/screens/ComponentRenderBatch.h"
+#include "mc/client/renderer/screen/MinecraftUIRenderContext.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "client/render/ModelState.h"
@@ -64,8 +69,130 @@ bool drawBackpackIcon(ui::Painter& p, ItemStack const& stack, float x, float y, 
     return true;
 }
 
+// ---- vanilla item slots (GX-1) ---------------------------------------------------------------------
+//
+// SB renders its backpack model (both colours, every part) wherever an item is drawn. Vanilla
+// Bedrock slots (inventory, hotbar, containers) draw items through InventoryItemRenderer: `render`
+// gets the UI render context, `_render` the slot's screen position and scale and draws the icon
+// sprite (one atlas sprite, one item colour). For backpacks `_render` draws the layered icon above
+// instead (count and durability are separate controls and stay vanilla).
+
+// Vanilla item slots are batched into one shared mesh on the item atlas (begin/endSharedMeshBatch):
+// images drawn while it is open would sample the atlas. Icons met inside a batch are drawn right
+// after it ends, before anything later in the screen.
+
+namespace {
+struct DeferredIcon {
+    ItemStack stack;
+    float     x, y, scale;
+};
+thread_local MinecraftUIRenderContext* tSlotContext = nullptr;
+thread_local int                       tMeshBatchDepth = 0;
+thread_local std::vector<DeferredIcon> tDeferred;
+bool                                   gSlotLogged = false;
+
+void drawDeferred(MinecraftUIRenderContext& ctx) {
+    if (tDeferred.empty()) return;
+    auto icons = std::move(tDeferred);
+    tDeferred.clear();
+    ui::Painter p(ctx);
+    for (auto const& d : icons) drawBackpackIcon(p, d.stack, d.x, d.y, d.scale);
+    p.flush();
+}
+} // namespace
+
+LL_TYPE_INSTANCE_HOOK(
+    AbpBeginSharedMeshBatchHook,
+    ll::memory::HookPriority::Normal,
+    MinecraftUIRenderContext,
+    &MinecraftUIRenderContext::$beginSharedMeshBatch,
+    void,
+    ::ComponentRenderBatch& renderBatch
+) {
+    ++tMeshBatchDepth;
+    origin(renderBatch);
+}
+
+LL_TYPE_INSTANCE_HOOK(
+    AbpEndSharedMeshBatchHook,
+    ll::memory::HookPriority::Normal,
+    MinecraftUIRenderContext,
+    &MinecraftUIRenderContext::$endSharedMeshBatch,
+    void,
+    ::ComponentRenderBatch& renderBatch
+) {
+    origin(renderBatch);
+    if (tMeshBatchDepth > 0) --tMeshBatchDepth;
+    if (tMeshBatchDepth == 0) drawDeferred(*this);
+}
+
+LL_TYPE_INSTANCE_HOOK(
+    AbpInventoryItemRenderHook,
+    ll::memory::HookPriority::Normal,
+    InventoryItemRenderer,
+    &InventoryItemRenderer::$render,
+    void,
+    ::MinecraftUIRenderContext& renderContext,
+    ::IClientInstance&          client,
+    ::UIControl&                owner,
+    int                         pass
+) {
+    auto* previous = tSlotContext;
+    tSlotContext   = &renderContext;
+    origin(renderContext, client, owner, pass);
+    tSlotContext = previous;
+}
+
+LL_TYPE_INSTANCE_HOOK(
+    AbpInventoryItemDrawHook,
+    ll::memory::HookPriority::Normal,
+    InventoryItemRenderer,
+    &InventoryItemRenderer::_render,
+    void,
+    ::IInventoryItemRendererRenderContext& renderContext,
+    ::InventoryItemRenderOwnerData const&  owner,
+    int                                    pass
+) {
+    ItemStack const& stack = *mItemInstance;
+    if (tSlotContext && !mHidingIcon && !stack.isNull() && game::backpackTierOf(stack.getTypeName())) {
+        if (pass == 0) {
+            float scale = owner.mScale;
+            if (tMeshBatchDepth > 0) {
+                tDeferred.push_back({stack, owner.mScreenAlignedX, owner.mScreenAlignedY, scale});
+            } else {
+                ui::Painter p(*tSlotContext);
+                drawBackpackIcon(p, stack, owner.mScreenAlignedX, owner.mScreenAlignedY, scale);
+                p.flush();
+            }
+            if (!gSlotLogged) {
+                gSlotLogged = true;
+                log().info("backpack icons: vanilla slots draw the layered model icon (scale {})", scale);
+            }
+        }
+        return;
+    }
+    origin(renderContext, owner, pass);
+}
+
+class VanillaSlotIcons {
+public:
+    void install() {
+        AbpBeginSharedMeshBatchHook::hook();
+        AbpEndSharedMeshBatchHook::hook();
+        AbpInventoryItemRenderHook::hook();
+        AbpInventoryItemDrawHook::hook();
+    }
+    void uninstall() {
+        AbpInventoryItemRenderHook::unhook();
+        AbpInventoryItemDrawHook::unhook();
+        AbpBeginSharedMeshBatchHook::unhook();
+        AbpEndSharedMeshBatchHook::unhook();
+    }
+};
+
 } // namespace abp::client::render
 
+ABP_REGISTER_MODULE(abp::client::render::VanillaSlotIcons);
 
 
 #endif // ABP_CLIENT

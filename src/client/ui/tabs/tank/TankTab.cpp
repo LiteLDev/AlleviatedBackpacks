@@ -43,7 +43,7 @@ public:
             int amount = f.value("amount", 0);
             int level  = static_cast<int>((a.h - 2) * (static_cast<float>(amount) / static_cast<float>(capacity)));
             level      = std::clamp(level, 0, static_cast<int>(a.h) - 2);
-            if (level > 0) fg::fluid(p, a.x + 10, a.y + 1 + a.h - 2 - static_cast<float>(level), 16, static_cast<float>(level), f.value("color", 0xFFFFFFFFu));
+            if (level > 0) fg::fluid(p, a.x + 10, a.y + 1 + a.h - 2 - static_cast<float>(level), 16, static_cast<float>(level), f);
         }
         fg::tankOverlay(p, left + 1, a.y, a.h);
     }

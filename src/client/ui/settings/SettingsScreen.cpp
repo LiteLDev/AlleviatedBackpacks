@@ -14,6 +14,7 @@
 
 #include "client/Client.h"
 #include "client/net/ClientNet.h"
+#include "client/render/BackpackPreview.h"
 #include "client/ui/settings/ItemTransform.h"
 #include "client/tooltip/ContentsTooltip.h"
 #include "client/ui/gfx/Painter.h"
@@ -795,8 +796,13 @@ void SettingsScreen::render(Painter& p, core::screen::BackpackScreenModel const&
                 auto const& carried = player->getInventory().getItem(m.lockedSlot);
                 if (!carried.isNull() && game::isBackpack(carried)) pv = &carried;
             }
-            if (!pv->isNull()) {
-                float size  = std::min(d.previewRect.w, d.previewRect.h) - 16;
+            // SC renderItemDisplayPreviewItem: the backpack's 3D model (with its display item),
+            // (min(w, h) - 16) units per block, turned X(-x) then Y(y + 180) about its centre.
+            float const size = std::min(d.previewRect.w, d.previewRect.h) - 16;
+            if (!pv->isNull() && render::drawBackpackModel(p, *pv, d.previewRect.x + d.previewRect.w / 2, d.previewRect.y + d.previewRect.h / 2, size,
+                                                           d.rotX, d.rotY + 180, &d.previewRect)) {
+                p.flush();
+            } else if (!pv->isNull()) {
                 // SB turns its backpack model by 180 degrees (the model faces backwards); the Bedrock
                 // icon faces the viewer, and like Java's flat items it is shown from both sides.
                 float      ry = d.rotY, rx = -d.rotX;
