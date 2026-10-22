@@ -1,8 +1,16 @@
 // Selftests of opening another player's backpack: access.*
 
 #include <cmath>
+#include <numbers>
+
+#include "ll/api/command/CommandHandle.h"
+#include "ll/api/service/Bedrock.h"
 
 #include "mc/deps/core/math/Vec2.h"
+#include "mc/server/commands/CommandOrigin.h"
+#include "mc/server/commands/CommandOutput.h"
+#include "mc/server/commands/CommandPermissionLevel.h"
+#include "mc/world/level/Level.h"
 #include "mc/deps/shared_types/legacy/actor/ArmorSlot.h"
 #include "mc/server/SimulatedPlayer.h"
 #include "mc/world/actor/player/Player.h"
@@ -14,9 +22,12 @@
 #include "feature/admin/SbConfig.h"
 #include "feature/gui/Gui.h"
 #include "game/BackpackItem.h"
+#include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "game/Storage.h"
+#include "mod/Commands.h"
 #include "mod/Config.h"
+#include "mod/Log.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
