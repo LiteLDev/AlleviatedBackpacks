@@ -4,21 +4,42 @@
     "description": {
       "identifier": "alleviatedbackpacks:advanced_mob_catcher_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       "HDE",
       "GBG",
       "SSS"
     ],
     "key": {
-      "H": { "item": "minecraft:wither_skeleton_skull" },
-      "D": { "item": "minecraft:diamond" },
-      "E": { "item": "minecraft:ender_eye" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "B": { "item": "alleviatedbackpacks:mob_catcher_upgrade" },
-      "S": { "item": "minecraft:soul_sand" }
+      "H": {
+        "item": "minecraft:wither_skeleton_skull"
+      },
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "E": {
+        "item": "minecraft:ender_eye"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:mob_catcher_upgrade"
+      },
+      "S": {
+        "item": "minecraft:soul_sand"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:mob_catcher_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:advanced_mob_catcher_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:mob_catcher_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:advanced_mob_catcher_upgrade",
+      "count": 1
+    }
   }
 }

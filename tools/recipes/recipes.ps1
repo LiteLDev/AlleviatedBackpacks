@@ -124,6 +124,9 @@ Recipe 'anvil_upgrade' @('ADA', 'IBI', ' C ') ([ordered]@{ A = 'minecraft:anvil'
 Recipe 'smithing_upgrade' @(' S ', 'IBI', ' C ') ([ordered]@{ S = 'minecraft:smithing_table'; I = $I; B = $B; C = $C })
 Recipe 'alchemy_upgrade' @('TGF', 'IBI', 'RPR') ([ordered]@{ T = 'minecraft:ghast_tear'; G = 'minecraft:glass_bottle'; F = 'minecraft:fermented_spider_eye'; I = $I; B = $B; R = 'minecraft:blaze_rod'; P = 'minecraft:ender_pearl' })
 Advanced 'advanced_alchemy_upgrade' 'alchemy_upgrade'
+Recipe 'mob_catcher_upgrade' @(' E ', 'IBI', 'L L') ([ordered]@{ E = $E; I = $I; B = $B; L = 'minecraft:lead' })
+# Next tier (keeps the basic catcher's components through the tier crafting hook).
+Recipe 'advanced_mob_catcher_upgrade' @('HDE', 'GBG', 'SSS') ([ordered]@{ H = 'minecraft:wither_skeleton_skull'; D = $D; E = 'minecraft:ender_eye'; G = $G; B = 'mob_catcher_upgrade'; S = 'minecraft:soul_sand' })
 Recipe 'battery_upgrade' @('GRG', 'RBR', 'GRG') ([ordered]@{ G = $G; R = 'minecraft:redstone_block'; B = $B })
 Recipe 'tank_upgrade' @('GGG', 'GBG', 'GGG') ([ordered]@{ G = 'minecraft:glass'; B = $B })
 Recipe 'pump_upgrade' @('GUG', 'PBS', 'GUG') ([ordered]@{ G = 'minecraft:glass'; U = 'minecraft:bucket'; P = 'minecraft:piston'; B = $B; S = 'minecraft:sticky_piston' })

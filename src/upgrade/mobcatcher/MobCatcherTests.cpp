@@ -19,6 +19,7 @@
 #include "mc/world/phys/HitResultType.h"
 #include "mc/scripting/modules/minecraft/ScriptFacing.h"
 
+#include "feature/tiers/Tiers.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -117,6 +118,10 @@ ABP_REGISTER_SELFTEST("mobcatcher.registered", [](Context& ctx) {
     ctx.check(!basic->info().toggleable && !advanced->info().toggleable, "can't be switched off (SB canBeDisabled false)");
     ctx.check(!basic->info().hasSettings && !advanced->info().hasSettings, "no settings tab (SB hideSettingsTab)");
     ctx.check(config().basicMaxSlotCost == 18 && config().advancedMaxSlotCost == 72, "SB default limits");
+    ctx.check(
+        tiers::isNextTierUpgrade("alleviatedbackpacks:mob_catcher_upgrade", "alleviatedbackpacks:advanced_mob_catcher_upgrade"),
+        "the advanced recipe keeps the basic catcher's components (SC upgrade_next_tier)"
+    );
 });
 
 ABP_REGISTER_SELFTEST("mobcatcher.one_per_backpack", [](Context& ctx) {
