@@ -78,8 +78,8 @@ using NestedBackpackProvider =
 void setNestedBackpackProvider(NestedBackpackProvider provider);
 
 /// Extension point: whether the upgrades of a carried backpack run at all (ticks, pickup, ...).
-/// `carriedBackpacks(..., includeNested = true)` - the list the upgrade ticker and the pickup
-/// dispatch use - gives entries the gate rejects an `upgradeGate` that turns every upgrade off.
+/// `carriedBackpacks` gives entries the gate rejects an `upgradeGate` that turns every upgrade off
+/// (`CarriedBackpack::upgradeActive` is false).
 /// Used for Sophisticated Backpacks' `nerfs.onlyWornBackpackTriggersUpgrades`. nullptr removes it.
 using CarriedUpgradeGate = std::function<bool(Player& player, CarriedBackpack const& carried)>;
 void setCarriedUpgradeGate(CarriedUpgradeGate gate);

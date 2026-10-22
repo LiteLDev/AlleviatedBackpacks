@@ -26,6 +26,9 @@ struct AdminConfig {
     /// openfor, stats, cleanup): 0 = any player, 1 = operators (default), 2 = admin, 3 = host,
     /// 4 = owner/console. `/sbp` always needs operator rights (SB: op level 2).
     int commandPermissionLevel = 1;
+    /// Deprecated (kept so existing deny-lists keep working): merged with SB's `disallowedItems` in
+    /// `sophisticatedbackpacks-server.json`, where new entries belong.
+    std::vector<std::string> disallowedItems{};
     /// Upgrade ids (or groups) that are disabled on this server: they can't be installed and
     /// installed ones stop working (no ticks, no pickups, no filters) until re-enabled. Not in SB
     /// (Sophisticated Core's `enabledItems` disables crafting instead); default: none.

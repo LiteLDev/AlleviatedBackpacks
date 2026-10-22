@@ -126,6 +126,8 @@ public:
         std::function<bool(core::ItemStackData const& a, core::ItemStackData const& b)> mayShareUuid;
     };
     static void setPlacementHooks(PlacementHooks hooks);
+    /// Two placed items may stand for one storage (PlacementHooks::mayShareUuid).
+    [[nodiscard]] static bool sharesUuid(core::ItemStackData const& a, core::ItemStackData const& b);
 
     /// Runs the placed-backpack upgrade ticks / consistency checks now (selftests).
     void tickPlaced(int interval);

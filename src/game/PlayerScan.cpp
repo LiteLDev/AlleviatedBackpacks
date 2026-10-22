@@ -95,7 +95,7 @@ carriedBackpacks(Player& player, bool assignUuids, bool includeNested) {
         }
     }
     if (includeNested && !out.empty() && nestedProvider()) nestedProvider()(player, out);
-    if (includeNested && carriedUpgradeGate()) {
+    if (carriedUpgradeGate()) {
         for (auto& [c, bp] : out) {
             if (!carriedUpgradeGate()(player, c)) c.upgradeGate = [](std::string_view, std::string_view) { return false; };
         }

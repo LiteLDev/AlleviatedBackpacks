@@ -356,16 +356,17 @@ void openLater(Player& player, std::shared_ptr<game::Backpack> backpack, std::st
 bool isDisallowed(std::string_view itemId) {
     // SB: container items (canFitInsideContainerItems false) other than backpacks.
     if (sbServer().containerItemsDisallowed && game::isShulkerBox(itemId)) return true;
-    auto const& list = sbServer().disallowedItems;
-    if (list.empty()) return false;
-    auto id = lower(itemId);
-    for (auto const& raw : list) {
-        if (raw.empty()) continue;
-        auto pattern = lower(raw);
-        if (pattern.find(':') == std::string::npos) pattern = "minecraft:" + pattern;
-        if (core::globMatch(pattern, id)) return true;
-    }
-    return false;
+    auto id      = lower(itemId);
+    auto matches = [&](std::vector<std::string> const& list) {
+        for (auto const& raw : list) {
+            if (raw.empty()) continue;
+            auto pattern = lower(raw);
+            if (pattern.find(':') == std::string::npos) pattern = "minecraft:" + pattern;
+            if (core::globMatch(pattern, id)) return true;
+        }
+        return false;
+    };
+    return matches(sbServer().disallowedItems) || matches(cfg().disallowedItems); // + the deprecated admin.json list
 }
 
 bool isUpgradeDisabled(std::string_view id, std::string_view group) {

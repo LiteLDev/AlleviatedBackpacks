@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <exception>
+#include <unordered_set>
 
 #include "ll/api/command/CommandHandle.h"
 #include "ll/api/event/EventBus.h"
@@ -280,11 +281,15 @@ PlacedBackpacks::PlacementHooks& placementHooks() {
 
 void PlacedBackpacks::setPlacementHooks(PlacementHooks hooks) { placementHooks() = std::move(hooks); }
 
+bool PlacedBackpacks::sharesUuid(core::ItemStackData const& a, core::ItemStackData const& b) {
+    auto const& may = placementHooks().mayShareUuid;
+    return may && may(a, b);
+}
+
 void PlacedBackpacks::add(PlacedEntry entry) {
     auto shared = [&](BlockLocation const& other) {
-        auto const& may = placementHooks().mayShareUuid;
-        auto        it  = mEntries.find(other);
-        return may && it != mEntries.end() && may(it->second.item, entry.item);
+        auto it = mEntries.find(other);
+        return it != mEntries.end() && sharesUuid(it->second.item, entry.item);
     };
     if (auto old = mByUuid.find(entry.uuid); old != mByUuid.end() && !(old->second == entry.loc) && !shared(old->second)) {
         // The same backpack can't stand in two places: keep the newest.
@@ -298,10 +303,19 @@ void PlacedBackpacks::add(PlacedEntry entry) {
 void PlacedBackpacks::erase(BlockLocation const& loc) {
     auto it = mEntries.find(loc);
     if (it == mEntries.end()) return;
-    if (auto u = mByUuid.find(it->second.uuid); u != mByUuid.end() && u->second == loc) mByUuid.erase(u);
-    // Its jukeboxes stop playing at the block (picked up, broken, dropped).
-    upgrade::jukebox::Service::get().stopAll(it->second.uuid);
+    auto uuid = it->second.uuid;
     mEntries.erase(it);
+    // Another endpoint of a linked group may stand for the same storage: it takes over.
+    std::optional<BlockLocation> other;
+    for (auto const& [l, e] : mEntries) {
+        if (e.uuid == uuid) other = l;
+    }
+    if (auto u = mByUuid.find(uuid); u != mByUuid.end() && u->second == loc) {
+        if (other) u->second = *other;
+        else mByUuid.erase(u);
+    }
+    // Its jukeboxes stop playing at the block (picked up, broken, dropped).
+    if (!other) upgrade::jukebox::Service::get().stopAll(uuid);
 }
 
 // ---- actions ------------------------------------------------------------------------------------
@@ -320,9 +334,10 @@ PlacedBackpacks::PlaceResult PlacedBackpacks::place(BlockSource& region, BlockPo
     bool changed = false;
     auto bp      = storage.forItem(item, &changed); // binds a uuid on first use
     if (!bp) return PlaceResult::NoStorage;
-    if (auto other = findUuid(bp->uuid())) {
+    if (auto other = findUuid(bp->uuid()); other && !sharesUuid(other->item, game::ItemConv::toData(item))) {
         // An item bound to a backpack that is already placed (a copy): refuse instead of
-        // ending up with two blocks for one backpack.
+        // ending up with two blocks for one backpack. Linked-storage endpoints share their group's
+        // storage on purpose (placement hooks).
         log().warn("backpack {} is already placed at {} {} {}", bp->uuid(), other->loc.x, other->loc.y, other->loc.z);
         return PlaceResult::Failed;
     }
@@ -571,6 +586,7 @@ void PlacedBackpacks::tickPlaced(int interval) {
     mJukeboxTicks += interval;
     bool jukeboxDue = mJukeboxTicks >= 10;
     if (jukeboxDue) mJukeboxTicks = 0;
+    std::unordered_set<std::string> ticked;
     for (auto const& loc : keys) {
         auto it = mEntries.find(loc); // upgrades / drops may change the map while we iterate
         if (it == mEntries.end()) continue;
@@ -594,6 +610,8 @@ void PlacedBackpacks::tickPlaced(int interval) {
             continue;
         }
         mMismatches.erase(e.loc);
+        // Linked-storage endpoints share one storage: its upgrades run once per pass.
+        if (!ticked.insert(e.uuid).second) continue;
         auto bp = storage.find(e.uuid);
         if (!bp) continue;
         if (jukeboxDue && upgrade::hasActive(*bp, "jukebox")) {

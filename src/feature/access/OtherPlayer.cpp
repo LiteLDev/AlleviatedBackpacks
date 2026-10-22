@@ -157,8 +157,12 @@ void checkViewers(Level& level) {
         tid.rawID    = v.target;
         auto* viewer = level.getPlayer(vid);
         if (!viewer) return true;
-        auto menu = std::dynamic_pointer_cast<ui::BackpackMenu>(mm.current(*viewer));
-        if (!menu || !menu->backpack() || menu->backpack()->uuid() != v.uuid) return true; // closed / replaced
+        auto current = mm.current(*viewer);
+        if (!current) return true; // closed
+        // Another backpack opened: done. Any other menu (an upgrade's filter, settings) belongs to
+        // the viewed backpack, keep watching.
+        auto menu = std::dynamic_pointer_cast<ui::BackpackMenu>(current);
+        if (menu && menu->backpack() && menu->backpack()->uuid() != v.uuid) return true;
         auto* target = level.getPlayer(tid);
         bool  keep   = target && target->isAlive() && target->getDimensionId() == viewer->getDimensionId()
                   && game::backpackUuid(game::itemAt(*target, chestSlot())) == v.uuid

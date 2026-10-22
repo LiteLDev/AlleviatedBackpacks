@@ -10,6 +10,8 @@
 #include "feature/admin/Admin.h"
 #include "feature/dedup/Dedup.h"
 #include "feature/linked/Linked.h"
+#include "feature/placed/PlacedBackpacks.h"
+#include "feature/placed/TestSite.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -133,6 +135,48 @@ ABP_REGISTER_SELFTEST("linked.creative_copy_and_dedup", [](Context& ctx) {
     ctx.require(ctx.give(player, pItem, 10) == 10 && ctx.give(player, *copy, 11) == 11, "give both");
     ctx.check(dedup::dedupePlayers(static_cast<int>(player.getDimensionId())) == 0, "no dedup between endpoints");
     ctx.check(game::backpackUuid(game::itemAt(player, {game::ItemLocation::Kind::Inventory, 11})) == primary->uuid(), "uuid kept");
+});
+
+ABP_REGISTER_SELFTEST("linked.placed_endpoints", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& sp = ctx.spawnPlayer();
+    co_await placed::test::toGround(ctx, sp);
+    placed::test::Site site(sp);
+    auto& service = Service::get();
+    auto  bp      = ctx.createBackpack(Tier::Leather);
+    bp->inventory().insert(data("minecraft:emerald", 4), kInternal);
+    auto primary = ctx.backpackItem(*bp);
+    auto l       = linker();
+    ctx.require(service.link("owner", l, primary) == LinkResult::Success, "group");
+    auto copy = service.createSecondaryEndpointCopy(primary);
+    ctx.require(copy.has_value(), "secondary endpoint");
+    auto a = site.at(0, 1), b = site.at(2, 1);
+    for (auto const& pos : {a, b}) {
+        site.set(pos + BlockPos{0, -1, 0}, "minecraft:stone");
+        site.set(pos, "minecraft:air");
+        site.touch(pos);
+    }
+    auto& placedBackpacks = placed::PlacedBackpacks::get();
+    ctx.require(placedBackpacks.place(site.region(), a, primary, 2) == placed::PlacedBackpacks::PlaceResult::Ok, "primary placed");
+    ctx.require(placedBackpacks.place(site.region(), b, *copy, 2) == placed::PlacedBackpacks::PlaceResult::Ok, "a second endpoint of the group can stand too");
+    ctx.check(placedBackpacks.backpackAt(site.region(), a) == bp && placedBackpacks.backpackAt(site.region(), b) == bp, "both show the shared storage");
+    // A plain copy of an already placed backpack is still refused.
+    auto plain = ctx.backpackItem(*ctx.createBackpack(Tier::Iron));
+    auto plainCopy = plain;
+    auto c = site.at(4, 1);
+    site.set(c + BlockPos{0, -1, 0}, "minecraft:stone");
+    site.set(c, "minecraft:air");
+    site.touch(c);
+    auto d = site.at(6, 1);
+    site.set(d + BlockPos{0, -1, 0}, "minecraft:stone");
+    site.set(d, "minecraft:air");
+    site.touch(d);
+    ctx.require(placedBackpacks.place(site.region(), c, plain, 2) == placed::PlacedBackpacks::PlaceResult::Ok, "plain placed");
+    ctx.check(placedBackpacks.place(site.region(), d, plainCopy, 2) != placed::PlacedBackpacks::PlaceResult::Ok, "a copy of a placed plain backpack is refused");
+    // Taking one endpoint away leaves the other one working.
+    auto taken = placedBackpacks.take(site.region(), a);
+    ctx.check(taken.has_value(), "primary picked up");
+    ctx.check(placedBackpacks.backpackAt(site.region(), b) == bp, "the other endpoint still stands for the storage");
+    ctx.check(placedBackpacks.findUuid(bp->uuid()).has_value(), "found by uuid");
 });
 
 ABP_REGISTER_SELFTEST("linked.screen_click", [](Context& ctx) -> ll::coro::CoroTask<> {

@@ -522,13 +522,13 @@ bool equipMob(Mob& mob, std::optional<core::Tier> forcedTier, std::optional<bool
             colours.mainColor   = loot.mainColor;
             colours.accentColor = loot.accentColor;
             colours.seed        = loot.seed;
-            colours.upgrades    = loot.upgrades;
             setPendingLoot(backpack, colours);
             setUserData(backpack, [](CompoundTag& tag) { tag.putByte(std::string(kMobJukeboxKey), 1); });
             bool changed = false;
             auto bp      = game::Storage::get().forItem(backpack, &changed);
             if (bp && !bp->data().upgrades.empty()) {
                 addJukeboxUpgradeAndRandomDisc(bp);
+                if (loot.upgrades) installRandomUpgrades(bp); // AlleviatedBackpacks extra, after the jukebox
                 jukeboxMobs()[mob.getOrCreateUniqueID().rawID] = {bp->uuid(), static_cast<int>(mob.getDimensionId()), mob.getPosition()};
             } else {
                 setUserData(backpack, [](CompoundTag& tag) { tag.remove(kMobJukeboxKey); });
@@ -700,7 +700,8 @@ private:
     /// Jukebox mobs play at their position (SB onLivingUpdate); a mob that left the level loses
     /// its backpack's storage, unless it converted (the new mob wears the same backpack).
     static void tickJukeboxMobs(Level& level) {
-        auto& mobs = jukeboxMobs();
+        auto&                                          mobs = jukeboxMobs();
+        std::vector<std::pair<std::int64_t, JukeboxMob>> converted;
         for (auto it = mobs.begin(); it != mobs.end();) {
             ActorUniqueID uid;
             uid.rawID   = it->first;
@@ -718,24 +719,24 @@ private:
                 continue;
             }
             // Converting (zombie -> drowned, piglin -> zombified piglin, ...): the new mob wears it.
-            Mob* converted = nullptr;
+            Mob* successor = nullptr;
             if (auto dim = level.getDimension(it->second.dim).lock()) {
                 auto& region = dim->getBlockSourceFromMainChunkSource();
                 auto  p      = it->second.pos;
                 for (auto* a : region.getEntities(AABB{Vec3{p.x - 4, p.y - 4, p.z - 4}, Vec3{p.x + 4, p.y + 4, p.z + 4}}, 0.0f)) {
                     if (!a || a->isPlayer() || !a->isAlive() || !a->hasCategory(ActorCategory::Mob)) continue;
-                    if (game::backpackUuid(a->getArmor(ArmorSlot::Torso)) == uuid) converted = static_cast<Mob*>(a);
+                    if (game::backpackUuid(a->getArmor(ArmorSlot::Torso)) == uuid) successor = static_cast<Mob*>(a);
                 }
             }
-            if (converted) {
-                auto data = it->second;
-                it        = mobs.erase(it);
-                mobs[converted->getOrCreateUniqueID().rawID] = data;
+            if (successor) {
+                converted.emplace_back(successor->getOrCreateUniqueID().rawID, it->second);
+                it = mobs.erase(it);
                 continue;
             }
             dropStorage(uuid);
             it = mobs.erase(it);
         }
+        for (auto& [id, data] : converted) mobs[id] = std::move(data); // after the loop: no rehash under it
     }
 
     std::vector<ll::event::ListenerPtr> mListeners;

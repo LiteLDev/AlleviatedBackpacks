@@ -100,12 +100,12 @@ void AccessLog::logPlayerAccess(Player& player, std::string const& itemId, game:
 }
 
 void AccessLog::put(AccessLogRecord record) {
-    auto& s = state();
-    auto  it = s.records.find(record.backpackUuid);
-    bool  isNew = it == s.records.end();
+    auto& s       = state();
+    auto  it      = s.records.find(record.backpackUuid);
+    bool  changed = it == s.records.end() || it->second.playerName != record.playerName;
     s.records[record.backpackUuid] = std::move(record);
-    s.dirty = true;
-    if (isNew) ++mRevision; // new uuid / player name for the command suggestions
+    s.dirty                        = true;
+    if (changed) ++mRevision; // new uuid / player name for the command suggestions
 }
 
 std::set<std::string> AccessLog::playerNames() {
