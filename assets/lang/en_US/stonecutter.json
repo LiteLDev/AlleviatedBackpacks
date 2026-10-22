@@ -1,14 +1,12 @@
 {
   "abp.stonecutter.name": "Stonecutter Upgrade",
-  "abp.stonecutter.title": "Stonecutter",
-  "abp.stonecutter.button": "Stonecutter",
-  "abp.stonecutter.selected": "§a» Selected",
-  "abp.stonecutter.select": "§7Click to select",
-  "abp.stonecutter.help_input": "§7Put blocks into the slot below",
-  "abp.stonecutter.help_select": "§7Pick an output on the right",
-  "abp.stonecutter.help_click": "§7Click the result to cut one",
-  "abp.stonecutter.help_shift": "§7Shift-click the result to cut as many as possible",
-  "abp.stonecutter.next_page_hint": "§7Click for the next page",
-  "abp.stonecutter.page": "Outputs page {} of {}",
-  "abp.stonecutter.describe_selected": "§7Output: {}"
+  "abp.stonecutter.tooltip": "§7Stonecutter in an upgrade tab",
+  "abp.stonecutter.tab": "Stonecutter",
+  "abp.stonecutter.tab.tooltip": "Stonecutter",
+  "abp.stonecutter.refill_input": "Refill Input",
+  "abp.stonecutter.do_not_refill_input": "Do Not Refill Input",
+  "abp.stonecutter.browse_results": "Open expanded output list with search",
+  "abp.stonecutter.search_icon": "Filter outputs by name",
+  "abp.stonecutter.search_hint": "Search",
+  "abp.stonecutter.search_box": "Click to search"
 }
