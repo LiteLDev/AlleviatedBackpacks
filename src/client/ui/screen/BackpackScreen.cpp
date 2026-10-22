@@ -120,7 +120,14 @@ bool isFillerItem(core::ItemStackData const& d) { return d.id == cs::kFillerId; 
 class BackpackScreenLayer final : public IUiLayer {
 public:
     // ---- host ---------------------------------------------------------------------------------
-    bool rendering = false; ///< set by the host while it draws the screen scene
+    bool rendering = false; ///< set by the host while it draws the screen scene (this frame only)
+    /// Input runs on the client tick, outside the draw: the screen takes input while the host
+    /// drew it recently (our scene is on top) and is not closing.
+    std::chrono::steady_clock::time_point drawnAt{};
+    bool                                  closing = false;
+    [[nodiscard]] bool active() const {
+        return !closing && std::chrono::steady_clock::now() - drawnAt < std::chrono::milliseconds(250);
+    }
 
     [[nodiscard]] char const* name() const override { return "abp.backpack_screen"; }
     [[nodiscard]] int         zOrder() const override { return 1000; }
@@ -315,8 +322,11 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
     mSearchReady.assign(m.slots.size(), false);
     mMatchesDirty = true;
     rebuildTabs(m);
-    for (auto& t : mTabs) {
-        if (!t.native || t.slot < 0 || t.slot >= static_cast<int>(m.upgrades.size())) continue;
+    // Only the open tab has built widgets: closed tabs' widget groups are cleared, so their
+    // tabs must not touch widgets they kept from an earlier build() (NativeTab contract).
+    auto* open = mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size()) ? &mTabs[static_cast<std::size_t>(mOpenTab)] : nullptr;
+    if (open && open->native && open->slot >= 0 && open->slot < static_cast<int>(m.upgrades.size()) && !open->widgets.widgets.empty()) {
+        auto& t = *open;
         TabContext ctx{m, t.slot, m.upgrades[static_cast<std::size_t>(t.slot)], &mUpgradeStacks[static_cast<std::size_t>(t.slot)], {}, {}};
         ctx.sendTabAction    = [slot = t.slot](nlohmann::json d) { net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(d)}}); };
         ctx.sendScreenAction = [](nlohmann::json b) { net::sendScreenAction(std::move(b)); };
@@ -864,7 +874,7 @@ ItemStack const* BackpackScreenLayer::stackAt(SlotRef const& s) const {
 
 bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, float y) {
     auto const* m = net::screenModel();
-    if (!m || !rendering) return false;
+    if (!m || !active()) return false;
     if (m->kind == "menu") return down ? menuMouse(*m, button, x, y) : true;
     if (mView == View::Settings) return settingsMouse(*m, button, down, x, y);
     if (!down) {
@@ -982,7 +992,7 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
 
 bool BackpackScreenLayer::onMouseMove(float x, float y) {
     auto const* m = net::screenModel();
-    if (!m || !rendering) return false;
+    if (!m || !active()) return false;
     if (mView == View::Settings && mDragButton >= 0) {
         // SC SettingsScreen.mouseDragged: dragging over slots selects / unselects them too.
         for (auto const& ps : mPlaced) {
@@ -1033,7 +1043,7 @@ void BackpackScreenLayer::finishDistribution() {
 
 bool BackpackScreenLayer::onScroll(float x, float y, float delta) {
     auto const* m = net::screenModel();
-    if (!m || !rendering) return false;
+    if (!m || !active()) return false;
     if (mOpenTab >= 0 && mOpenTab < static_cast<int>(mTabs.size()) && mTabs[static_cast<std::size_t>(mOpenTab)].widgets.scroll(x, y, delta)) {
         return true;
     }
@@ -1067,7 +1077,7 @@ void BackpackScreenLayer::openBackpackKey(cs::BackpackScreenModel const& m) {
 
 bool BackpackScreenLayer::onKey(int vk, bool down) {
     auto const* m = net::screenModel();
-    if (!m || !rendering) return false;
+    if (!m || !active()) return false;
     if (mSearch.focused()) return mSearch.onKey(vk, down);
     if (openTabWantsText()) return mTabs[static_cast<std::size_t>(mOpenTab)].widgets.key(vk, down);
     if (!down) return true;
@@ -1662,6 +1672,7 @@ void dropScene(bool byPlayer) {
     gScene.seen         = false;
     gScene.closing      = false;
     gScene.popScheduled = false;
+    gLayer.drawnAt      = {};
     gLayer.resetFocus();
 }
 
@@ -1712,6 +1723,7 @@ void requestClose() {
     gScene.closedSession = m->session; // never reopen this session's scene
     net::sendScreenAction({{"action", "close"}});
     gScene.closing = true;
+    gLayer.closing = true;
     gLayer.resetFocus();
 }
 
@@ -1726,6 +1738,8 @@ LL_TYPE_INSTANCE_HOOK(AbpNativeScreenViewHook, ll::memory::HookPriority::Highest
             log().info("companion: drawing the native backpack screen (session {})", net::displayModel()->session);
         }
         gLayer.rendering = !gScene.closing;
+        gLayer.closing   = gScene.closing;
+        if (gLayer.rendering) gLayer.drawnAt = Clock::now();
         UiRoot::get().renderFrame(*this, reinterpret_cast<MinecraftUIRenderContext&>(uiRenderContext));
     } catch (std::exception const& e) {
         log().error("native backpack screen failed: {}", e.what());
@@ -1821,7 +1835,7 @@ private:
 };
 
 } // namespace
-bool nativeScreenActive() { return gLayer.rendering; }
+bool nativeScreenActive() { return gLayer.active() && net::displayModel(); }
 
 } // namespace abp::client::ui
 

@@ -2,10 +2,12 @@
 
 #include "client/ui/screen/Tabs.h"
 
+#include <algorithm>
 #include <unordered_map>
 
 #include "client/Client.h"
 #include "client/input/InputRouter.h"
+#include "client/ui/UiRoot.h"
 #include "game/ItemConv.h"
 
 #include "mc/world/item/ItemStack.h"
@@ -75,7 +77,16 @@ public:
             auto& grid   = widgets.add(std::make_unique<MenuGrid>());
             mGrid        = &grid;
             int rows     = std::max(1, menu->value("rows", 1));
-            grid.rect    = {area.x + 3, y, 9 * 18, static_cast<float>(rows) * 18};
+            // Server menus are 9 wide; wrap them when the tab would leave the screen.
+            auto const& screen = UiRoot::get().lastFrame().screen;
+            int  cols    = 9;
+            if (!screen.empty()) {
+                float avail = screen.x + screen.w - (area.x + 3) - 6;
+                cols        = std::clamp(static_cast<int>(avail / 18), 1, 9);
+            }
+            if (cols < 9) rows = (rows * 9 + cols - 1) / cols;
+            grid.columns = cols;
+            grid.rect    = {area.x + 3, y, static_cast<float>(cols) * 18, static_cast<float>(rows) * 18};
             int  slot    = ctx.slot;
             auto send    = ctx.sendTabAction;
             grid.onClick = [send](int i, int button, bool) {
@@ -83,7 +94,7 @@ public:
             };
             (void)slot;
             update(ctx);
-            return {9 * 18 + 3 + 6, 22 + static_cast<float>(rows) * 18 + 6};
+            return {static_cast<float>(cols) * 18 + 3 + 6, 22 + static_cast<float>(rows) * 18 + 6};
         }
         mGrid       = nullptr;
         float width = 120;

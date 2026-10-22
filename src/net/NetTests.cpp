@@ -23,6 +23,7 @@
 #include "game/Storage.h"
 #include "core/Appearance.h"
 #include "mod/Commands.h"
+#include "mod/Log.h"
 #include "net/Companion.h"
 #include "net/NativeScreens.h"
 #include "net/Packets.h"
@@ -405,14 +406,8 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
             "minecraft:apple", "minecraft:redstone", "minecraft:oak_planks", "minecraft:torch", "minecraft:gold_ingot",
             "minecraft:stone", "minecraft:sand",
         };
-        auto& inv = bp->inventory();
-        for (int i = 0; i < inv.size(); ++i) {
-            auto id = kItems[static_cast<std::size_t>(i) % std::size(kItems)];
-            if (i % 7 == 6) continue; // some gaps
-            auto d = game::ItemConv::toData(game::ItemConv::make(id, 1));
-            inv.set(i, d.withCount(i == 0 ? 1500 : 1 + (i * 13) % 64));
-        }
-        for (auto const* id : {"magnet", "deposit", "stack_tier_1", "tank"}) {
+        // Upgrades first: the stack upgrade raises the slot limits the fill below relies on.
+        for (auto const* id : {"magnet", "deposit", "stack_tier_4", "tank"}) {
             auto* type = upgrade::byId(id);
             if (!type) continue;
             for (int s = 0; s < static_cast<int>(bp->data().upgrades.size()); ++s) {
@@ -421,6 +416,14 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
                 (void)upgrade::install(bp, s, item, &player);
                 break;
             }
+        }
+        auto& inv = bp->inventory();
+        for (int i = 0; i < inv.size(); ++i) {
+            auto id = kItems[static_cast<std::size_t>(i) % std::size(kItems)];
+            if (i % 7 == 6) continue; // some gaps
+            auto d = game::ItemConv::toData(game::ItemConv::make(id, 1));
+            // Slot 0 shows the abbreviated count (stack upgrade installed above: limit > 64).
+            inv.set(i, d.withCount(i == 0 ? std::min(1500, inv.slotLimit(0, d)) : 1 + (i * 13) % 64));
         }
         // The deposit upgrade puts cobblestone into containers (C on a chest).
         for (int s = 0; s < static_cast<int>(bp->data().upgrades.size()); ++s) {
@@ -437,6 +440,7 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
         auto stack = game::makeBackpackItem(core::Tier::Netherite, bp->uuid());
         if (!player.add(stack)) player.drop(stack, false);
         player.sendInventory(false);
+        abp::log().info("companion setup: gave netherite backpack {}", bp->uuid());
         output.success("companion setup: gave netherite backpack " + bp->uuid());
     });
 });

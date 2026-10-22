@@ -61,7 +61,9 @@ public:
     /// +20,+8 by the host, so content usually starts at y + 22). Returns the open tab size
     /// (content extent plus SC's 6 unit right/bottom border).
     virtual Size build(TabContext const& ctx, Rect area, WidgetGroup& widgets) = 0;
-    /// The screen model changed (new server data in `ctx.upgrade.tab`).
+    /// The screen model changed (new server data in `ctx.upgrade.tab`). Called only while the tab
+    /// is open, after `build`. Widgets added in `build` live until the tab closes or is rebuilt:
+    /// a tab may keep pointers to them for `update`, but must not use them at any other time.
     virtual void update(TabContext const& /*ctx*/) {}
     /// Extra drawing above the widgets.
     virtual void render(Painter& /*p*/, TabContext const& /*ctx*/, Rect /*area*/, float /*mx*/, float /*my*/) {}
