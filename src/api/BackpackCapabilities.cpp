@@ -70,7 +70,8 @@ std::shared_ptr<IEnergyStorage> energyStorage(std::shared_ptr<game::Backpack> co
     return out;
 }
 
-int slotRows(game::Backpack& backpack) { return core::capacity::slotRows(backpack.inventory().size()); }
+// SB's getNumberOfSlotRows counts the base layout (before Tank / Battery columns were taken).
+int slotRows(game::Backpack& backpack) { return core::capacity::slotRows(backpack.data().baseStorageSlots()); }
 
 double stackMultiplier(game::Backpack& backpack) {
     auto& inv = backpack.inventory();
