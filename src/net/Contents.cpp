@@ -137,6 +137,9 @@ core::screen::RenderInfo buildRenderInfo(game::Backpack const& backpack) {
         if (s.empty() || !s.enabled) continue;
         if (auto* type = upgrade::upgradeFor(s.item)) r.upgrades.push_back(type->info().id);
     }
+    for (auto const& provider : RenderInfoRegistry::entries()) {
+        if (provider) provider(backpack, r);
+    }
     return r;
 }
 

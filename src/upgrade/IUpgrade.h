@@ -131,6 +131,10 @@ public:
     virtual bool canReplaceWith(UpgradeContext const& ctx, core::ItemStackData const& /*replacement*/, std::string& reason) const {
         return canRemove(ctx, reason);
     }
+    /// Storage slots the native screen highlights with SC's red error overlay when `canRemove` /
+    /// `canReplaceWith` refuses (SC `UpgradeSlotChangeResult` error slots), e.g. the slots covered
+    /// by captured mobs. Default: none (only the upgrade slot is highlighted).
+    [[nodiscard]] virtual std::vector<int> refusalStorageSlots(UpgradeContext const& /*ctx*/) const { return {}; }
     /// The player clicks this installed upgrade's slot in the GUI while holding `item` on the
     /// cursor (e.g. a Stack upgrade conversion item). Return nullopt to let the normal swap happen,
     /// or how many of `item` were used up (the cursor loses that many; 0 = refused) — then

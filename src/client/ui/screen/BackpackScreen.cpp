@@ -37,6 +37,7 @@
 #include "client/render/RenderHooks.h"
 #include "client/tooltip/ContentsTooltip.h"
 #include "client/ui/UiRoot.h"
+#include "client/ui/screen/StorageOverlay.h"
 #include "client/ui/screen/Tabs.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "client/ui/widgets/TextInput.h"
@@ -185,6 +186,15 @@ private:
     void                  openBackpackKey(cs::BackpackScreenModel const& m);
     [[nodiscard]] ItemStack const* stackAt(SlotRef const& s) const;
 
+    // ---- storage overlays (StorageOverlay.h) ------------------------------------------------------
+    [[nodiscard]] StorageOverlayContext overlayContext(cs::BackpackScreenModel const& m) const;
+    [[nodiscard]] static bool           overlayReplaces(StorageOverlayContext const& ctx, int index) {
+        for (auto const& o : storageOverlays()) {
+            if (o->replacesSlot(ctx, index)) return true;
+        }
+        return false;
+    }
+
     // model caches
     std::uint32_t                  mSession  = 0;
     std::uint64_t                  mRevision = ~std::uint64_t{0};
@@ -278,6 +288,7 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         // A new screen: SC starts with an empty search box and the scroll panel at the top
         // (unless "keep search phrase" / "keep tab open" are on for this backpack).
         mSession = m.session;
+        for (auto const& o : storageOverlays()) o->reset();
         mScroll  = {};
         mSearch.setText({});
         mSearch.setFocused(false);
@@ -592,8 +603,10 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         if (mHover.area == SlotRef::Area::Upgrade && mHover.index == static_cast<int>(i)) highlight(x, y);
     }
 
-    // Storage slots.
+    // Storage slots (slots taken over by a storage overlay are drawn by it).
+    auto overlays = overlayContext(m);
     for (auto const& ps : mPlaced) {
+        if (overlayReplaces(overlays, ps.index)) continue;
         float x = L + static_cast<float>(ps.pos.x), y = T + static_cast<float>(ps.pos.y);
         auto  i = static_cast<std::size_t>(ps.index);
         auto const& d = m.slots[i];
@@ -610,6 +623,11 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
         }
         if (mHover.area == SlotRef::Area::Storage && mHover.index == ps.index) highlight(x, y);
         else if (mDistSlots.size() > 1 && std::find(mDistSlots.begin(), mDistSlots.end(), SlotRef{SlotRef::Area::Storage, ps.index}) != mDistSlots.end()) highlight(x, y);
+    }
+    if (!storageOverlays().empty()) {
+        p.flush();
+        for (auto const& o : storageOverlays()) o->render(p, overlays, mx, my);
+        p.flush();
     }
 
     // Player inventory.
@@ -639,8 +657,6 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
             {L + static_cast<float>(thumb.x), T + static_cast<float>(thumb.y), static_cast<float>(thumb.w), static_cast<float>(thumb.h)}
         );
     }
-    (void)mx;
-    (void)my;
 }
 
 void BackpackScreenLayer::drawSearch(Painter& p, double t) {
@@ -675,10 +691,15 @@ void BackpackScreenLayer::drawErrorOverlay(Painter& p, cs::BackpackScreenModel c
         if (i < 0 || i >= static_cast<int>(mLayout.upgradeSlots.size())) continue;
         p.fillRect(slotRect({SlotRef::Area::Upgrade, i}).inset(1), sb::color::ERROR_SLOT, Painter::Layer::Foreground);
     }
+    auto overlays = overlayContext(m);
     for (int i : m.errorStorageSlots) {
+        if (overlayReplaces(overlays, i)) continue;
         for (auto const& ps : mPlaced) {
             if (ps.index == i) p.fillRect({mLeft + ps.pos.x, mTop + ps.pos.y, 16, 16}, sb::color::ERROR_SLOT, Painter::Layer::Foreground);
         }
+    }
+    if (!m.errorStorageSlots.empty()) {
+        for (auto const& o : storageOverlays()) o->errorOverlay(p, overlays, m.errorStorageSlots);
     }
     // Message box centred under the storage, at the inventory label (SC renderErrorMessage).
     float w  = std::min(260.f, p.textWidth(m.errorMessage));
@@ -725,6 +746,13 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         if (titleRect.contains(mx, my) && p.textWidth(m.title) > titleRect.w) {
             drawTooltip(p, {{m.title, 0xFFFFFF}}, mx, my);
             return;
+        }
+    }
+    // Storage overlays (e.g. a captured mob).
+    if (!storageOverlays().empty()) {
+        auto overlays = overlayContext(m);
+        for (auto const& o : storageOverlays()) {
+            if (o->tooltip(p, overlays, mx, my)) return;
         }
     }
     // Hovered slot item (only with an empty cursor, like SC).
@@ -814,6 +842,28 @@ void BackpackScreenLayer::render(Painter& p, FrameInfo const& f) {
         }
     }
     drawTooltips(p, *m, mx, my);
+}
+
+StorageOverlayContext BackpackScreenLayer::overlayContext(cs::BackpackScreenModel const& m) const {
+    StorageOverlayContext ctx{m, {}, {}, {}};
+    ctx.slotItemRect = [this](int index) -> std::optional<Rect> {
+        for (auto const& ps : mPlaced) {
+            if (ps.index == index) return Rect{mLeft + static_cast<float>(ps.pos.x), mTop + static_cast<float>(ps.pos.y), 16, 16};
+        }
+        return std::nullopt;
+    };
+    float l = 1e9f, t = 1e9f, r = -1e9f, b = -1e9f;
+    for (auto const& ps : mPlaced) {
+        l = std::min(l, mLeft + static_cast<float>(ps.pos.x));
+        t = std::min(t, mTop + static_cast<float>(ps.pos.y));
+        r = std::max(r, mLeft + static_cast<float>(ps.pos.x) + 16);
+        b = std::max(b, mTop + static_cast<float>(ps.pos.y) + 16);
+    }
+    if (r > l && b > t) ctx.visibleStorage = Rect{l, t, r - l, b - t};
+    ctx.sendTabAction = [](int slot, nlohmann::json data) {
+        net::sendScreenAction({{"action", "tab"}, {"slot", slot}, {"data", std::move(data)}});
+    };
+    return ctx;
 }
 
 // ---- hit testing ----------------------------------------------------------------------------------------------
@@ -942,6 +992,13 @@ bool BackpackScreenLayer::onMouseButton(MouseButton button, bool down, float x, 
             mDraggingBar = true;
             mDragY       = y;
             return true;
+        }
+    }
+    // Storage overlays (SC inventory parts get clicks before the slots).
+    if (!storageOverlays().empty()) {
+        auto overlays = overlayContext(*m);
+        for (auto const& o : storageOverlays()) {
+            if (o->mouseDown(overlays, button, x, y)) return true;
         }
     }
     // Middle mouse: Sort (anywhere but the player inventory, SC tryCallSort).

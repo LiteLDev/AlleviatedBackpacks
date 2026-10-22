@@ -42,7 +42,13 @@ int BackpackInventory::slotLimit(int slot, ItemStackData const& item) const {
     return std::max(limit, 1);
 }
 
+bool BackpackInventory::isSlotBlocked(int slot) const {
+    if (slot < 0) return false;
+    return std::any_of(mBlockers.begin(), mBlockers.end(), [&](auto const& b) { return b.fn(slot); });
+}
+
 InsertVerdict BackpackInventory::checkInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const {
+    if (isSlotBlocked(slot)) return InsertVerdict::Deny;
     InsertQuery q{*this, slot, stack, ctx};
     for (auto const& f : mInsertFilters) {
         if (auto v = f.fn(q); v != InsertVerdict::Allow) return v;
@@ -197,19 +203,25 @@ void BackpackInventory::sort(std::function<bool(ItemStackData const&, ItemStackD
         long long     total;
     };
     std::vector<Kind> kinds;
-    for (auto const& s : mSlots) {
+    std::vector<ItemStackData> laid(mSlots.size());
+    for (std::size_t i = 0; i < mSlots.size(); ++i) {
+        auto const& s = mSlots[i];
         if (s.empty()) continue;
+        if (isSlotBlocked(static_cast<int>(i))) { // blocked slots keep whatever they hold
+            laid[i] = s;
+            continue;
+        }
         auto it = std::find_if(kinds.begin(), kinds.end(), [&](Kind const& k) { return k.item.sameItem(s); });
         if (it == kinds.end()) kinds.push_back({s, s.count});
         else it->total += s.count;
     }
     for (auto& k : kinds) k.item.count = static_cast<int>(std::min<long long>(k.total, INT_MAX));
     std::stable_sort(kinds.begin(), kinds.end(), [&](Kind const& a, Kind const& b) { return less(a.item, b.item); });
-    std::vector<ItemStackData> laid(mSlots.size());
-    std::size_t                next = 0;
+    std::size_t next = 0;
     for (auto const& k : kinds) {
         long long left = k.total;
         while (left > 0) {
+            while (next < laid.size() && isSlotBlocked(static_cast<int>(next))) ++next; // blocked slots stay empty
             if (next >= laid.size()) return; // would not fit (slot-dependent limits): keep the old layout
             int n        = static_cast<int>(std::min<long long>(left, slotLimit(static_cast<int>(next), k.item)));
             laid[next++] = k.item.withCount(n);
@@ -237,6 +249,10 @@ void BackpackInventory::addSlotPreference(std::string owner, int priority, SlotP
     insertSorted(mPreferences, std::move(owner), priority, std::move(fn));
 }
 
+void BackpackInventory::addSlotBlocker(std::string owner, SlotBlockerFn fn) {
+    mBlockers.push_back(Hook<SlotBlockerFn>{std::move(owner), 0, std::move(fn)});
+}
+
 void BackpackInventory::removeHooks(std::string const& owner) {
     auto drop = [&](auto& v) {
         std::erase_if(v, [&](auto const& h) { return h.owner == owner; });
@@ -246,6 +262,7 @@ void BackpackInventory::removeHooks(std::string const& owner) {
     drop(mLimitModifiers);
     drop(mListeners);
     drop(mPreferences);
+    drop(mBlockers);
 }
 
 void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
@@ -257,6 +274,7 @@ void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
     drop(mLimitModifiers);
     drop(mListeners);
     drop(mPreferences);
+    drop(mBlockers);
 }
 
 void BackpackInventory::clearFilters() {
@@ -264,6 +282,7 @@ void BackpackInventory::clearFilters() {
     mExtractFilters.clear();
     mLimitModifiers.clear();
     mPreferences.clear();
+    mBlockers.clear();
 }
 
 nlohmann::json BackpackInventory::toJson() const {

@@ -69,6 +69,11 @@ using TabActionRegistry = StaticRegistry<TabActionHandler>;
 using ContentsLineProvider = std::function<void(Player& player, game::Backpack& backpack, std::vector<std::string>& lines)>;
 using ContentsLineRegistry = StaticRegistry<ContentsLineProvider>;
 
+/// Adds data to a backpack's `RenderInfo::extra` (client renderers, e.g. the mob catcher's
+/// captured mob types for SB's muffled ambient sounds). Use a unit-specific key.
+using RenderInfoProvider = std::function<void(game::Backpack const& backpack, core::screen::RenderInfo& info)>;
+using RenderInfoRegistry = StaticRegistry<RenderInfoProvider>;
+
 /// The model `player` sees for `menu` (session 0, containerId -1).
 [[nodiscard]] core::screen::BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu);
 /// Session id of the player's open native screen (0 = none).
@@ -97,6 +102,9 @@ struct TabActionRegistrar {
 struct ContentsLineRegistrar {
     explicit ContentsLineRegistrar(ContentsLineProvider p) { ContentsLineRegistry::add(std::move(p)); }
 };
+struct RenderInfoRegistrar {
+    explicit RenderInfoRegistrar(RenderInfoProvider p) { RenderInfoRegistry::add(std::move(p)); }
+};
 } // namespace detail
 
 } // namespace abp::net
@@ -109,3 +117,5 @@ struct ContentsLineRegistrar {
 /// Adds contents tooltip lines (see `abp::net::ContentsLineProvider`).
 #define ABP_REGISTER_CONTENTS_LINES(...)                                                                               \
     static ::abp::net::detail::ContentsLineRegistrar ABP_UNIQUE(abp_contents_lines_)(__VA_ARGS__)
+/// Adds render info data (see `abp::net::RenderInfoProvider`).
+#define ABP_REGISTER_RENDER_INFO(...) static ::abp::net::detail::RenderInfoRegistrar ABP_UNIQUE(abp_render_info_)(__VA_ARGS__)
