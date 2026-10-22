@@ -275,7 +275,7 @@ ABP_REGISTER_SELFTEST("filter.tab_actions", [](Context& ctx) {
     auto const& s = tab["filter"];
     ctx.check(s.value("slots", 0) == 16 && s.value("perRow", 0) == 4 && s.value("advanced", false), "16 slots, 4 per row, advanced");
     ctx.check(s.value("type", std::string{}) == "contents" && s.value("typeState", -1) == 1, "contents type, block list (SB default)");
-    ctx.check(!tab.value("title", std::string{}).empty() && !tab.value("tooltip", std::string{}).empty(), "tab title and tooltip");
+    ctx.check(!tab.value("tabLabel", std::string{}).empty() && !tab.value("tabTooltip", std::string{}).empty(), "tab title and tooltip");
 
     // Filter slot with the cursor item; duplicates are refused; an empty cursor clears.
     p.mPlayerUIContainer->setItem(0, game::ItemConv::make("minecraft:apple", 5));

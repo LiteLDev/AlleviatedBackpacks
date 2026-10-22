@@ -236,8 +236,8 @@ nlohmann::json tabTexts(Player& player, std::string_view group, bool advanced) {
         if (t.group != group) continue;
         auto base = std::format("abp.{}.tab{}", group, advanced ? ".advanced" : "");
         return nlohmann::json{
-            {"title",   trFor(player, base, advanced ? t.advName : t.name)                    },
-            {"tooltip", trFor(player, base + ".tooltip", advanced ? t.advTooltip : t.tooltip)},
+            {"tabLabel",   trFor(player, base, advanced ? t.advName : t.name)                    },
+            {"tabTooltip", trFor(player, base + ".tooltip", advanced ? t.advTooltip : t.tooltip)},
         };
     }
     return nlohmann::json::object();

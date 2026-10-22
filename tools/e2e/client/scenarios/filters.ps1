@@ -136,7 +136,7 @@ Button-Click 3
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'allow-dur-nbt' | Out-Null
-Press-Key ESC
+Press-Key 'E'
 Start-Sleep -Milliseconds 500
 Assert-Filter 0 { param($f) $f.items[0].id -eq 'minecraft:apple' -and -not $f.items[1] -and $f.typeState -eq 0 -and $f.dur -and $f.nbt } 'apple ghost, no duplicate, allow, durability + NBT'
 
@@ -183,7 +183,7 @@ Save-Screenshot 'tags-added' | Out-Null
 Ctl-Move 20 30
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'tag-list' | Out-Null
-Press-Key ESC
+Press-Key 'E'
 Start-Sleep -Milliseconds 500
 $added = @((Get-Filter 0).tags).Count
 if ($added -lt 1) { throw 'Add Tag added nothing' }
@@ -198,7 +198,7 @@ Button-Click 3 $tagY
 Button-Move 3 $tagY
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'match-all-tags' | Out-Null
-Press-Key ESC
+Press-Key 'E'
 Start-Sleep -Milliseconds 500
 Assert-Filter 0 { param($f) $f.primary -eq 2 -and @($f.tags).Count -eq $added - 1 -and -not $f.anyTag } 'tags mode: one removed, match all'
 
@@ -210,7 +210,7 @@ Button-Click 0
 $mark = Get-LogMark
 Button-Click 1
 Read-Control $mark 'primary=0'
-Press-Key ESC
+Press-Key 'E'
 Start-Sleep -Milliseconds 500
 Assert-Filter 0 { param($f) $f.primary -eq 0 -and $f.typeState -eq 0 } 'tags mode skips STORAGE (allow -> block -> allow), back to item'
 
@@ -225,7 +225,7 @@ Ctl-Move 9 (-20 + 9)
 Start-Sleep -Milliseconds 400
 Save-Screenshot 'adv-filter-input' | Out-Null
 Ctl-Click 9 (-20 + 9)
-Press-Key ESC
+Press-Key 'E'
 Start-Sleep -Milliseconds 500
 Assert-Filter 1 { param($f) $f.direction -eq 2 } 'direction: both -> input -> output'
 
@@ -260,7 +260,7 @@ Open-FilterTab 7
 Gui-Move 100 3
 Start-Sleep -Milliseconds 300
 Save-Screenshot 'deposit-tab' | Out-Null
-Press-Key ESC
+Press-Key 'E'
 Start-Sleep -Milliseconds 500
 Assert-Filter 2 { param($f) $f.typeState -eq 0 } 'deposit type cycled back to allow'
 
