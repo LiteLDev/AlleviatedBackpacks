@@ -1,0 +1,8 @@
+{
+  "abp_infinity_upgrade": {
+    "textures": "textures/items/infinity_upgrade"
+  },
+  "abp_survival_infinity_upgrade": {
+    "textures": "textures/items/survival_infinity_upgrade"
+  }
+}

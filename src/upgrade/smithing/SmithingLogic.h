@@ -20,4 +20,9 @@ struct SmithingOutcome {
 /// Whether the item looks like a smithing template (used to route shift-clicks).
 [[nodiscard]] bool isTemplate(ItemStack const& stack);
 
+/// Vanilla SmithingMenu slot rules: whether some smithing_table recipe takes `stack` as its
+/// template (index 0), base (1) or addition (2) ingredient.
+enum class Ingredient { Template = 0, Base = 1, Addition = 2 };
+[[nodiscard]] bool isIngredient(ItemStack const& stack, Ingredient which);
+
 } // namespace abp::upgrade::smithing
