@@ -10,9 +10,14 @@
 if ($env:ABP_E2E_HOST_DIR) { Wait-LogLine 'companion: server ready' 90 | Out-Null }
 
 function Get-TiersInfo {
-    $mark = Get-LogMark
-    Invoke-Chat '/backpack tiers info'
-    $line = Wait-LogLine 'tiers info: ' 25 -Since $mark
+    # Remote mode: the line comes from the host log; a chat line typed while a screen is still
+    # closing can get lost, so retry once.
+    $line = $null
+    for ($try = 0; $try -lt 2 -and -not $line; $try++) {
+        $mark = Get-LogMark
+        Invoke-Chat '/backpack tiers info'
+        try { $line = Wait-LogLine 'tiers info: ' 20 -Since $mark } catch { if ($try -gt 0) { throw }; Start-Sleep -Seconds 1 }
+    }
     if ($line -notmatch 'uuid=(\S+) tier=(\S+) items=(\d+) main=(#\w+) accent=(#\w+) upgrades=\[([^\]]*)\]') { throw "bad info line: $line" }
     return [pscustomobject]@{ Uuid = $Matches[1]; Tier = $Matches[2]; Items = [int]$Matches[3]; Main = $Matches[4]; Accent = $Matches[5]; Upgrades = $Matches[6] }
 }
@@ -126,7 +131,7 @@ Save-Screenshot 'upgrade-tier1' | Out-Null
 $mark = Get-LogMark
 Press-Key 'E'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 1500
 $after = Get-TiersInfo
 if ($after.Upgrades -notmatch 'stack_tier_1_upgrade' -or $after.Items -ne 20) { throw "conversion: $($after | Out-String)" }
 
