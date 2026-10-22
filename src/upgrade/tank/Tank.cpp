@@ -1,55 +1,88 @@
-// Tank upgrade: a fluid tank inside the backpack (SB "Tank Upgrade").
+// Tank upgrade (SB "Tank Upgrade"; Sophisticated Core `TankUpgradeItem` / `TankUpgradeWrapper`).
 //
 // Settings JSON (travels with the upgrade item):
-//   "tank": {"fluid": "<fluid id>", "amount": <mB>}
-//   "in":   ItemStackData (the input slot: what is left after pouring filled containers in)
-//   "out":  ItemStackData (the output slot: containers filled from the tank)
+//   "tank":      {"fluid": "<phase-1 fluid id>", "amount": <mB>}
+//   "in", "out", "inResult", "outResult": ItemStackData (SB INPUT_SLOT .. OUTPUT_RESULT_SLOT)
 
 #include "upgrade/tank/Tank.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 
-#include "mc/world/PlayerUIContainer.h"
 #include "mc/world/actor/player/Inventory.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
 #include "api/BackpackCapabilities.h"
 #include "api/Service.h"
+#include "core/Capacity.h"
 #include "core/FluidRegistry.h"
-#include "core/Format.h"
-#include "selftest/SelfTest.h"
 #include "game/ItemConv.h"
 #include "mod/Config.h"
 #include "mod/I18n.h"
-#include "ui/menu/MenuManager.h"
+#include "mod/Module.h"
+#include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/magnet/Magnet.h"
+#include "upgrade/tank/Columns.h"
+#include "upgrade/tank/FastTick.h"
 #include "upgrade/tank/MenuBits.h"
 
 namespace abp::upgrade::tank {
 
 namespace fl = core::fluid;
 
-/// `config/tank.json`
+/// `config/tank.json` (SB `tankUpgrade` server config).
 struct TankConfig {
-    int version = 1;
-    /// Tank capacity in mB per 9 storage slots of the backpack (multiplied by stack upgrades).
-    int capacityPerSlotRow = fl::kPerSlotRow;
+    int version = 2;
+    /// Capacity in mB the tank upgrade will have per row of storage slots.
+    int capacityPerSlotRow = 4000;
+    /// Ratio applied to the inventory stack multiplier before it multiplies the tank capacity
+    /// (0 = stack upgrades don't change the capacity).
+    double stackMultiplierRatio = 1.0;
+    /// Cooldown (ticks) between fill / drain actions on the containers in the tank slots.
+    int autoFillDrainContainerCooldown = 20;
+    /// mB moved in / out per operation per row of storage slots (times the stack multiplier, at
+    /// least a bucket).
+    int maxInputOutput = 20;
 };
 
-// ---- tank access --------------------------------------------------------------------------------
+namespace {
+constexpr char const* kIn        = "in";
+constexpr char const* kOut       = "out";
+constexpr char const* kInResult  = "inResult";
+constexpr char const* kOutResult = "outResult";
+constexpr int         kSlotLimit = 64; ///< SB TankIOSlot: min(stack max size, 64)
 
-int stackMultiplier(game::Backpack& backpack) {
-    auto& inv = backpack.inventory();
-    if (inv.size() <= 0) return 1;
-    auto probe = core::ItemStackData::of("minecraft:stone", 1, 64);
-    return std::max(1, inv.slotLimit(0, probe) / 64);
+TankConfig const& cfg() { return config::get<TankConfig>(); }
+} // namespace
+
+// ---- sizing ---------------------------------------------------------------------------------------
+
+int baseCapacity(game::Backpack& backpack) {
+    return core::capacity::tankCapacity(api::backpack::slotRows(backpack), 1.0, std::clamp(cfg().capacityPerSlotRow, 500, 20000), 0.0);
 }
 
 int capacity(game::Backpack& backpack) {
-    return fl::tankCapacity(backpack.inventory().size(), stackMultiplier(backpack), config::get<TankConfig>().capacityPerSlotRow);
+    return core::capacity::tankCapacity(
+        api::backpack::slotRows(backpack),
+        api::backpack::stackMultiplier(backpack),
+        std::clamp(cfg().capacityPerSlotRow, 500, 20000),
+        std::clamp(cfg().stackMultiplierRatio, 0.0, 5.0)
+    );
 }
+
+int maxInOut(game::Backpack& backpack) {
+    return core::capacity::tankMaxInOut(
+        api::backpack::slotRows(backpack),
+        api::backpack::stackMultiplier(backpack),
+        std::clamp(cfg().maxInputOutput, 1, 1000),
+        std::clamp(cfg().stackMultiplierRatio, 0.0, 5.0)
+    );
+}
+
+// ---- tank access ----------------------------------------------------------------------------------
 
 bool isTank(UpgradeContext const& ctx) {
     auto const& slots = ctx.backpack().data().upgrades;
@@ -81,12 +114,85 @@ void write(UpgradeContext const& ctx, fl::Tank const& tank) {
     ctx.saveSettings();
 }
 
+api::FluidStack contents(UpgradeContext const& ctx) { return core::toApi(read(ctx).contents()); }
+
+namespace {
+void writeContents(UpgradeContext const& ctx, api::FluidStack const& stack) {
+    write(ctx, fl::Tank(core::fromApi(stack), capacity(ctx.backpack())));
+}
+} // namespace
+
+int fillTank(UpgradeContext const& ctx, api::FluidStack const& resource, bool simulate, bool ignoreLimit) {
+    if (resource.empty() || !isTank(ctx)) return 0;
+    int  cap = capacity(ctx.backpack());
+    auto c   = contents(ctx);
+    int  have = c.empty() ? 0 : c.amount;
+    if (have >= cap || (!c.empty() && !c.isSameFluid(resource))) return 0;
+    int toFill = std::min(cap - have, resource.amount);
+    if (!ignoreLimit) toFill = std::min(maxInOut(ctx.backpack()), toFill);
+    if (toFill <= 0) return 0;
+    if (!simulate) writeContents(ctx, c.empty() ? resource.copyWithAmount(toFill) : c.copyWithAmount(have + toFill));
+    return toFill;
+}
+
+api::FluidStack drainTank(UpgradeContext const& ctx, int maxDrain, bool simulate, bool ignoreLimit) {
+    if (!isTank(ctx) || maxDrain <= 0) return {};
+    auto c = contents(ctx);
+    if (c.empty()) return {};
+    int toDrain = std::min(maxDrain, c.amount);
+    if (!ignoreLimit) toDrain = std::min(maxInOut(ctx.backpack()), toDrain);
+    auto out = c.copyWithAmount(toDrain);
+    if (!simulate) writeContents(ctx, c.copyWithAmount(c.amount - toDrain));
+    return out;
+}
+
+namespace {
+/// One tank upgrade as an API fluid handler (what pipes, pumps and other mods see).
+class TankHandler final : public api::IFluidHandler {
+public:
+    TankHandler(UpgradeContext ctx, bool ignoreLimit) : mCtx(std::move(ctx)), mIgnoreLimit(ignoreLimit) {}
+
+    [[nodiscard]] int             tanks() const override { return 1; }
+    [[nodiscard]] api::FluidStack fluidInTank(int t) const override { return t == 0 ? contents(mCtx) : api::FluidStack{}; }
+    [[nodiscard]] int tankCapacity(int t) const override { return t == 0 && isTank(mCtx) ? capacity(mCtx.backpack()) : 0; }
+    [[nodiscard]] bool isFluidValid(int t, api::FluidStack const& s) const override {
+        if (t != 0 || s.empty()) return false;
+        auto c = contents(mCtx);
+        return c.empty() || c.isSameFluid(s);
+    }
+    int fill(api::FluidStack const& resource, bool simulate) override { return fillTank(mCtx, resource, simulate, mIgnoreLimit); }
+    api::FluidStack drain(api::FluidStack const& resource, bool simulate) override {
+        if (resource.empty() || !contents(mCtx).isSameFluid(resource)) return {};
+        return drainTank(mCtx, resource.amount, simulate, mIgnoreLimit);
+    }
+    api::FluidStack drainAny(int maxDrain, bool simulate) override { return drainTank(mCtx, maxDrain, simulate, mIgnoreLimit); }
+
+private:
+    UpgradeContext mCtx;
+    bool           mIgnoreLimit;
+};
+} // namespace
+
+ABP_REGISTER_BACKPACK_TANK(std::string(kId), [](UpgradeContext const& ctx) -> std::shared_ptr<api::IFluidHandler> {
+    return std::make_shared<TankHandler>(ctx, false);
+});
+
+std::shared_ptr<api::IFluidHandler> storageHandler(std::shared_ptr<game::Backpack> const& backpack, bool ignoreLimit) {
+    std::vector<std::shared_ptr<api::IFluidHandler>> parts;
+    forEachInstalled(backpack, true, [&](IUpgrade& u, UpgradeContext const& ctx) {
+        if (u.info().id == kId) parts.push_back(std::make_shared<TankHandler>(ctx, ignoreLimit));
+    });
+    if (parts.empty()) return nullptr;
+    return std::make_shared<api::CombinedFluidHandler>(std::move(parts));
+}
+
+// ---- backpack-wide access by phase-1 id ------------------------------------------------------------
+
 int fill(std::shared_ptr<game::Backpack> const& backpack, FluidStack const& stack, bool simulate, bool exact) {
     if (stack.empty()) return 0;
     auto all = tanks(backpack);
     if (exact && !simulate && fill(backpack, stack, true, false) < stack.amount) return 0;
     int left = stack.amount;
-    // Pass 1: tanks already holding this fluid; pass 2: empty tanks.
     for (int pass = 0; pass < 2 && left > 0; ++pass) {
         for (auto const& ctx : all) {
             if (left <= 0) break;
@@ -150,7 +256,7 @@ std::vector<std::string> fluids(std::shared_ptr<game::Backpack> const& backpack)
     return out;
 }
 
-// ---- containers ---------------------------------------------------------------------------------
+// ---- swap containers by item data -----------------------------------------------------------------
 
 namespace {
 core::ItemStackData itemData(std::string_view id, int aux) {
@@ -164,7 +270,6 @@ core::ItemStackData itemData(std::string_view id, int aux) {
 
 std::optional<core::ItemStackData> emptyContainer(core::ItemStackData const& filled, FillFn const& fill, bool simulate) {
     if (filled.empty() || !fill) return std::nullopt;
-    // Containers come from the capability API's registry (vanilla + registered by mods).
     auto contents = api::fluidRegistry().contentsOf(filled.id, filled.aux);
     if (!contents) return std::nullopt;
     auto empty = itemData(contents->emptyItem, 0);
@@ -208,12 +313,260 @@ DrainFn drainerOf(UpgradeContext const& ctx) {
     };
 }
 
-FillFn fillerOf(std::shared_ptr<game::Backpack> const& backpack) {
-    return [backpack](FluidStack const& s, bool simulate) { return fill(backpack, s, simulate, true); };
+// ---- SB container logic ---------------------------------------------------------------------------
+
+namespace {
+using HandlerPtr = std::shared_ptr<api::IFluidHandlerItem>;
+using Update     = std::function<void(ItemStack const&)>;
+
+HandlerPtr handlerOf(ItemStack const& stack) {
+    if (stack.isNull() || stack.mCount <= 0) return nullptr;
+    return api::service().itemFluid(stack);
 }
 
-DrainFn drainerOf(std::shared_ptr<game::Backpack> const& backpack) {
-    return [backpack](std::string_view fluid, int amount, bool simulate) { return drain(backpack, fluid, amount, simulate, true); };
+int amountIn(api::FluidStack const& s) { return s.empty() ? 0 : s.amount; }
+
+int matchingTank(api::IFluidHandler const& h, api::FluidStack const& match) {
+    for (int t = 0; t < h.tanks(); ++t) {
+        if (h.fluidInTank(t).isSameFluid(match)) return t;
+    }
+    return -1;
+}
+
+ItemStack one(core::ItemStackData const& d) { return game::ItemConv::toStack(d, 1); }
+
+/// SB TankUpgradeWrapper container helpers, bound to one tank.
+class Logic {
+public:
+    explicit Logic(UpgradeContext ctx) : mCtx(std::move(ctx)) {}
+
+    [[nodiscard]] api::FluidStack current() const { return contents(mCtx); }
+    [[nodiscard]] int             cap() const { return capacity(mCtx.backpack()); }
+
+    [[nodiscard]] bool isValidFluidHandler(api::IFluidHandler const& h, bool isOutput) const {
+        auto c         = current();
+        bool tankEmpty = c.empty();
+        for (int t = 0; t < h.tanks(); ++t) {
+            auto in = h.fluidInTank(t);
+            if (isOutput && amountIn(in) < h.tankCapacity(t) && (in.empty() || tankEmpty || in.isSameFluid(c))) return true;
+            if (!isOutput && !in.empty() && (tankEmpty || c.isSameFluid(in))) return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool hasValidFluidHandler(core::ItemStackData const& item, bool isOutput) const {
+        if (item.empty()) return false;
+        auto h = handlerOf(one(item));
+        return h && isValidFluidHandler(*h, isOutput);
+    }
+
+    [[nodiscard]] bool hasNoMatchingFluid(api::IFluidHandler const& h) const {
+        auto c = current();
+        if (c.empty()) {
+            for (int t = 0; t < h.tanks(); ++t) {
+                if (!h.fluidInTank(t).empty()) return false;
+            }
+            return true;
+        }
+        for (int t = 0; t < h.tanks(); ++t) {
+            if (h.fluidInTank(t).isSameFluid(c)) return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool matchingTankIsFull(api::IFluidHandler const& h) const {
+        auto c         = current();
+        bool tankEmpty = c.empty();
+        for (int t = 0; t < h.tanks(); ++t) {
+            auto in  = h.fluidInTank(t);
+            int  tc  = h.tankCapacity(t);
+            if (tankEmpty && amountIn(in) < tc) return false;
+            if (in.isSameFluid(c) && amountIn(in) < tc) return false;
+        }
+        return true;
+    }
+
+    /// ComponentItemHandler.insertItem(slot, stack, simulate).isEmpty()
+    [[nodiscard]] bool insertsFully(char const* key, ItemStack const& stack, bool simulate) const {
+        if (stack.isNull()) return true;
+        return fluidui::insertCount(mCtx, key, game::ItemConv::toData(stack), kSlotLimit, simulate) == 0;
+    }
+
+    bool fillHandler(api::IFluidHandlerItem& fh, Update const& update, bool moveFullToResult, bool simulateIncludingFullFill) {
+        auto c = current();
+        if (c.empty() || !isValidFluidHandler(fh, true)) return false;
+        int filled = fh.fill(c.copyWithAmount(std::min(api::kBucketVolume, c.amount)), true);
+        if (filled <= 0) return false;
+        if (moveFullToResult && isFullAfterFillButUnableToInsertIntoResult(fh.container())) return false;
+        if (simulateIncludingFullFill) {
+            auto drained = drainTank(mCtx, filled, true, false);
+            if (amountIn(drained) != filled) return false;
+            auto copy = handlerOf(fh.container());
+            if (!copy || copy->fill(drained, false) != filled) return false;
+            auto after = handlerOf(copy->container());
+            return after && matchingTankIsFull(*after);
+        }
+        auto drained = drainTank(mCtx, filled, false, false);
+        fh.fill(drained, false);
+        auto after = handlerOf(fh.container());
+        if (moveFullToResult && after && matchingTankIsFull(*after)) {
+            update(ItemStack{});
+            (void)insertsFully(kOutResult, fh.container(), false);
+        } else {
+            update(fh.container());
+        }
+        return true;
+    }
+
+    bool drainHandler(api::IFluidHandlerItem& fh, Update const& update, bool moveEmptyToResult, bool simulateIncludingFullDrain) {
+        if (!isValidFluidHandler(fh, false)) return false;
+        auto            c = current();
+        api::FluidStack extracted =
+            c.empty() ? fh.drainAny(api::kBucketVolume, true)
+                      : fh.drain(c.copyWithAmount(std::min(api::kBucketVolume, cap() - c.amount)), true);
+        if (extracted.empty()) return false;
+        if (moveEmptyToResult && isEmptyAfterDrainButUnableToInsertIntoResult(fh.container(), extracted)) return false;
+        if (simulateIncludingFullDrain) {
+            return fh.tanks() > 0 && fillTank(mCtx, extracted, true, false) == fh.tankCapacity(0);
+        }
+        int  filled    = fillTank(mCtx, extracted, false, false);
+        auto toExtract = filled == extracted.amount ? extracted : extracted.copyWithAmount(filled);
+        fh.drain(toExtract, false);
+        auto after = handlerOf(fh.container());
+        if (moveEmptyToResult && (!after || hasNoMatchingFluid(*after))) {
+            update(ItemStack{});
+            (void)insertsFully(kInResult, fh.container(), false);
+        } else {
+            update(fh.container());
+        }
+        return true;
+    }
+
+    bool tryDraining() {
+        auto in = fluidui::slotItem(mCtx, kIn);
+        if (in.empty()) return false;
+        if (in.count > 1) {
+            auto sim = handlerOf(one(in));
+            if (!sim || !drainHandler(*sim, [](ItemStack const&) {}, true, true)) return false;
+            auto h = handlerOf(one(in));
+            return h && drainHandler(*h, [&](ItemStack const&) { fluidui::setSlotItem(mCtx, kIn, in.withCount(in.count - 1)); }, true, false);
+        }
+        auto h = handlerOf(one(in));
+        return h && drainHandler(*h, [&](ItemStack const& s) { fluidui::setSlotItem(mCtx, kIn, oneData(s)); }, true, false);
+    }
+
+    bool tryFilling() {
+        auto out = fluidui::slotItem(mCtx, kOut);
+        if (out.empty()) return false;
+        if (out.count > 1) {
+            auto sim = handlerOf(one(out));
+            if (!sim || !fillHandler(*sim, [](ItemStack const&) {}, true, true)) return false;
+            auto h = handlerOf(one(out));
+            return h && fillHandler(*h, [&](ItemStack const&) { fluidui::setSlotItem(mCtx, kOut, out.withCount(out.count - 1)); }, true, false);
+        }
+        auto h = handlerOf(one(out));
+        return h && fillHandler(*h, [&](ItemStack const& s) { fluidui::setSlotItem(mCtx, kOut, oneData(s)); }, true, false);
+    }
+
+    /// SB TankComponentItemHandler.migrateLegacyContents: phase-1 tanks kept the processed
+    /// container in the input / output slot.
+    void migrateLegacySlots() {
+        auto in = fluidui::slotItem(mCtx, kIn);
+        if (!in.empty() && !hasValidFluidHandler(in, false) && fluidui::slotItem(mCtx, kInResult).empty()) {
+            fluidui::setSlotItem(mCtx, kIn, {});
+            fluidui::setSlotItem(mCtx, kInResult, in);
+        }
+        auto out = fluidui::slotItem(mCtx, kOut);
+        if (!out.empty() && !hasValidFluidHandler(out, true) && fluidui::slotItem(mCtx, kOutResult).empty()) {
+            fluidui::setSlotItem(mCtx, kOut, {});
+            fluidui::setSlotItem(mCtx, kOutResult, out);
+        }
+    }
+
+private:
+    static core::ItemStackData oneData(ItemStack const& s) {
+        if (s.isNull()) return {};
+        auto d = game::ItemConv::toData(s);
+        return d;
+    }
+
+    bool isFullAfterFillButUnableToInsertIntoResult(ItemStack const& container) const {
+        auto copy = handlerOf(container);
+        if (!copy) return true;
+        auto c = current();
+        copy->fill(c.copyWithAmount(std::min(api::kBucketVolume, c.amount)), false);
+        auto fh = handlerOf(copy->container());
+        if (!fh) return true;
+        int tank = matchingTank(*fh, c);
+        if (tank < 0) return true;
+        return amountIn(fh->fluidInTank(tank)) == fh->tankCapacity(tank) && !insertsFully(kOutResult, copy->container(), true);
+    }
+
+    bool isEmptyAfterDrainButUnableToInsertIntoResult(ItemStack const& container, api::FluidStack const& extracted) const {
+        auto copy = handlerOf(container);
+        if (!copy) return true;
+        int tank = matchingTank(*copy, extracted);
+        if (tank < 0) return true;
+        copy->drain(extracted, false);
+        auto after   = handlerOf(copy->container());
+        bool emptied = !after || after->tanks() <= tank || after->fluidInTank(tank).empty();
+        return emptied && !insertsFully(kInResult, copy->container(), true);
+    }
+
+    UpgradeContext mCtx;
+};
+
+struct Cooldown {
+    std::int64_t until = 0;
+};
+
+constexpr char const* kSlotsVersionKey = "slotsV";
+
+/// Phase-1 tanks (no slot format version yet) get SB's slot layout once.
+void migrateSlotsOnce(UpgradeContext const& ctx) {
+    auto& s = ctx.settings();
+    if (s.is_object() && s.value(kSlotsVersionKey, 0) >= 2) return;
+    Logic(ctx).migrateLegacySlots();
+    auto& after = ctx.settings();
+    if (!after.is_object()) after = nlohmann::json::object();
+    after[kSlotsVersionKey] = 2;
+    ctx.saveSettings();
+}
+
+/// SB `tick`: one container step per cooldown.
+void tickSlots(UpgradeContext const& ctx) {
+    if (!isTank(ctx)) return;
+    auto& cd = ctx.transient<Cooldown>();
+    Logic logic(ctx);
+    migrateSlotsOnce(ctx);
+    if (fasttick::now() < cd.until) return;
+    bool did = logic.tryDraining();
+    did |= logic.tryFilling();
+    if (did) cd.until = fasttick::now() + std::clamp(cfg().autoFillDrainContainerCooldown, 1, 100);
+}
+} // namespace
+
+bool processSlots(UpgradeContext const& ctx) {
+    if (!isTank(ctx)) return false;
+    Logic logic(ctx);
+    bool  did = logic.tryDraining();
+    did |= logic.tryFilling();
+    return did;
+}
+
+std::optional<ItemStack> interactWithCursor(UpgradeContext const& ctx, ItemStack const& cursor) {
+    if (!isTank(ctx) || cursor.isNull() || cursor.mCount > 1) return std::nullopt;
+    auto h = handlerOf(cursor);
+    if (!h) return std::nullopt;
+    Logic                    logic(ctx);
+    std::optional<ItemStack> result;
+    Update                   update = [&](ItemStack const& s) { result = s; };
+    if (logic.current().empty()) {
+        logic.drainHandler(*h, update, false, false);
+    } else if (!logic.fillHandler(*h, update, false, false)) {
+        logic.drainHandler(*h, update, false, false);
+    }
+    return result;
 }
 
 // ---- display ------------------------------------------------------------------------------------
@@ -234,32 +587,22 @@ template <class... Args>
 std::string text(Player const* p, std::string_view key, std::string_view fallback, Args const&... args) {
     return p ? trFor(*p, key, fallback, args...) : tr(key, fallback, args...);
 }
-
-std::string_view gaugePane(std::string_view fluid) {
-    auto fam = fl::family(fluid);
-    if (fam == fl::kWater) return "minecraft:blue_stained_glass_pane";
-    if (fam == fl::kLava) return "minecraft:orange_stained_glass_pane";
-    if (fam == fl::kMilk) return "minecraft:white_stained_glass_pane";
-    if (fam == fl::kPowderSnow) return "minecraft:light_blue_stained_glass_pane";
-    if (fam == fl::kHoney) return "minecraft:yellow_stained_glass_pane";
-    if (fam == fl::kExperience) return "minecraft:lime_stained_glass_pane";
-    return "minecraft:magenta_stained_glass_pane"; // potions
-}
 } // namespace
 
 std::string fluidName(Player const* player, std::string_view fluid) {
     auto fam = fl::family(fluid);
     if (fam == "potion") return text(player, "abp.tank.fluid.potion", "Potion #{}", fl::potionAux(fluid));
     if (fam == "splash_potion") return text(player, "abp.tank.fluid.splash_potion", "Splash Potion #{}", fl::potionAux(fluid));
-    if (fam == "lingering_potion") {
-        return text(player, "abp.tank.fluid.lingering_potion", "Lingering Potion #{}", fl::potionAux(fluid));
-    }
+    if (fam == "lingering_potion") return text(player, "abp.tank.fluid.lingering_potion", "Lingering Potion #{}", fl::potionAux(fluid));
     if (fluid == fl::kWater) return text(player, "abp.tank.fluid.water", "Water");
     if (fluid == fl::kLava) return text(player, "abp.tank.fluid.lava", "Lava");
     if (fluid == fl::kMilk) return text(player, "abp.tank.fluid.milk", "Milk");
     if (fluid == fl::kPowderSnow) return text(player, "abp.tank.fluid.powder_snow", "Powder Snow");
     if (fluid == fl::kHoney) return text(player, "abp.tank.fluid.honey", "Honey");
     if (fluid == fl::kExperience) return text(player, "abp.tank.fluid.experience", "Experience");
+    // A mod fluid: its registered name.
+    auto api = core::toApi({std::string(fluid), 1});
+    if (auto const* info = api::fluidRegistry().fluid(api.id)) return text(player, info->nameKey, info->nameFallback);
     return std::string(fluid);
 }
 
@@ -275,237 +618,39 @@ std::string describe(Player const* player, fl::Tank const& tank) {
     );
 }
 
-ItemStack fluidIcon(std::string_view fluid, std::string const& name, std::vector<std::string> const& lore) {
-    ItemStack stack;
-    if (fluid.empty()) stack = game::ItemConv::make("minecraft:barrier", 1, 0);
-    else if (fluid == fl::kExperience) stack = game::ItemConv::make("minecraft:experience_bottle", 1, 0);
-    else if (auto item = fl::displayItem(fluid)) stack = game::ItemConv::make(item->id, 1, item->aux);
-    if (stack.isNull()) stack = game::ItemConv::make("minecraft:bucket", 1, 0);
-    game::ItemConv::setDisplay(stack, name.empty() ? std::string{} : "§r" + name, lore);
-    return stack;
-}
-
-// ---- menu ---------------------------------------------------------------------------------------
+// ---- the upgrade --------------------------------------------------------------------------------
 
 namespace {
 
-/// The tank's input (pour filled containers in) or output (fill empty containers) slot. The
-/// result stays in the slot until the player takes it, as in SB.
-class ContainerSlot : public ui::Slot {
-public:
-    ContainerSlot(UpgradeContext ctx, bool input) : mCtx(std::move(ctx)), mInput(input) {}
+bool alive(UpgradeContext const& ctx) { return isTank(ctx); }
 
-    [[nodiscard]] ItemStack display(Player&) const override {
-        auto c = content();
-        return c.empty() ? ItemStack{} : game::ItemConv::toStack(c, std::min(c.count, 255));
+std::shared_ptr<ui::Menu> slotsMenu(Player& player, UpgradeContext const& ctx) {
+    auto factory = [ctx]() {
+        Logic                                  logic(ctx);
+        auto                                   isAlive = [ctx] { return alive(ctx); };
+        std::vector<std::shared_ptr<ui::Slot>> slots;
+        auto valid = [ctx](bool output) {
+            return [ctx, output](core::ItemStackData const& d) {
+                return !fluidui::isOwnBackpack(ctx, d) && Logic(ctx).hasValidFluidHandler(d, output);
+            };
+        };
+        slots.push_back(std::make_shared<fluidui::SettingsItemSlot>(ctx, kIn, valid(false), kSlotLimit, isAlive));
+        slots.push_back(std::make_shared<fluidui::SettingsItemSlot>(ctx, kOut, valid(true), kSlotLimit, isAlive));
+        slots.push_back(std::make_shared<fluidui::SettingsItemSlot>(ctx, kInResult, nullptr, kSlotLimit, isAlive));
+        slots.push_back(std::make_shared<fluidui::SettingsItemSlot>(ctx, kOutResult, nullptr, kSlotLimit, isAlive));
+        return slots;
+    };
+    return std::make_shared<fluidui::ItemSlotsMenu>(trFor(player, "abp.tank.tab", "Tank"), ctx, factory, [ctx] { return alive(ctx); });
+}
+
+int otherTanks(UpgradeContext const& ctx) {
+    int         n     = 0;
+    auto const& slots = ctx.backpack().data().upgrades;
+    for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
+        if (i != ctx.slot() && slots[static_cast<std::size_t>(i)].item.id == kItemId) ++n;
     }
-
-    ItemStack take(Player&, int amount) override {
-        auto c = content();
-        if (c.empty() || amount <= 0) return {};
-        int n = std::min({amount, c.count, 255});
-        auto out = game::ItemConv::toStack(c, n);
-        if (!mTaken.empty() && mTaken.sameItem(c)) mTaken.count += n;
-        else mTaken = c.withCount(n);
-        c.count -= n;
-        store(c);
-        return out;
-    }
-
-    int accept(Player&, ItemStack const& stack) override { return offer(game::ItemConv::toData(stack)); }
-
-    /// Processes (or merges back) `offered`; returns how many were accepted.
-    int offer(core::ItemStackData offered) {
-        if (offered.empty() || !isTank(mCtx)) return 0;
-        auto c = content();
-        // The framework handing back what it took (a rest that didn't fit, a failed swap): put it
-        // back unprocessed. Only what was taken out can come back, so the slots never become extra
-        // storage.
-        if (!mTaken.empty() && mTaken.sameItem(offered) && (c.empty() || c.sameItem(offered))) {
-            int room = std::max(0, std::max(1, offered.maxStack) - (c.empty() ? 0 : c.count));
-            int n    = std::min({offered.count, mTaken.count, room});
-            if (n > 0) {
-                mTaken.count -= n;
-                if (mTaken.count <= 0) mTaken.clear();
-                store(c.empty() ? offered.withCount(n) : c.withCount(c.count + n));
-                return n;
-            }
-        }
-        int done = 0;
-        for (; done < offered.count; ++done) {
-            auto one    = offered.withCount(1);
-            auto result = process(one, true);
-            if (!result) break;
-            if (!c.empty() && (!c.sameItem(*result) || c.count >= c.maxStack)) break;
-            result = process(one, false);
-            if (!result) break;
-            if (c.empty()) c = *result;
-            else c.count += 1;
-        }
-        if (done > 0) store(c);
-        return done;
-    }
-
-    [[nodiscard]] core::ItemStackData content() const {
-        if (!isTank(mCtx)) return {};
-        auto const& s = mCtx.settings();
-        if (!s.is_object() || !s.contains(key())) return {};
-        return core::ItemStackData::fromJson(s.at(key()));
-    }
-
-private:
-    [[nodiscard]] char const* key() const { return mInput ? "in" : "out"; }
-
-    std::optional<core::ItemStackData> process(core::ItemStackData const& one, bool simulate) const {
-        if (mInput) return emptyContainer(one, fillerOf(mCtx), simulate);
-        auto t = read(mCtx);
-        if (t.empty()) return std::nullopt;
-        return fillContainer(one, t.fluid(), drainerOf(mCtx), simulate);
-    }
-
-    void store(core::ItemStackData const& c) const {
-        auto& s = mCtx.settings();
-        if (!s.is_object()) s = nlohmann::json::object();
-        if (c.empty()) s.erase(key());
-        else s[key()] = c.toJson();
-        mCtx.saveSettings();
-    }
-
-    UpgradeContext mCtx;
-    bool           mInput;
-    core::ItemStackData mTaken; ///< items taken out that may be handed back unprocessed
-};
-
-class TankMenu : public ui::Menu {
-public:
-    static constexpr int kInputSlot  = 11;
-    static constexpr int kOutputSlot = 15;
-    static constexpr int kInfoSlot   = 13;
-
-    TankMenu(UpgradeContext ctx, std::string title) : Menu(std::move(title), Rows::Six), mCtx(std::move(ctx)) {}
-
-    void build(Player& player) override {
-        for (int i = 0; i < size(); ++i) setSlot(i, fluidui::filler());
-        // Row 0: a gauge of 9 panes.
-        for (int i = 0; i < 9; ++i) {
-            setSlot(i, fluidui::live([this, i](Player& p) {
-                auto const& t = current();
-                int  filled = 0;
-                if (!t.empty() && t.capacity() > 0) {
-                    filled = static_cast<int>(std::ceil(9.0 * std::min(t.amount(), t.capacity()) / t.capacity()));
-                }
-                auto id = i < filled ? gaugePane(t.fluid()) : std::string_view("minecraft:black_stained_glass_pane");
-                return ui::icon(id, describe(&p, t));
-            }));
-        }
-        setSlot(
-            kInputSlot - 1,
-            std::make_shared<ui::StaticSlot>(ui::icon(
-                "minecraft:hopper",
-                trFor(player, "abp.tank.input", "Fill the tank ▶"),
-                {trFor(player, "abp.tank.input.help1", "§7Put a filled bucket or bottle here:"),
-                 trFor(player, "abp.tank.input.help2", "§7it is poured into the tank and the"),
-                 trFor(player, "abp.tank.input.help3", "§7empty container stays in the slot.")}
-            ))
-        );
-        setSlot(kInputSlot, std::make_shared<ContainerSlot>(mCtx, true));
-        setSlot(kInfoSlot, fluidui::live([this](Player& p) {
-            auto const& t = current();
-            return fluidIcon(t.fluid(), t.empty() ? trFor(p, "abp.tank.name", "Tank Upgrade") : fluidName(&p, t.fluid()), {describe(&p, t)});
-        }));
-        setSlot(
-            kOutputSlot - 1,
-            std::make_shared<ui::StaticSlot>(ui::icon(
-                "minecraft:bucket",
-                trFor(player, "abp.tank.output", "Empty the tank ▶"),
-                {trFor(player, "abp.tank.output.help1", "§7Put an empty bucket or bottle here:"),
-                 trFor(player, "abp.tank.output.help2", "§7it is filled from the tank.")}
-            ))
-        );
-        setSlot(kOutputSlot, std::make_shared<ContainerSlot>(mCtx, false));
-        setSlot(18, fluidui::backButton(player, mCtx.backpackPtr()));
-    }
-
-    void onOpen(Player& player) override { fluidui::lockBackpackItem(*this, player, mCtx.backpack()); }
-
-    void onTick(Player& player) override {
-        if (!isTank(mCtx)) ui::MenuManager::get().close(player);
-    }
-
-    /// Everything shown depends on the backpack only (tank settings, capacity): skip the per-tick
-    /// diff while it is unchanged.
-    std::optional<std::uint64_t> contentVersion() const override { return mCtx.backpack().revision(); }
-
-    int quickMoveIn(Player&, ItemStack const& stack) override {
-        if (stack.isNull()) return 0;
-        auto d = game::ItemConv::toData(stack);
-        if (api::fluidRegistry().contentsOf(d.id, d.aux)) return static_cast<ContainerSlot*>(slot(kInputSlot))->offer(d);
-        if (api::fluidRegistry().isEmptyContainer(d.id)) return static_cast<ContainerSlot*>(slot(kOutputSlot))->offer(d);
-        return 0;
-    }
-
-private:
-    /// The tank, read once per backpack revision (the gauge shows it in 10 slots).
-    fl::Tank const& current() {
-        auto rev = mCtx.backpack().revision();
-        if (!mCached || mCachedRevision != rev) {
-            mCached         = read(mCtx);
-            mCachedRevision = rev;
-        }
-        return *mCached;
-    }
-
-    UpgradeContext          mCtx;
-    std::optional<fl::Tank> mCached;
-    std::uint64_t           mCachedRevision = 0;
-};
-
-// ---- capability API ------------------------------------------------------------------------------
-
-/// One tank upgrade as an API fluid handler: what other mods (and the backpack's combined handler,
-/// placed-backpack block capability, backpack item capability) see. Contents stay in the phase-1
-/// format (`core::toApi` / `core::fromApi` convert the ids).
-class TankHandler final : public api::IFluidHandler {
-public:
-    explicit TankHandler(UpgradeContext ctx) : mCtx(std::move(ctx)) {}
-
-    [[nodiscard]] int tanks() const override { return 1; }
-    [[nodiscard]] api::FluidStack fluidInTank(int t) const override {
-        return t == 0 && isTank(mCtx) ? core::toApi(read(mCtx).contents()) : api::FluidStack{};
-    }
-    [[nodiscard]] int  tankCapacity(int t) const override { return t == 0 && isTank(mCtx) ? capacity(mCtx.backpack()) : 0; }
-    [[nodiscard]] bool isFluidValid(int t, api::FluidStack const& s) const override { return t == 0 && !s.empty(); }
-
-    int fill(api::FluidStack const& resource, bool simulate) override {
-        if (resource.empty() || !isTank(mCtx)) return 0;
-        auto t = read(mCtx);
-        int  n = t.fill(core::fromApi(resource), simulate);
-        if (n > 0 && !simulate) write(mCtx, t);
-        return n;
-    }
-    api::FluidStack drain(api::FluidStack const& resource, bool simulate) override {
-        if (resource.empty()) return {};
-        return take(core::legacyIdOf(resource), resource.amount, simulate);
-    }
-    api::FluidStack drainAny(int maxDrain, bool simulate) override { return take({}, maxDrain, simulate); }
-
-private:
-    api::FluidStack take(std::string const& legacyId, int max, bool simulate) {
-        if (!isTank(mCtx)) return {};
-        auto t   = read(mCtx);
-        auto got = t.drain(legacyId, max, simulate);
-        if (!got.empty() && !simulate) write(mCtx, t);
-        return core::toApi(got);
-    }
-
-    UpgradeContext mCtx;
-};
-
-ABP_REGISTER_BACKPACK_TANK(std::string(kId), [](UpgradeContext const& ctx) -> std::shared_ptr<api::IFluidHandler> {
-    return std::make_shared<TankHandler>(ctx);
-});
-
-// ---- the upgrade --------------------------------------------------------------------------------
+    return n;
+}
 
 class TankUpgrade : public IUpgrade {
 public:
@@ -516,198 +661,156 @@ public:
             .nameKey        = "abp.tank.name",
             .nameFallback   = "Tank Upgrade",
             .group          = "tank",
-            .maxPerBackpack = 2,
+            .maxPerBackpack = 1000, // SB's own limit (two) is checked in canInstallItem with its message
             .hasSettings    = true,
             .toggleable     = false,
         };
         return kInfo;
     }
 
-
-    std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
-        return std::make_shared<TankMenu>(ctx, displayName(*this, &player));
+    bool canInstallItem(UpgradeContext const& ctx, core::ItemStackData const& item, std::string& reason) const override {
+        auto msg = [&](std::string_view key, std::string_view fallback, auto const&... args) {
+            return ctx.player() ? trFor(*ctx.player(), key, fallback, args...) : tr(key, fallback, args...);
+        };
+        if (otherTanks(ctx) >= 2) {
+            reason = msg("abp.tank.error.two_tanks", "There are already two Tank Upgrades in other upgrade slots");
+            return false;
+        }
+        // SB checkExtraInsertConditions: the contents the item carries must fit.
+        auto settings = settingsOf(item);
+        int  amount   = 0;
+        if (auto it = settings.find("tank"); it != settings.end() && it->is_object()) amount = std::max(0, it->value("amount", 0));
+        int capacityAfter = std::max(1, capacity(ctx.backpack()));
+        double required   = static_cast<double>(amount) / capacityAfter;
+        if (required > 1) {
+            reason = msg(
+                "abp.tank.error.capacity_high",
+                "Backpack can't support this tank upgrade. Upgrade backpack or add stack multiplier to get at least {}x higher capacity",
+                core::capacity::formatRequiredMultiplier(required)
+            );
+            return false;
+        }
+        return columns::canInstall(ctx, item, reason);
     }
 
-    [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
-        return {tank::describe(&player, read(ctx))};
+    void onInstall(UpgradeContext const& ctx) override {
+        migrateSlotsOnce(ctx);
+        columns::sync(ctx.backpack());
     }
+    void onRemove(UpgradeContext const& ctx) override { columns::sync(ctx.backpack(), ctx.slot()); }
+
+    void attach(UpgradeContext const& ctx, core::BackpackInventory&) override {
+        // Phase-1 backpacks had tanks without taken columns: take them when the items fit.
+        if (columns::expected(ctx.backpack()) != ctx.backpack().data().columnsTaken) columns::sync(ctx.backpack());
+    }
+
+    void onTick(TickContext const& tick) override {
+        fasttick::keepAlive(tick, "tank", [](Player&, UpgradeContext const& ctx, game::ItemLocation, int) { tickSlots(ctx); });
+    }
+
+    void onPlacedTick(PlacedTickContext const& tick) override { tickSlots(tick.ctx); }
+
+    std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override { return slotsMenu(player, ctx); }
 };
 
-// ---- selftests ----------------------------------------------------------------------------------
+// ---- native screen: tab data, bar clicks, render info, contents ---------------------------------
 
-using selftest::Context;
-using Where  = ui::MenuManager::SlotAddress::Where;
-using Action = ui::MenuManager::ActionType;
-
-core::ItemStackData itemOf(std::string_view id, int aux = 0) {
-    auto d = game::ItemConv::toData(game::ItemConv::make(id, 1, aux));
-    return d;
+nlohmann::json fluidJson(Player* player, api::FluidStack const& f) {
+    if (f.empty()) return nullptr;
+    auto const* info = api::fluidRegistry().fluid(f.id);
+    return nlohmann::json{
+        {"id",     f.id                                      },
+        {"nbt",    f.nbt                                     },
+        {"amount", f.amount                                  },
+        {"name",   fluidName(player, core::legacyIdOf(f))     },
+        {"color",  info ? info->color : 0xFFFFFFFFu          },
+        {"xp",     api::fluidRegistry().hasTag(f.id, api::fluid_tags::Experience)},
+    };
 }
 
-ItemStack cursorOf(Player& p) { return p.mPlayerUIContainer->getItem(0); }
-
-int countInInventory(Player& p, std::string_view id) {
-    int n = 0;
-    for (int i = 0; i < p.getInventory().getContainerSize(); ++i) {
-        auto const& it = p.getInventory().getItem(i);
-        if (!it.isNull() && it.getTypeName() == id) n += it.mCount;
+ABP_REGISTER_TAB_DATA(net::TabDataProvider{
+    std::string(kId),
+    [](Player& player, UpgradeContext const& ctx) {
+        return nlohmann::json{
+            {"fluidTank",    {{"fluid", fluidJson(&player, contents(ctx))}, {"capacity", capacity(ctx.backpack())}}},
+            {"inventoryColumns", 2                                   },
+            {"columnsTaken", ctx.backpack().data().columnsTaken      },
+            {"tabLabel",     trFor(player, "abp.tank.tab", "Tank")   },
+            {"tabTooltip",   trFor(player, "abp.tank.tab.tooltip", "Tank")},
+        };
     }
-    if (!cursorOf(p).isNull() && cursorOf(p).getTypeName() == id) n += cursorOf(p).mCount;
-    return n;
-}
-
-ABP_REGISTER_SELFTEST("tank.capacity_and_limit", [](Context& ctx) {
-    auto big = ctx.createBackpack(core::Tier::Diamond); // 108 slots = 12 rows
-    ctx.installUpgrade(big, "tank");
-    ctx.check(capacity(*big) == 48000, "diamond tank capacity = " + std::to_string(capacity(*big)));
-    ctx.installUpgrade(big, "tank");
-    ctx.check(tanks(big).size() == 2, "two tanks installed");
-    ctx.check(!upgrade::canInstall(big, 2, itemOf(kItemId), nullptr), "a third tank is refused (max 2)");
-    auto small = ctx.createBackpack(core::Tier::Leather);
-    ctx.installUpgrade(small, "tank");
-    ctx.check(capacity(*small) == 12000, "leather tank capacity = " + std::to_string(capacity(*small)));
-    auto t = read(tanks(small)[0]);
-    ctx.check(t.empty() && t.capacity() == 12000, "a new tank is empty");
 });
 
-ABP_REGISTER_SELFTEST("tank.containers", [](Context& ctx) {
-    auto bp = ctx.createBackpack(core::Tier::Leather);
-    UpgradeContext t(bp, ctx.installUpgrade(bp, "tank"));
-    auto           in  = fillerOf(t);
-    auto           out = drainerOf(t);
-
-    auto empty = emptyContainer(itemOf("minecraft:water_bucket"), in);
-    ctx.require(empty && empty->id == "minecraft:bucket", "water bucket -> empty bucket");
-    ctx.check(read(t).contents() == FluidStack{"water", 1000}, "1000 mB water");
-    auto bottle = emptyContainer(itemOf("minecraft:potion", 0), in);
-    ctx.check(bottle && bottle->id == "minecraft:glass_bottle", "water bottle -> glass bottle");
-    ctx.check(read(t).amount() == 1250, "+250 mB from a bottle");
-    ctx.check(!emptyContainer(itemOf("minecraft:lava_bucket"), in), "lava refused while the tank holds water");
-    ctx.check(read(t).amount() == 1250, "refusal changes nothing");
-
-    auto filledBottle = fillContainer(itemOf("minecraft:glass_bottle"), "water", out);
-    ctx.check(filledBottle && filledBottle->id == "minecraft:potion" && filledBottle->aux == 0, "glass bottle -> water bottle");
-    auto filledBucket = fillContainer(itemOf("minecraft:bucket"), "water", out);
-    ctx.check(filledBucket && filledBucket->id == "minecraft:water_bucket", "bucket -> water bucket");
-    ctx.check(read(t).empty(), "tank empty again");
-    ctx.check(!fillContainer(itemOf("minecraft:bucket"), "water", out), "nothing to fill from an empty tank");
-
-    // Potions keep their type.
-    auto potion = itemOf("minecraft:potion", 7);
-    ctx.require(potion.aux == 7, "potion aux survives conversion (aux=" + std::to_string(potion.aux) + ")");
-    ctx.check(emptyContainer(potion, in).has_value(), "potion poured in");
-    ctx.check(read(t).fluid() == "potion:7", "fluid is potion:7 (got " + read(t).fluid() + ")");
-    auto back = fillContainer(itemOf("minecraft:glass_bottle"), read(t).fluid(), out);
-    ctx.check(back && back->id == "minecraft:potion" && back->aux == 7, "the same potion comes back");
-    // Honey bottles and milk buckets.
-    ctx.check(emptyContainer(itemOf("minecraft:honey_bottle"), in).has_value(), "honey bottle poured in");
-    ctx.check(read(t).contents() == FluidStack{"honey", 250}, "250 mB honey");
-    ctx.check(!fillContainer(itemOf("minecraft:bucket"), "honey", out), "honey can't go into a bucket");
-    (void)out("honey", 250, false);
-    ctx.check(emptyContainer(itemOf("minecraft:milk_bucket"), in).has_value(), "milk poured in");
-    ctx.check(fillContainer(itemOf("minecraft:bucket"), "milk", out)->id == "minecraft:milk_bucket", "milk bucket back");
+/// SB TankClickPayload: a click on the tank bar with a container (count <= 1) on the cursor.
+ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
+    std::string(kId),
+    [](Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+        if (data.value("op", std::string{}) != "click") return false;
+        auto cursor = fluidui::cursorOf(player);
+        if (cursor.isNull() || cursor.mCount > 1) return true;
+        if (auto result = interactWithCursor(ctx.withPlayer(&player), cursor)) fluidui::setCursor(player, *result);
+        return true;
+    }
 });
 
-ABP_REGISTER_SELFTEST("tank.backpack_api", [](Context& ctx) {
-    auto bp = ctx.createBackpack(core::Tier::Iron); // 54 slots: 24000 mB per tank
-    ctx.installUpgrade(bp, "tank");
-    ctx.installUpgrade(bp, "tank");
-    auto all = tanks(bp);
-    ctx.require(all.size() == 2, "two tanks");
-    ctx.check(fill(bp, {"water", 30000}) == 30000, "30000 mB fit into two tanks");
-    ctx.check(read(all[0]).amount() == 24000 && read(all[1]).amount() == 6000, "first tank filled first");
-    ctx.check(fill(bp, {"lava", 1000}) == 0, "no room for a second fluid");
-    ctx.check(fill(bp, {"water", 20000}, false, true) == 0, "exact fill refuses a partial fill");
-    ctx.check(amountOf(bp, "water") == 30000, "exact refusal changed nothing");
-    auto got = drain(bp, "", 25000);
-    ctx.check(got == FluidStack{"water", 25000}, "drain the first fluid found");
-    ctx.check(amountOf(bp, "water") == 5000, "5000 mB left");
-    ctx.check(drain(bp, "water", 6000, false, true).empty(), "exact drain refuses");
-    ctx.check(fill(bp, {"lava", 1000}) == 1000, "lava goes into the now-empty tank");
-    ctx.check(fluids(bp).size() == 2, "two fluids listed");
+/// SB UpgradeHandler.initTankRenderInfoCallbacks: one tank renders right when it sits in the
+/// second half of the upgrade slots, two tanks render left then right. Fill ratio in 0.1 steps.
+ABP_REGISTER_RENDER_INFO([](game::Backpack& backpack, nlohmann::json& extra) {
+    auto const& slots = backpack.data().upgrades;
+    std::vector<int> tankSlots;
+    bool             singleRight = false;
+    int              minRight    = static_cast<int>(slots.size()) / 2;
+    for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
+        if (slots[static_cast<std::size_t>(i)].item.id != kItemId) continue;
+        tankSlots.push_back(i);
+        if (i >= minRight) singleRight = true;
+    }
+    if (tankSlots.empty()) return;
+    auto        self = backpack.shared_from_this();
+    std::string pos  = tankSlots.size() == 1 && singleRight ? "right" : "left";
+    for (int s : tankSlots) {
+        UpgradeContext ctx(self, s);
+        auto           c   = contents(ctx);
+        int            cap = std::max(1, capacity(backpack));
+        nlohmann::json info = nlohmann::json::object();
+        if (!c.empty()) {
+            auto const* fluid = api::fluidRegistry().fluid(c.id);
+            info["fluid"]     = c.id;
+            info["nbt"]       = c.nbt;
+            info["color"]     = fluid ? fluid->color : 0xFFFFFFFFu;
+            info["fillRatio"] = std::round(static_cast<float>(c.amount) / static_cast<float>(cap) * 10.f) / 10.f;
+        }
+        extra["tanks"][pos] = std::move(info);
+        pos                 = "right";
+    }
 });
 
-ABP_REGISTER_SELFTEST("tank.travels_with_item", [](Context& ctx) {
-    auto a = ctx.createBackpack(core::Tier::Leather);
-    UpgradeContext t(a, ctx.installUpgrade(a, "tank"));
-    write(t, fl::Tank({"lava", 3000}, capacity(*a)));
-    auto item = upgrade::remove(a, t.slot(), nullptr);
-    ctx.require(item.has_value(), "tank removed");
-    auto b = ctx.createBackpack(core::Tier::Copper);
-    std::string reason;
-    ctx.require(upgrade::install(b, 0, *item, nullptr, &reason), "reinstall: " + reason);
-    ctx.check(read(UpgradeContext(b, 0)).contents() == FluidStack{"lava", 3000}, "contents kept in the upgrade item");
-});
+/// SB magnet: picked up experience orbs go into the backpack's tanks as liquid experience.
+class TankMagnetXp {
+public:
+    void install() {
+        magnet::addXpConsumer(std::string(kOwner), 20, [](UpgradeContext const& magnetCtx, Player*, int amount) {
+            auto h = api::backpack::fluidHandler(magnetCtx.backpackPtr());
+            if (!h || amount <= 0) return 0;
+            auto& caps   = api::service();
+            int   liquid = api::xp::experienceToLiquid(static_cast<float>(amount));
+            int   filled = api::fillTagged(caps, *h, api::fluid_tags::Experience, liquid, {std::string(api::fluids::Experience), liquid}, true);
+            int   points = static_cast<int>(api::xp::liquidToExperience(filled));
+            if (points <= 0) return 0;
+            api::fillTagged(caps, *h, api::fluid_tags::Experience, api::xp::experienceToLiquid(static_cast<float>(points)), {std::string(api::fluids::Experience), 1}, false);
+            return points;
+        });
+    }
+    void uninstall() { magnet::removeXpConsumers(std::string(kOwner)); }
 
-ABP_REGISTER_SELFTEST("tank.slots_are_not_storage", [](Context& ctx) {
-    auto& player = ctx.player();
-    auto  bp     = ctx.createBackpack(core::Tier::Leather);
-    UpgradeContext t(bp, ctx.installUpgrade(bp, "tank"));
-    ContainerSlot  in(t, true);
-    ctx.check(in.offer(itemOf("minecraft:water_bucket")) == 1, "water bucket processed");
-    ctx.check(in.content().id == "minecraft:bucket", "empty bucket left in the slot");
-    ctx.check(in.offer(itemOf("minecraft:bucket")) == 0, "unrelated empty buckets are not stored");
-    ctx.check(in.offer(itemOf("minecraft:stone")) == 0, "other items are refused");
-    auto taken = in.take(player, 1);
-    ctx.check(game::ItemConv::idOf(taken) == "minecraft:bucket" && in.content().empty(), "bucket taken out");
-    ctx.check(in.offer(itemOf("minecraft:stone")) == 0, "still no stone");
-    ctx.check(in.offer(itemOf("minecraft:bucket")) == 1, "what was taken can be handed back (framework rollback)");
-    ctx.check(in.offer(itemOf("minecraft:bucket")) == 0, "but not more than that");
-    ContainerSlot out(t, false);
-    ctx.check(out.offer(itemOf("minecraft:bucket")) == 1 && out.content().id == "minecraft:water_bucket", "output fills a bucket");
-    ctx.check(out.offer(itemOf("minecraft:water_bucket")) == 0, "filled buckets are not stored in the output");
-});
-
-ABP_REGISTER_SELFTEST("tank.menu",[](Context& ctx) -> ll::coro::CoroTask<> {
-    auto& mm     = ui::MenuManager::get();
-    auto& player = ctx.player();
-    auto  bp     = ctx.createBackpack(core::Tier::Leather);
-    int   slot   = ctx.installUpgrade(bp, "tank");
-    ctx.require(ctx.give(player, ctx.backpackItem(*bp), 0) == 0, "give backpack");
-    ctx.require(ctx.give(player, game::ItemConv::make("minecraft:water_bucket"), 1) == 1, "give water bucket");
-    ctx.require(ctx.give(player, game::ItemConv::make("minecraft:glass_bottle", 3), 2) == 2, "give bottles");
-    auto* type = upgrade::byId(kId);
-    ctx.require(type != nullptr, "tank upgrade registered");
-    type->openSettings(player, UpgradeContext(bp, slot, &player));
-    ctx.require(mm.current(player) != nullptr, "tank menu open");
-    mm.forceShown(player);
-    UpgradeContext t(bp, slot);
-
-    // Pour the water bucket in through the input slot.
-    ctx.check(mm.simulate(player, {Action::Take, {Where::Inventory, 1}, {Where::Cursor, 0}, 1}), "bucket to cursor");
-    ctx.check(mm.simulate(player, {Action::Place, {Where::Cursor, 0}, {Where::Menu, TankMenu::kInputSlot}, 1}), "place into input");
-    ctx.check(read(t).contents() == FluidStack{"water", 1000}, "tank holds 1000 mB water");
-    co_await ctx.ticks(2);
-    ctx.check(game::ItemConv::idOf(mm.shownItem(player, TankMenu::kInputSlot)) == "minecraft:bucket", "empty bucket shown in the input slot");
-    ctx.check(cursorOf(player).isNull(), "cursor empty");
-    // Fill 3 bottles in the output slot (one at a time: potions don't stack).
-    ctx.check(mm.simulate(player, {Action::Take, {Where::Inventory, 2}, {Where::Cursor, 0}, 3}), "bottles to cursor");
-    ctx.check(mm.simulate(player, {Action::Place, {Where::Cursor, 0}, {Where::Menu, TankMenu::kOutputSlot}, 3}), "place bottles");
-    ctx.check(read(t).amount() == 750, "one bottle filled (750 mB left), got " + std::to_string(read(t).amount()));
-    ctx.check(cursorOf(player).mCount == 2, "2 bottles stay on the cursor");
-    // Take the water bottle out (shift-click) and fill the rest.
-    ctx.check(mm.simulate(player, {Action::Take, {Where::Menu, TankMenu::kOutputSlot}, {Where::Inventory, 3}, 1}), "water bottle out");
-    ctx.check(game::ItemConv::idOf(player.getInventory().getItem(3)) == "minecraft:potion", "water bottle in the inventory");
-    ctx.check(mm.simulate(player, {Action::Place, {Where::Cursor, 0}, {Where::Menu, TankMenu::kOutputSlot}, 2}), "place again");
-    ctx.check(read(t).amount() == 500, "500 mB left");
-    // Shift-click the empty bucket from the input slot to the output: filled with 500 mB? no (needs 1000).
-    ctx.check(mm.simulate(player, {Action::Take, {Where::Menu, TankMenu::kInputSlot}, {Where::Inventory, 4}, 1}), "bucket out");
-    ctx.check(!mm.simulate(player, {Action::Place, {Where::Inventory, 4}, {Where::Menu, TankMenu::kOutputSlot}, 1}), "a bucket needs 1000 mB");
-    // Shift-click the water bottle back in: it goes to the input slot.
-    ctx.check(mm.simulate(player, {Action::Place, {Where::Inventory, 3}, {Where::Menu, 0}, 1}), "quick move bottle in");
-    ctx.check(read(t).amount() == 750, "bottle poured back (750 mB)");
-    mm.close(player);
-    ctx.check(cursorOf(player).isNull(), "cursor returned on close");
-    auto const& s = t.settings();
-    int inSlot  = s.contains("in") ? core::ItemStackData::fromJson(s["in"]).count : 0;
-    int outSlot = s.contains("out") ? core::ItemStackData::fromJson(s["out"]).count : 0;
-    ctx.check(inSlot == 1 && outSlot == 1, "1 glass bottle in the input slot, 1 water bottle in the output slot");
-    ctx.check(countInInventory(player, "minecraft:glass_bottle") == 1, "1 glass bottle left in the inventory");
-    ctx.check(countInInventory(player, "minecraft:bucket") == 1, "the empty bucket is in the inventory");
-});
+private:
+    static constexpr std::string_view kOwner = "tank";
+};
 
 } // namespace
 } // namespace abp::upgrade::tank
 
 ABP_REGISTER_CONFIG("tank", abp::upgrade::tank::TankConfig);
 ABP_REGISTER_UPGRADE(abp::upgrade::tank::TankUpgrade);
+ABP_REGISTER_INVENTORY_COLUMNS("tank", 2);
+ABP_REGISTER_MODULE(abp::upgrade::tank::TankMagnetXp);

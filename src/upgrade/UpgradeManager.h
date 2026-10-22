@@ -25,6 +25,9 @@ namespace abp::upgrade {
     std::string*                           reason = nullptr
 );
 
+/// The settings an upgrade item carries from a previous removal (empty object if none).
+[[nodiscard]] nlohmann::json settingsOf(core::ItemStackData const& item);
+
 /// Installs one upgrade item (count 1) into an empty slot. Settings carried by the item (from a
 /// previous removal) are restored. Rebuilds hooks.
 bool install(
