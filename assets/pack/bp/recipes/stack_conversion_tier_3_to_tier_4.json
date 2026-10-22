@@ -4,17 +4,30 @@
     "description": {
       "identifier": "alleviatedbackpacks:stack_conversion_tier_3_to_tier_4"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "XXX",
-      "XSX",
-      "XXX"
+      "MMM",
+      "MLM",
+      "MMM"
     ],
     "key": {
-      "X": { "item": "minecraft:netherite_block" },
-      "S": { "item": "minecraft:leather" }
+      "M": {
+        "item": "minecraft:netherite_block"
+      },
+      "L": {
+        "item": "minecraft:leather"
+      }
     },
-    "unlock": [{ "item": "minecraft:netherite_block" }],
-    "result": { "item": "alleviatedbackpacks:stack_conversion_tier_3_to_tier_4", "count": 1 }
+    "unlock": [
+      {
+        "item": "minecraft:leather"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:stack_conversion_tier_3_to_tier_4",
+      "count": 1
+    }
   }
 }

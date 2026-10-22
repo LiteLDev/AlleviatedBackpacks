@@ -8,6 +8,7 @@
 
 #include "nlohmann/json.hpp"
 
+#include "core/BackpackData.h"
 #include "core/BackpackInventory.h"
 #include "core/ItemStackData.h"
 

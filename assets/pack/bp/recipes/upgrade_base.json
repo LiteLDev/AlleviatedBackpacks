@@ -4,18 +4,33 @@
     "description": {
       "identifier": "alleviatedbackpacks:upgrade_base"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       "SIS",
       "ILI",
       "SIS"
     ],
     "key": {
-      "S": { "item": "minecraft:string" },
-      "I": { "item": "minecraft:iron_ingot" },
-      "L": { "item": "minecraft:leather" }
+      "S": {
+        "item": "minecraft:string"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "L": {
+        "item": "minecraft:leather"
+      }
     },
-    "unlock": [{ "item": "minecraft:iron_ingot" }],
-    "result": { "item": "alleviatedbackpacks:upgrade_base", "count": 2 }
+    "unlock": [
+      {
+        "item": "minecraft:string"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:upgrade_base",
+      "count": 1
+    }
   }
 }

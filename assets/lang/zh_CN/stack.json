@@ -8,9 +8,7 @@
   "abp.stack.stack_downgrade_tier_1.name": "堆叠降级（一级）",
   "abp.stack.stack_downgrade_tier_2.name": "堆叠降级（二级）",
   "abp.stack.stack_downgrade_tier_3.name": "堆叠降级（三级）",
-  "abp.stack.error.low_multiplier": "至少有一个槽位需要高于 {} 的堆叠上限。",
-  "abp.stack.conversion.wrong": "§c这个转换物品不适用于该升级。",
-  "abp.stack.conversion.done": "§a已转换为{}。",
+  "abp.stack.error.low_multiplier": "至少有一个槽位或升级需要高于 {} 的堆叠上限",
   "abp.stack.describe.multiplier": "§7堆叠倍率：§f{}",
   "abp.stack.describe.total": "§7槽位上限（所有堆叠升级）：§f{}"
 }

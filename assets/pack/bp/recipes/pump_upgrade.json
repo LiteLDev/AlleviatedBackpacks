@@ -22,11 +22,11 @@
       "P": {
         "item": "minecraft:piston"
       },
-      "S": {
-        "item": "minecraft:sticky_piston"
-      },
       "B": {
         "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "S": {
+        "item": "minecraft:sticky_piston"
       }
     },
     "unlock": [

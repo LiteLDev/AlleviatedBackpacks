@@ -1,0 +1,48 @@
+{
+  "format_version": "1.20.10",
+  "minecraft:recipe_shapeless": {
+    "description": {
+      "identifier": "alleviatedbackpacks:diamond_backpack_dye_8"
+    },
+    "tags": [
+      "crafting_table"
+    ],
+    "ingredients": [
+      {
+        "item": "alleviatedbackpacks:diamond_backpack"
+      },
+      {
+        "tag": "alleviatedbackpacks:dye"
+      },
+      {
+        "tag": "alleviatedbackpacks:dye"
+      },
+      {
+        "tag": "alleviatedbackpacks:dye"
+      },
+      {
+        "tag": "alleviatedbackpacks:dye"
+      },
+      {
+        "tag": "alleviatedbackpacks:dye"
+      },
+      {
+        "tag": "alleviatedbackpacks:dye"
+      },
+      {
+        "tag": "alleviatedbackpacks:dye"
+      },
+      {
+        "tag": "alleviatedbackpacks:dye"
+      }
+    ],
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:diamond_backpack"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:diamond_backpack"
+    }
+  }
+}

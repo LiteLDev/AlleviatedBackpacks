@@ -4,20 +4,39 @@
     "description": {
       "identifier": "alleviatedbackpacks:deposit_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      " H ",
+      " P ",
       "IBI",
       "RCR"
     ],
     "key": {
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "C": { "item": "minecraft:chest" },
-      "H": { "item": "minecraft:hopper" },
-      "I": { "item": "minecraft:iron_ingot" },
-      "R": { "item": "minecraft:redstone" }
+      "P": {
+        "item": "minecraft:piston"
+      },
+      "I": {
+        "item": "minecraft:iron_ingot"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      },
+      "C": {
+        "item": "minecraft:chest"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:deposit_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:deposit_upgrade",
+      "count": 1
+    }
   }
 }

@@ -4,20 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:advanced_jukebox_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "DJD",
-      "GBG",
-      "RGR"
+      " D ",
+      "G#G",
+      "RRR"
     ],
     "key": {
-      "D": { "item": "minecraft:diamond" },
-      "J": { "item": "minecraft:jukebox" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "R": { "item": "minecraft:redstone" }
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      },
+      "#": {
+        "item": "alleviatedbackpacks:jukebox_upgrade"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:advanced_jukebox_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:jukebox_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:advanced_jukebox_upgrade",
+      "count": 1
+    }
   }
 }

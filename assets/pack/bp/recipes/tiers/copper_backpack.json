@@ -26,7 +26,8 @@
       }
     ],
     "result": {
-      "item": "alleviatedbackpacks:copper_backpack"
+      "item": "alleviatedbackpacks:copper_backpack",
+      "count": 1
     }
   }
 }
