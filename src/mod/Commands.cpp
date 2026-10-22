@@ -33,6 +33,7 @@
 #include "mod/Module.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
+#include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
 
 namespace abp::commands {
@@ -72,6 +73,8 @@ void registerAll() {
         if (!player) return output.error("Only players can open backpacks.");
         // First carried backpack: chest slot, offhand, then inventory (the Java mod's keybind).
         if (!ui::BackpackMenu::openCarried(*player)) {
+            // Refused (no client mod): the presentation gate already told the player why.
+            if (ui::MenuManager::get().lastOpenRefused(*player)) return;
             return output.error(trFor(*player, "abp.gui.open.none", "You are not carrying a backpack."));
         }
         output.success(trFor(*player, "abp.cmd.open.ok", "Backpack opened."));

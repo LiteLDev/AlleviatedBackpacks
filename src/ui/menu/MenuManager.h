@@ -84,6 +84,63 @@ public:
     /// The item displayed in a menu slot as last synced to the client.
     [[nodiscard]] ItemStack shownItem(Player const& player, int slot) const;
 
+    /// Like `simulate`, but every `Where::Menu` address refers to `menuSlot` instead of the menu's
+    /// own slot at that index. Native screens use it for slots the chest page does not show (a
+    /// storage slot on another page, an upgrade slot while the storage view is shown): the action
+    /// goes through exactly the same rules (locked slots, `Slot::click/take/accept`) as a click in
+    /// the chest. Requires an open menu. Does not re-sync the player (see `resyncPlayer`).
+    bool simulateOn(Player& player, SimAction const& action, std::shared_ptr<Slot> menuSlot);
+    /// Sends the player's inventory and cursor to the client (after `simulate`/`simulateOn`).
+    void resyncPlayer(Player& player);
+    /// Container id of the player's open menu (-1 if none).
+    [[nodiscard]] int containerIdOf(Player const& player) const;
+
+    /// While alive, `close`/`closeThen` for this player leave the open menu alone (`closeThen`
+    /// just runs its callback a few ticks later). The client companion shows upgrade settings menus
+    /// inside the backpack screen's tabs and runs their slot callbacks under this guard, so a
+    /// "Back" button can't close the backpack screen.
+    class NavigationGuard {
+    public:
+        explicit NavigationGuard(Player const& player);
+        ~NavigationGuard();
+        NavigationGuard(NavigationGuard const&)            = delete;
+        NavigationGuard& operator=(NavigationGuard const&) = delete;
+
+    private:
+        std::int64_t mKey;
+    };
+
+    // ---- presentation (additive hook: the client companion) ----------------------------------
+    /// How a menu is shown to a player, decided when it opens.
+    enum class Presentation {
+        Chest,   ///< fake chest block + container screen (default; selftests' simulated players)
+        Virtual, ///< no fake chest and no container screen: an observer (the client companion's
+                 ///< native screens) shows the menu; actions come in through `simulate*`
+        Refuse,  ///< the player can't see menus: `open` returns false (the gate tells them why)
+    };
+    using PresentationGate = std::function<Presentation(Player&, Menu&)>;
+    /// Installs the gate (nullptr: every menu is a chest).
+    void setPresentationGate(PresentationGate gate) { mGate = std::move(gate); }
+    /// The player's open menu is virtual (shown by an observer, no container screen).
+    [[nodiscard]] bool isVirtual(Player const& player) const;
+    /// The player's last `open` was refused by the gate (which already told them why), so callers
+    /// don't add a second, misleading message.
+    [[nodiscard]] bool lastOpenRefused(Player const& player) const;
+
+    // ---- observers (additive hook: native renderers such as the client companion) ------------
+    struct Observer {
+        /// Right before the client is told to open `menu` (`containerId` = the screen's id). Also
+        /// runs for `forceShown`.
+        std::function<void(Player&, Menu&, int containerId)> beforeShow;
+        /// Every server tick after the shown `menu` was ticked and synced.
+        std::function<void(Player&, Menu&)> afterTick;
+        /// The menu's session ended (closed, replaced, player gone: then `player` is null).
+        std::function<void(Player*, Menu&)> closed;
+    };
+    /// Registers an observer; returns an id for `removeObserver`.
+    int  addObserver(Observer observer);
+    void removeObserver(int id);
+
     struct Session;
 
     // Internal (packet hooks).
@@ -125,6 +182,14 @@ private:
     std::vector<std::function<void()>>                         mDeferred;
     std::vector<Delayed>                                       mDelayed;
     bool                                                       mBusy = false;
+    std::vector<std::pair<int, Observer>>                      mObservers;
+    PresentationGate                                           mGate;
+    std::unordered_map<std::int64_t, int>                      mGuarded; ///< NavigationGuard depth per player
+    std::unordered_map<std::int64_t, bool>                     mRefused; ///< last open refused by the gate
+    int                                                        mNextVirtualId = 1000;
+    int                                                        mNextObserver = 1;
+
+    void notifyBeforeShow(Player& player, Session& s);
 };
 
 } // namespace abp::ui

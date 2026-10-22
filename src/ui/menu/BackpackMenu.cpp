@@ -215,6 +215,18 @@ void BackpackMenu::build(Player& player) {
     buildControls(player);
 }
 
+std::shared_ptr<Slot> BackpackMenu::storageSlot(int index) {
+    if (index < 0 || index >= mBackpack->inventory().size()) return nullptr;
+    auto decorators = DecoratedStorageSlot::sorted();
+    if (!decorators->empty()) return std::make_shared<DecoratedStorageSlot>(mBackpack, index, this, decorators);
+    return std::make_shared<StorageSlot>(mBackpack, index);
+}
+
+std::shared_ptr<Slot> BackpackMenu::upgradeSlot(int index) {
+    if (index < 0 || index >= static_cast<int>(mBackpack->data().upgrades.size())) return nullptr;
+    return std::make_shared<UpgradeSlotView>(mBackpack, index, this);
+}
+
 void BackpackMenu::buildStorage(Player&) {
     int  size       = mBackpack->inventory().size();
     auto decorators = DecoratedStorageSlot::sorted();

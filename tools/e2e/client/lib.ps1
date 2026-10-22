@@ -413,7 +413,34 @@ function Start-LogSession {
     $script:LogPos = if (Test-Path $script:LogFile) { (Get-Item $script:LogFile).Length } else { 0L }
 }
 
+# Remote modes: the BDS console log (tools/e2e/server/out/client-host/server.log) is merged into
+# the session log (lines prefixed "[host] "), so scenarios wait for server-side lines the same
+# way in every mode.
+$script:HostLog    = $null
+$script:HostLogPos = 0L
+$script:HostTail   = ''
+
+function Update-HostLog {
+    if (-not $script:HostLog -or -not (Test-Path $script:HostLog)) { return }
+    $fs = [System.IO.File]::Open($script:HostLog, 'Open', 'Read', 'ReadWrite')
+    try {
+        if ($fs.Length -lt $script:HostLogPos) { $script:HostLogPos = 0L }
+        if ($fs.Length -eq $script:HostLogPos) { return }
+        $fs.Position = $script:HostLogPos
+        $buf = New-Object byte[] ($fs.Length - $script:HostLogPos)
+        $n = $fs.Read($buf, 0, $buf.Length)
+        $script:HostLogPos += $n
+    } finally { $fs.Dispose() }
+    $parts = ($script:HostTail + [Text.Encoding]::UTF8.GetString($buf, 0, $n)) -split "`n"
+    $script:HostTail = $parts[-1]
+    for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+        $l = $parts[$i].TrimEnd("`r")
+        if ($l -ne '') { $script:LogLines.Add("[host] $l") }
+    }
+}
+
 function Update-LeviLog {
+    Update-HostLog
     if (-not (Test-Path $script:LogFile)) { return }
     # The game keeps the file open for writing: read with FileShare.ReadWrite.
     $fs = [System.IO.File]::Open($script:LogFile, 'Open', 'Read', 'ReadWrite')
@@ -479,10 +506,21 @@ function Assert-NoErrors {
 # ---------------------------------------------------------------------------------------
 # Menu navigation (calibrated for a 1600x900 client area; coordinates are fractions)
 # ---------------------------------------------------------------------------------------
-function Wait-GameReady([int]$TimeoutSeconds = 180) {
+function Wait-GameReady([int]$TimeoutSeconds = 180, [switch]$WithoutMod) {
     Set-GameWindowSize
-    $hit = Wait-LogLine "$script:ModName enabled|Failed to (load|enable) mod $script:ModName" $TimeoutSeconds
-    if ($hit -notmatch "$script:ModName enabled") { throw "LeviLamina failed to load $($script:ModName): $hit" }
+    if ($WithoutMod) {
+        # With no mods at all LeviLamina logs "0 mod(s) loaded" and never "enabled"; that early line
+        # is sometimes missed after a game restart, so a running game counts as ready after 90 s.
+        try {
+            Wait-LogLine '\[LeviLamina\] (\d+ mod\(s\) enabled|0 mod\(s\) loaded)' ([Math]::Min(90, $TimeoutSeconds)) | Out-Null
+        } catch {
+            if (-not (Get-GameProcess)) { throw }
+            Write-Step "no LeviLamina mod line in the log; the game is running, continuing"
+        }
+    } else {
+        $hit = Wait-LogLine "$script:ModName enabled|Failed to (load|enable) mod $script:ModName" $TimeoutSeconds
+        if ($hit -notmatch "$script:ModName enabled") { throw "LeviLamina failed to load $($script:ModName): $hit" }
+    }
     # The title screen takes a while after mods are enabled.
     Start-Sleep -Seconds 15
     Focus-Game
@@ -517,6 +555,120 @@ function Enter-TestWorld([int]$LoadSeconds = 10, [int]$Attempts = 3) {
         }
     }
 }
+
+# ---------------------------------------------------------------------------------------
+# Remote modes: join a BDS (tools/e2e/server, scenario client-host) instead of the local world
+# ---------------------------------------------------------------------------------------
+$script:ExternalServerName = 'ABP-E2E'
+
+# The external server list of the signed-in user (games\com.mojang\minecraftpe\external_servers.txt).
+function Get-ExternalServersFile {
+    $worlds = Get-WorldsDir
+    if (-not $worlds) { throw "game data not found under $(Get-GameDataDir)" }
+    return Join-Path (Split-Path $worlds) 'minecraftpe\external_servers.txt' # minecraftWorlds -> com.mojang
+}
+
+# Backs up the game's server list and drops stale entries of ours; Enter-RemoteServer adds the
+# server through the game's "Add server" dialog, Restore-ExternalServers puts the list back.
+function Set-ExternalServer([int]$Port) {
+    $file = Get-ExternalServersFile
+    New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+    $script:ExternalServersBackup = if (Test-Path $file) { Get-Content $file -Raw } else { $null }
+    Clear-OurServerEntries
+    $script:ExternalServerPort = $Port
+    Write-Step "external server $script:ExternalServerName -> 127.0.0.1:$Port (added in game; list backed up from $file)"
+}
+
+# Drops our entries from the game's server list (the game must not be running: it rewrites the
+# file from memory when it exits).
+function Clear-OurServerEntries {
+    $file = Get-ExternalServersFile
+    if (-not (Test-Path $file)) { return }
+    $content = Get-Content $file -Raw
+    $keep    = @(Remove-OurServerEntries $content)
+    $removed = @($content -split "`r?`n" | Where-Object { $_ }).Count - $keep.Count
+    if ($removed -le 0) { return }
+    if ($keep.Count -eq 0) { Remove-Item $file -Force } else { Set-Content -Path $file -Value $keep -Encoding UTF8 }
+    Write-Step "removed $removed stale $script:ExternalServerName server entr$(if ($removed -eq 1) { 'y' } else { 'ies' }) from $file"
+}
+
+# The list without our entries (also ones an interrupted run left behind).
+function Remove-OurServerEntries([string]$content) {
+    if (-not $content) { return @() }
+    return @($content -split "`r?`n" | Where-Object { $_ -and $_ -notmatch ":$([regex]::Escape($script:ExternalServerName)):" })
+}
+
+function Restore-ExternalServers {
+    if (-not (Get-Variable -Name ExternalServersBackup -Scope Script -ErrorAction SilentlyContinue)) { return }
+    $file = Get-ExternalServersFile
+    $keep = @(Remove-OurServerEntries $script:ExternalServersBackup)
+    if ($keep.Count -eq 0) { Remove-Item $file -ErrorAction SilentlyContinue }
+    else { Set-Content -Path $file -Value $keep -Encoding UTF8 }
+    Remove-Variable -Name ExternalServersBackup -Scope Script
+}
+
+# Play -> Servers -> "+ Add server" -> name / 127.0.0.1 / port -> "Add and play"; waits for the
+# BDS to log the spawn. (User-added servers are listed below the featured ones, out of view, so the
+# dialog is the deterministic path; the entry it adds is undone by Restore-ExternalServers.)
+# Coordinates are fractions of the client area (calibrated on 1.26.51 at 1280x720 and 1600x900).
+function Enter-RemoteServer([int]$Attempts = 3) {
+    if (-not $script:ExternalServerPort) { throw 'Enter-RemoteServer needs Set-ExternalServer first' }
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        Focus-Game
+        $mark = Get-LogMark
+        Click 0.498 0.474 -Relative      # Play
+        Start-Sleep -Seconds 4
+        Save-Screenshot "join-1-play-$attempt" | Out-Null
+        Click $script:ServersTab[0] $script:ServersTab[1] -Relative
+        Start-Sleep -Seconds 3
+        Save-Screenshot "join-2-servers-$attempt" | Out-Null
+        Click $script:AddServer[0] $script:AddServer[1] -Relative
+        Start-Sleep -Seconds 2
+        # The dialog keeps the text of an earlier attempt: clear each field before typing.
+        $fill = {
+            param($at, [string]$text)
+            Click $at[0] $at[1] -Relative
+            for ($i = 0; $i -lt 24; $i++) { Press-Key BACK 20 }
+            Type-Text $text
+        }
+        & $fill $script:NameField $script:ExternalServerName
+        # The dialog refuses an address/port that is already listed ("already been added"):
+        # Clear-OurServerEntries runs before every game launch, and run.ps1 joins once per launch.
+        & $fill $script:AddressField '127.0.0.1'
+        & $fill $script:PortField "$script:ExternalServerPort"
+        Start-Sleep -Milliseconds 500
+        Save-Screenshot "join-3-add-$attempt" | Out-Null
+        Click $script:AddAndPlay[0] $script:AddAndPlay[1] -Relative
+        try {
+            Wait-LogLine '\[host\].*Player Spawned' 90 -Since $mark | Out-Null
+            Start-Sleep -Seconds 4
+            Focus-Game
+            Write-Step "joined the remote server"
+            return
+        } catch {
+            if ($attempt -eq $Attempts) { throw }
+            Write-Step "remote join failed (attempt $attempt): $_; retrying"
+            Save-Screenshot "join-failed-$attempt" | Out-Null
+            # Back to the title screen: connecting dialog / Play screen (never a third ESC: exit dialog).
+            Press-Key ESC; Start-Sleep -Seconds 3
+            Save-Screenshot "join-reset-$attempt" | Out-Null
+        }
+    }
+}
+$script:ServersTab   = @(0.832, 0.13)   # "Servers" tab on the Play screen
+$script:AddServer    = @(0.176, 0.253)  # "+ Add server" at the top of the server list
+$script:NameField    = @(0.5, 0.20)     # "Add a new server" dialog fields
+$script:AddressField = @(0.5, 0.366)
+$script:PortField    = @(0.5, 0.532)
+$script:AddAndPlay   = @(0.693, 0.663)  # "Add and play"
+
+# Runs a console command on the remote host (remote modes).
+function Send-HostConsole([string]$Command) {
+    if (-not $script:HostDir) { throw 'Send-HostConsole needs a remote mode' }
+    $name = 'cmd-{0:D6}.txt' -f (++$script:HostCmd)
+    Set-Content -Path (Join-Path $script:HostDir $name) -Value $Command -Encoding UTF8
+}
+$script:HostCmd = 0
 
 # Open the survival inventory (E) and wait for it to render.
 function Open-Inventory { Focus-Game; Press-Key E; Start-Sleep -Milliseconds 1200 }

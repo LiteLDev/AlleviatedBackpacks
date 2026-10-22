@@ -122,6 +122,16 @@ public:
 
     static constexpr int kPageSlots = 45;
 
+    // ---- native screens (additive: used by the client companion's server side) -------------
+    /// A slot object for backpack storage index `index`, behaving exactly like the chest page's
+    /// slot for it (decorators, storage click handlers). nullptr if out of range.
+    [[nodiscard]] std::shared_ptr<Slot> storageSlot(int index);
+    /// A slot object for upgrade slot `index`, behaving exactly like the upgrades page's slot
+    /// (install / remove / replace, `IUpgrade::useItemOn`). nullptr if out of range.
+    [[nodiscard]] std::shared_ptr<Slot> upgradeSlot(int index);
+    /// Opens the backpack settings form (closes this menu first), like the comparator button.
+    void showSettings(Player& player) { openSettingsForm(player); }
+
 private:
     void buildStorage(Player& player);
     void buildUpgrades(Player& player);
