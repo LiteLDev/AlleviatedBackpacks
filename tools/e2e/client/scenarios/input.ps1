@@ -70,7 +70,11 @@ function V-Pos([string]$key) {
 function V-Move([string]$key) { $p = V-Pos $key; Move-Mouse $p[0] $p[1] }
 # A slot $dx columns / $dy rows away from a seen slot (18 GUI units per slot).
 function V-MoveFrom([string]$key, [int]$dx, [int]$dy) { $p = V-Pos $key; Move-Mouse ($p[0] + $dx * 18 / $V.Inv) ($p[1] + $dy * 18 / $V.Inv) }
-function V-Click([string]$key, [switch]$Right) { $p = V-Pos $key; Move-Mouse $p[0] $p[1]; Start-Sleep -Milliseconds 250; Click $p[0] $p[1] -Right:$Right; Start-Sleep -Milliseconds 400 }
+function V-Click([string]$key, [switch]$Right) {
+    $p = V-Pos $key; Move-Mouse $p[0] $p[1]; Start-Sleep -Milliseconds 250; Click $p[0] $p[1] -Right:$Right; Start-Sleep -Milliseconds 400
+    # Let the game finish the right-button gesture (hold / drag) before the next click elsewhere.
+    if ($Right) { Move-Mouse ($p[0] + 2) ($p[1] + 2); Start-Sleep -Milliseconds 500 }
+}
 
 # ---- setup ------------------------------------------------------------------------------------------------
 Invoke-Chat '/clear @s'
