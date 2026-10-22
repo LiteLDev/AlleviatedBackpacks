@@ -33,6 +33,7 @@
 #include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/filter/FilterCommon.h"
+#include "upgrade/inception/Inception.h"
 
 ABP_REGISTER_CONFIG("feeding", abp::upgrade::feeding::FeedingConfig);
 
@@ -135,15 +136,19 @@ std::pair<float, float> foodValues(Player& player) {
 }
 
 /// SC: the result of eating (bowl, bottle) goes into the backpack, else the player (or the ground).
-void returnContainer(Player& player, game::Backpack& bp, core::ItemStackData const& left) {
-    auto r = bp.inventory().insert(left, core::AccessContext{core::Source::Upgrade, &player});
-    if (r.remainder.empty()) return;
-    ItemStack rest = game::ItemConv::toStack(r.remainder);
+void returnContainer(Player& player, std::vector<std::shared_ptr<game::Backpack>> const& invs, core::ItemStackData const& left) {
+    auto remainder = left;
+    for (auto const& bp : invs) {
+        if (remainder.empty()) return;
+        remainder = bp->inventory().insert(remainder, core::AccessContext{core::Source::Upgrade, &player}).remainder;
+    }
+    if (remainder.empty()) return;
+    ItemStack rest = game::ItemConv::toStack(remainder);
     if (!player.addAndRefresh(rest) && !rest.isNull() && rest.mCount > 0) player.drop(rest, false);
 }
 
 /// Eats one item from `slot` through the vanilla use path. False if the item refused.
-bool eatFrom(Player& player, game::Backpack& bp, int slot) {
+bool eatFrom(Player& player, std::vector<std::shared_ptr<game::Backpack>> const& invs, game::Backpack& bp, int slot) {
     core::AccessContext ac{core::Source::Upgrade, &player};
     auto                taken = bp.inventory().extract(slot, 1, ac);
     if (taken.empty()) return false;
@@ -161,7 +166,7 @@ bool eatFrom(Player& player, game::Backpack& bp, int slot) {
         (void)bp.inventory().insertInto(slot, taken, core::AccessContext{core::Source::Internal, &player});
         return false;
     }
-    if (!unchanged && !food.isNull() && food.mCount > 0) returnContainer(player, bp, game::ItemConv::toData(food));
+    if (!unchanged && !food.isNull() && food.mCount > 0) returnContainer(player, invs, game::ItemConv::toData(food));
     bp.markDirty();
     return true;
 }
@@ -175,18 +180,21 @@ bool feedPlayerAndGetHungry(Player& player, UpgradeContext const& ctx, bool adva
     if (state.hunger() == 0) return false;
     auto        options = optionsOf(ctx);
     auto        filter  = filterOf(ctx, advanced);
-    auto&       bp      = ctx.backpack();
-    auto const& inv     = bp.inventory();
-    for (int i = 0; i < inv.size(); ++i) {
-        auto const& item = inv.at(i);
-        if (item.empty()) continue;
-        auto nutrition = nutritionOf(item);
-        if (!nutrition || !isEdible(item.id, *nutrition)) continue;
-        if (!filter.passes(item, &filtering::matcher())) continue;
-        if (!shouldFeed(state, *nutrition, options)) continue;
-        if (!eatFrom(player, bp, i)) continue;
-        if (fedSlot) *fedSlot = i;
-        return eaterState(player).foodLevel < 20;
+    // SC getInventoryForUpgradeProcessing: with Inception also the backpacks stored inside.
+    auto invs = inception::upgradeInventories(ctx.backpackPtr());
+    for (auto const& bp : invs) {
+        auto const& inv = bp->inventory();
+        for (int i = 0; i < inv.size(); ++i) {
+            auto const& item = inv.at(i);
+            if (item.empty()) continue;
+            auto nutrition = nutritionOf(item);
+            if (!nutrition || !isEdible(item.id, *nutrition)) continue;
+            if (!filter.passes(item, &filtering::matcher())) continue;
+            if (!shouldFeed(state, *nutrition, options)) continue;
+            if (!eatFrom(player, invs, *bp, i)) continue;
+            if (fedSlot) *fedSlot = bp.get() == ctx.backpackPtr().get() ? i : -1;
+            return eaterState(player).foodLevel < 20;
+        }
     }
     return false;
 }

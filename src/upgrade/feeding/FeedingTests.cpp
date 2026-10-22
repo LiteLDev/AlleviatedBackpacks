@@ -270,6 +270,19 @@ ABP_REGISTER_SELFTEST("feeding.placed_range", [](Context& ctx) -> ll::coro::Coro
     );
 });
 
+ABP_REGISTER_SELFTEST("feeding.inception_inventories", [](Context& ctx) {
+    // SC getInventoryForUpgradeProcessing: with Inception, food in a backpack stored inside counts.
+    auto  outer = ctx.createBackpack(Tier::Iron);
+    auto  inner = ctx.createBackpack(Tier::Leather);
+    int   slot  = ctx.installUpgrade(outer, "feeding");
+    ctx.installUpgrade(outer, "inception");
+    inner->inventory().set(4, data("minecraft:bread", 3));
+    outer->inventory().set(0, game::ItemConv::toData(ctx.backpackItem(*inner)));
+    auto& p = hungryPlayer(ctx, 0);
+    feed(outer, slot, p);
+    ctx.check(countIn(*inner, "minecraft:bread") == 2, "bread eaten from the backpack inside");
+});
+
 ABP_REGISTER_SELFTEST("feeding.settings_menu", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& mm   = ui::MenuManager::get();
     auto& p    = ctx.player();

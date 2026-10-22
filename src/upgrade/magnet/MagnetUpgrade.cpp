@@ -47,6 +47,7 @@
 #include "net/NativeScreens.h"
 #include "upgrade/UpgradeManager.h"
 #include "upgrade/filter/FilterCommon.h"
+#include "upgrade/inception/Inception.h"
 #include "upgrade/magnet/MagnetInternal.h"
 
 ABP_REGISTER_CONFIG("magnet", abp::upgrade::magnet::MagnetConfig);
@@ -208,13 +209,30 @@ void playXpPickupSound(Player& player) {
     playSound(player, "random.orb", 0.1f, (nextFloat() - nextFloat()) * 0.35f + 0.9f);
 }
 
+} // namespace
+
+int insertForUpgrade(UpgradeContext const& ctx, core::ItemStackData const& item, Player* player) {
+    // SC getInventoryForUpgradeProcessing: with Inception also the backpacks stored inside.
+    int  taken = 0;
+    auto rest  = item;
+    for (auto const& bp : inception::upgradeInventories(ctx.backpackPtr())) {
+        if (rest.empty()) break;
+        auto r      = bp->inventory().insert(rest, core::AccessContext{core::Source::Pickup, player});
+        int  n      = r.inserted + r.voided;
+        taken      += n;
+        rest        = rest.withCount(rest.count - n);
+    }
+    return taken;
+}
+
+namespace {
+
 /// SC `tryToInsertItem`. True if (part of) the stack went in.
-bool tryToInsertItem(game::Backpack& bp, Player* player, ItemActor& entity) {
+bool tryToInsertItem(UpgradeContext const& ctx, Player* player, ItemActor& entity) {
     auto& stack = entity.item();
     auto  data  = game::ItemConv::toData(stack);
     if (data.empty()) return false;
-    auto r     = bp.inventory().insert(data, core::AccessContext{core::Source::Pickup, player});
-    int  taken = r.inserted + r.voided;
+    int taken = insertForUpgrade(ctx, data, player);
     if (taken <= 0) return false;
     if (taken < data.count) {
         // SC setItem(remaining). Clients don't see count changes of an existing item entity, so
@@ -243,7 +261,7 @@ int pickupItems(UpgradeContext const& ctx, Settings const& s, Player* player, Bl
     for (auto* item : items) {
         if (!isItemPullable(*item, player != nullptr)) continue;
         if (!matchesFilter(s, bp, game::ItemConv::toData(item->item()))) continue;
-        if (tryToInsertItem(bp, player, *item)) {
+        if (tryToInsertItem(ctx, player, *item)) {
             if (player) playItemPickupSound(*player);
             cooldown = kCooldownTicks;
         }
@@ -380,8 +398,7 @@ public:
     void onPickup(UpgradeContext const& ctx, core::ItemStackData& item) override {
         auto s = settings(ctx);
         if (!s.pickupItems || !matchesFilter(s, ctx.backpack(), item)) return;
-        auto r      = ctx.backpack().inventory().insert(item, core::AccessContext{core::Source::Pickup, ctx.player()});
-        item.count -= r.inserted + r.voided;
+        item.count -= insertForUpgrade(ctx, item, ctx.player());
     }
 
     // Carried magnets run on the shared clock (MagnetClock), not on the upgrade ticker.

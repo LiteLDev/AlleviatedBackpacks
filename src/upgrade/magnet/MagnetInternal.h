@@ -29,6 +29,10 @@ namespace abp::upgrade::magnet {
 /// SC item eligibility without the filter: alive, not on infinite pickup delay, tags.
 [[nodiscard]] bool isItemPullable(ItemActor& item, bool carried);
 
+/// Inserts into SC's `getInventoryForUpgradeProcessing` (the backpack, plus with Inception the
+/// backpacks stored inside it). Returns how many were taken (stored or voided).
+int insertForUpgrade(UpgradeContext const& ctx, core::ItemStackData const& item, Player* player);
+
 /// SC `canFillStorageWithXp`: the backpack's fluid handler accepts liquid experience.
 [[nodiscard]] bool canFillStorageWithXp(std::shared_ptr<game::Backpack> const& backpack);
 
