@@ -121,6 +121,12 @@ public:
     // ---- lifecycle --------------------------------------------------------------------------
     /// Extra install checks (slot limits and conflicts are already checked by the manager).
     virtual bool canInstall(UpgradeContext const& /*ctx*/, std::string& /*reason*/) const { return true; }
+    /// Like `canInstall`, with the item being installed (count 1; settings it carries from a
+    /// previous removal are still embedded: read them with `upgrade::settingsOf(item)`). E.g. a
+    /// Tank upgrade refuses a backpack too small for its contents. Default: `canInstall`.
+    virtual bool canInstallItem(UpgradeContext const& ctx, core::ItemStackData const& /*item*/, std::string& reason) const {
+        return canInstall(ctx, reason);
+    }
     virtual void onInstall(UpgradeContext const& /*ctx*/) {}
     /// E.g. a Stack upgrade refuses removal while slots hold more than the base limit.
     virtual bool canRemove(UpgradeContext const& /*ctx*/, std::string& /*reason*/) const { return true; }
