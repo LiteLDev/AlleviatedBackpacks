@@ -53,10 +53,20 @@ inline long long countIn(Container& c, std::string_view id) {
 }
 
 inline void setFilter(UpgradeContext const& ctx, bool advanced, std::initializer_list<std::string_view> ids, core::FilterMode mode) {
-    core::Filter f(filterSlots(advanced));
+    core::Filter f(filterSlots(advanced), core::FilterDefaults{});
     f.mode = mode;
     int i  = 0;
     for (auto id : ids) f.setGhost(i++, itemData(id, 1));
+    ctx.settings()[std::string(kFilterKey)] = f.toJson();
+    ctx.saveSettings(false);
+}
+
+/// Sets the type button's third state: Deposit "Match Inventory Contents" / Restock "Match
+/// Backpack Contents".
+inline void setContents(UpgradeContext const& ctx, bool advanced, bool on) {
+    auto f              = loadFilter(ctx, advanced);
+    f.filterByInventory = on;
+    f.filterByStorage   = on;
     ctx.settings()[std::string(kFilterKey)] = f.toJson();
     ctx.saveSettings(false);
 }
@@ -174,6 +184,7 @@ inline ll::coro::CoroTask<> settingsMenuTest(selftest::Context& ctx, std::string
     (void)mm.simulate(player, {Action::Place, {Where::Cursor, 0}, {Where::Inventory, 4}, 3});
 
     ctx.check(!contentsMode(uc, true), "contents mode off by default");
+    ctx.check(loadFilter(uc, true).mode == core::FilterMode::Deny, "a new filter is a block list (SB)");
     (void)mm.simulate(player, {Action::Take, {Where::Menu, 18 + 5}, {Where::Cursor, 0}, 1});
     ctx.check(contentsMode(uc, true), "contents button toggles the mode");
     auto lore = type->describe(player, uc);

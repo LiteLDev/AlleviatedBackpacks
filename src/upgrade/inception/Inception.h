@@ -16,59 +16,34 @@ namespace abp::upgrade::inception {
 
 inline constexpr std::string_view kId = "inception";
 
-/// `config/inception.json`.
+/// `config/inception.json` (SB `InceptionUpgradeConfig`).
 struct InceptionConfig {
-    int version = 1;
-    /// Upgrades of backpacks stored inside a backpack with an Inception upgrade work as if the
-    /// inner backpack were carried (server-wide switch; each upgrade also has its own setting).
-    bool nestedUpgradesWork = true;
-    /// How deep nested backpacks are scanned for active upgrades (1 = only backpacks directly in a
-    /// carried backpack). 0 disables nested upgrades.
-    int maxDepth = 3;
-    /// Upgrade ids/groups that count as "storage related" (they move items into or out of a
-    /// backpack). With the "non-storage only" setting these stay inactive in nested backpacks.
-    std::vector<std::string> storageUpgrades = {
-        "pickup",
-        "advanced_pickup",
-        "magnet",
-        "advanced_magnet",
-        "void",
-        "advanced_void",
-        "compacting",
-        "advanced_compacting",
-        "deposit",
-        "advanced_deposit",
-        "restock",
-        "advanced_restock",
-        "refill",
-        "advanced_refill",
-        "feeding",
-        "advanced_feeding",
-        "filter",
-        "advanced_filter",
-        "smelting",
-        "auto_smelting",
-        "smoking",
-        "auto_smoking",
-        "blasting",
-        "auto_blasting",
-        "stack",
-        "crafting",
-        "stonecutter",
-        "tool_swapper",
-        "advanced_tool_swapper",
-    };
+    int version = 2;
+    /// Allows / disallows backpack upgrades to work with inventories of backpacks in the backpack
+    /// with Inception upgrade (also hides the Inception tab when off).
+    bool upgradesUseInventoriesOfBackpacksInBackpack = true;
+    /// Allows / disallows upgrades to be functional even when they are in backpacks in the
+    /// inventory of a backpack with Inception upgrade (their tanks / batteries join the outer's).
+    bool upgradesInContainedBackpacksAreFunctional = true;
 };
 
-/// Which upgrades of the nested backpacks are active (per Inception upgrade setting).
-enum class NestedUpgrades { All, NonStorage, None };
+/// SB `InventoryOrder` (per Inception upgrade, setting "inventoryOrder"; default main first).
+enum class InventoryOrder { MainFirst, InceptedFirst };
 
-[[nodiscard]] std::string_view toString(NestedUpgrades mode);
-[[nodiscard]] NestedUpgrades   nestedUpgradesFromString(std::string_view s);
-/// The setting of the (enabled) Inception upgrade in `backpack`, nullopt if none is installed.
-[[nodiscard]] std::optional<NestedUpgrades> nestedUpgradesOf(game::Backpack const& backpack);
-/// True if the upgrade id/group is in `InceptionConfig::storageUpgrades`.
-[[nodiscard]] bool isStorageRelated(std::string_view upgradeId, std::string_view group);
+[[nodiscard]] std::string_view toString(InventoryOrder order);         ///< "main_first" / "incepted_first"
+[[nodiscard]] InventoryOrder   inventoryOrderFromString(std::string_view s);
+/// The order of the Inception upgrade installed in `backpack`, nullopt if none is installed.
+[[nodiscard]] std::optional<InventoryOrder> inventoryOrderOf(game::Backpack const& backpack);
+/// True if `backpack` has an Inception upgrade in any upgrade slot (enabled or not).
+[[nodiscard]] bool hasInception(game::Backpack const& backpack);
+
+/// SC `getInventoryForUpgradeProcessing`: the inventories the upgrades of `backpack` work with, in
+/// order. Just `backpack` itself, unless it has an Inception upgrade and
+/// `upgradesUseInventoriesOfBackpacksInBackpack` is on: then also the backpacks stored inside it
+/// (slot order), after (main first) or before (incepted first) its own inventory.
+[[nodiscard]] std::vector<std::shared_ptr<game::Backpack>> upgradeInventories(std::shared_ptr<game::Backpack> const& backpack);
+/// The backpacks stored inside `backpack` (slot order; resolved, uuids assigned when missing).
+[[nodiscard]] std::vector<std::shared_ptr<game::Backpack>> subBackpacks(std::shared_ptr<game::Backpack> const& backpack);
 
 /// Storage slots of `backpack` that hold backpack items.
 [[nodiscard]] std::vector<int> backpackSlots(game::Backpack& backpack);

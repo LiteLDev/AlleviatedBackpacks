@@ -76,12 +76,12 @@ TEST(Filter, NamespaceAndTags) {
     EXPECT_TRUE(f.matches(ItemStackData::of("othermod:other", 1)));
     EXPECT_FALSE(f.matches(ItemStackData::of("minecraft:stone", 1)));
 
+    // TAGS (SC): only the selected tag list counts, filter items are ignored.
     f.matchBy = MatchBy::Tag;
     f.setGhost(0, ItemStackData::of("minecraft:birch_log", 1));
-    EXPECT_FALSE(f.matches(ItemStackData::of("minecraft:oak_log", 1))); // no provider
-    EXPECT_TRUE(f.matches(ItemStackData::of("minecraft:oak_log", 1), &tags));
-    EXPECT_FALSE(f.matches(ItemStackData::of("minecraft:stone", 1), &tags));
+    EXPECT_FALSE(f.matches(ItemStackData::of("minecraft:oak_log", 1), &tags));
     f.tags = {"minecraft:stone_like"};
+    EXPECT_FALSE(f.matches(ItemStackData::of("minecraft:stone", 1))); // no provider
     EXPECT_TRUE(f.matches(ItemStackData::of("minecraft:stone", 1), &tags));
     EXPECT_FALSE(f.matches(ItemStackData::of("minecraft:oak_log", 1), &tags));
 }

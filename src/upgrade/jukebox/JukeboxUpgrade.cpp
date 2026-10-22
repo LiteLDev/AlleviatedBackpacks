@@ -1,16 +1,20 @@
-// Jukebox upgrades (basic: 1 disc, play/stop; advanced: 12 discs, playlist with previous/next,
-// shuffle and repeat) and their menu.
+// Jukebox upgrades (SC JukeboxUpgradeItem / JukeboxUpgradeWrapper): basic = 1 disc, Stop / Play;
+// advanced = 12 discs (config 1..16), Previous / Stop / Play / Next, Shuffle and Repeat. Their
+// native tab is client/ui/tabs/jukebox; the server menu below backs the tab's disc slots (and is
+// the chest UI of simulated players in selftests).
 
 #include <algorithm>
 
 #include "ll/api/service/Bedrock.h"
 
 #include "mc/world/actor/player/Player.h"
-#include "mc/world/level/Level.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/world/level/Level.h"
 
 #include "game/ItemConv.h"
+#include "mod/Config.h"
 #include "mod/I18n.h"
+#include "net/NativeScreens.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
@@ -22,8 +26,6 @@ namespace {
 constexpr std::string_view kBasicItem    = "alleviatedbackpacks:jukebox_upgrade";
 constexpr std::string_view kAdvancedItem = "alleviatedbackpacks:advanced_jukebox_upgrade";
 
-bool isAdvanced(UpgradeContext const& ctx) { return ctx.state().item.id == kAdvancedItem; }
-
 nlohmann::json const* discArray(UpgradeContext const& ctx) {
     auto const& s  = ctx.settings();
     auto        it = s.find("discs");
@@ -32,6 +34,14 @@ nlohmann::json const* discArray(UpgradeContext const& ctx) {
 } // namespace
 
 // ---- settings ------------------------------------------------------------------------------------
+
+int advancedSlots() { return std::clamp(config::get<JukeboxConfig>().advancedSlots, 1, kMaxAdvancedSlots); }
+
+bool isAdvanced(UpgradeContext const& ctx) { return ctx.state().item.id == kAdvancedItem; }
+
+int slotsInRow(UpgradeContext const& ctx) {
+    return isAdvanced(ctx) ? std::clamp(config::get<JukeboxConfig>().advancedSlotsInRow, 1, 6) : 4;
+}
 
 bool isJukebox(UpgradeContext const& ctx) {
     auto const& slots = ctx.backpack().data().upgrades;
@@ -42,7 +52,7 @@ bool isJukebox(UpgradeContext const& ctx) {
 
 int discSlots(UpgradeContext const& ctx) {
     if (!isJukebox(ctx)) return 0;
-    return isAdvanced(ctx) ? kAdvancedSlots : kBasicSlots;
+    return isAdvanced(ctx) ? advancedSlots() : kBasicSlots;
 }
 
 core::ItemStackData disc(UpgradeContext const& ctx, int index) {
@@ -61,6 +71,8 @@ void setDisc(UpgradeContext const& ctx, int index, core::ItemStackData const& it
     while (static_cast<int>(arr.size()) < n) arr.push_back(nullptr);
     arr[static_cast<std::size_t>(index)] = item.empty() ? nlohmann::json(nullptr) : item.withCount(1).toJson();
     ctx.saveSettings(false);
+    // SC JukeboxUpgradeContainer: a change of the playing disc slot stops the playback.
+    Service::get().discChanged(ctx, index);
 }
 
 std::vector<bool> occupiedDiscs(UpgradeContext const& ctx) {
@@ -71,19 +83,18 @@ std::vector<bool> occupiedDiscs(UpgradeContext const& ctx) {
 }
 
 bool shuffle(UpgradeContext const& ctx) {
-    if (!isJukebox(ctx) || !isAdvanced(ctx)) return false;
+    if (!isJukebox(ctx)) return false;
     auto const& s = ctx.settings();
     return s.contains("shuffle") && s["shuffle"].is_boolean() && s["shuffle"].get<bool>();
 }
 
 core::RepeatMode repeatMode(UpgradeContext const& ctx) {
-    // The basic jukebox plays its disc once, like a vanilla jukebox.
-    if (!isJukebox(ctx) || !isAdvanced(ctx)) return core::RepeatMode::None;
+    if (!isJukebox(ctx)) return core::RepeatMode::None;
     auto const& s = ctx.settings();
     if (s.contains("repeat") && s["repeat"].is_string()) {
         if (auto m = core::repeatModeFromId(s["repeat"].get<std::string>())) return *m;
     }
-    return core::RepeatMode::All;
+    return core::RepeatMode::None; // SC default: RepeatMode.NO
 }
 
 void setShuffle(UpgradeContext const& ctx, bool on) {
@@ -105,12 +116,16 @@ namespace {
 
 constexpr std::string_view kFiller = "minecraft:gray_stained_glass_pane";
 
-/// Menu slot of disc slot `i`: basic in the middle; advanced in two rows of six.
+/// Menu slot of disc slot `i`: basic in the middle; advanced in two rows (6 or 8 per row).
 int discMenuSlot(int i, int count) {
     if (count <= 1) return 22;
-    return (i < 6 ? 10 : 19) + i % 6;
+    int perRow = count <= 12 ? 6 : 8;
+    int col0   = count <= 12 ? 1 : 0;
+    return (i < perRow ? 9 : 18) + col0 + i % perRow;
 }
 
+/// The jukebox's server menu: disc slots and buttons. Companion players see the native SB tab
+/// (client/ui/tabs/jukebox), which clicks these disc slots through the tab menu bridge.
 class JukeboxMenu : public ui::Menu {
 public:
     JukeboxMenu(UpgradeContext ctx, std::string title) : Menu(std::move(title), Rows::Six), mCtx(std::move(ctx)) {}
@@ -119,9 +134,8 @@ public:
         for (int i = 0; i < size(); ++i) setSlot(i, std::make_shared<ui::StaticSlot>(ui::icon(kFiller, " ")));
         if (!isJukebox(mCtx)) return;
         int  n   = discSlots(mCtx);
-        bool adv = n > 1;
+        bool adv = isAdvanced(mCtx);
         for (int i = 0; i < n; ++i) setSlot(discMenuSlot(i, n), discSlot(i));
-        setSlot(4, statusSlot());
 
         auto& svc = Service::get();
         setSlot(45, std::make_shared<ui::ButtonSlot>(
@@ -131,24 +145,20 @@ public:
             }
         ));
         setSlot(48, button(
-            [](Player& p) { return ui::icon("minecraft:lime_dye", trFor(p, "abp.jukebox.play", "Play")); },
-            [this, &svc](Player& p) {
-                if (svc.playing(mCtx.backpack().uuid(), mCtx.slot())) return;
-                std::string reason;
-                if (!svc.play(mCtx.withPlayer(&p), &p, std::nullopt, &reason) && !reason.empty()) p.sendMessage(reason);
-            }
-        ));
-        setSlot(49, button(
             [](Player& p) { return ui::icon("minecraft:red_dye", trFor(p, "abp.jukebox.stop", "Stop")); },
             [this, &svc](Player&) { svc.stop(mCtx.backpack().uuid(), mCtx.slot()); }
         ));
+        setSlot(49, button(
+            [](Player& p) { return ui::icon("minecraft:lime_dye", trFor(p, "abp.jukebox.play", "Play")); },
+            [this, &svc](Player& p) { (void)svc.play(mCtx.withPlayer(&p), &p); }
+        ));
         if (!adv) return;
         setSlot(47, button(
-            [](Player& p) { return ui::icon("minecraft:arrow", trFor(p, "abp.jukebox.previous", "Previous disc")); },
+            [](Player& p) { return ui::icon("minecraft:arrow", trFor(p, "abp.jukebox.previous", "Previous")); },
             [this, &svc](Player&) { svc.previous(mCtx); }
         ));
         setSlot(50, button(
-            [](Player& p) { return ui::icon("minecraft:arrow", trFor(p, "abp.jukebox.next", "Next disc")); },
+            [](Player& p) { return ui::icon("minecraft:arrow", trFor(p, "abp.jukebox.next", "Next")); },
             [this, &svc](Player&) { svc.next(mCtx); }
         ));
         setSlot(52, button(
@@ -156,8 +166,7 @@ public:
                 bool on = shuffle(mCtx);
                 return ui::icon(
                     on ? "minecraft:ender_eye" : "minecraft:ender_pearl",
-                    on ? trFor(p, "abp.jukebox.shuffle.on", "Shuffle: §aOn") : trFor(p, "abp.jukebox.shuffle.off", "Shuffle: §cOff"),
-                    {trFor(p, "abp.jukebox.click_to_change", "§7Click to change")}
+                    on ? trFor(p, "abp.jukebox.shuffle_on", "Shuffle Enabled") : trFor(p, "abp.jukebox.shuffle_off", "Shuffle Disabled")
                 );
             },
             [this](Player&) { setShuffle(mCtx, !shuffle(mCtx)); }
@@ -165,13 +174,13 @@ public:
         setSlot(53, button(
             [this](Player& p) {
                 switch (repeatMode(mCtx)) {
-                case core::RepeatMode::One:
-                    return ui::icon("minecraft:comparator", trFor(p, "abp.jukebox.repeat.one", "Repeat: one disc"), {trFor(p, "abp.jukebox.click_to_change", "§7Click to change")});
-                case core::RepeatMode::None:
-                    return ui::icon("minecraft:barrier", trFor(p, "abp.jukebox.repeat.none", "Repeat: off"), {trFor(p, "abp.jukebox.click_to_change", "§7Click to change")});
                 case core::RepeatMode::All:
+                    return ui::icon("minecraft:repeater", trFor(p, "abp.jukebox.repeat_all", "Repeat All"));
+                case core::RepeatMode::One:
+                    return ui::icon("minecraft:comparator", trFor(p, "abp.jukebox.repeat_one", "Repeat One"));
+                case core::RepeatMode::None:
                 default:
-                    return ui::icon("minecraft:repeater", trFor(p, "abp.jukebox.repeat.all", "Repeat: all discs"), {trFor(p, "abp.jukebox.click_to_change", "§7Click to change")});
+                    return ui::icon("minecraft:barrier", trFor(p, "abp.jukebox.no_repeat", "Repeat Disabled"));
                 }
             },
             [this](Player&) { setRepeatMode(mCtx, core::nextRepeatMode(repeatMode(mCtx))); }
@@ -187,7 +196,7 @@ public:
     [[nodiscard]] std::optional<std::uint64_t> contentVersion() const override {
         std::uint64_t v  = mCtx.backpack().revision() * 0x9E3779B97F4A7C15ull;
         auto          st = Service::get().status(mCtx.backpack().uuid(), mCtx.slot());
-        if (st) v ^= (static_cast<std::uint64_t>(st->index + 1) << 48) ^ static_cast<std::uint64_t>(st->elapsedTicks / 20 + 1);
+        if (st) v ^= (static_cast<std::uint64_t>(st->index + 1) << 48);
         return v;
     }
 
@@ -214,15 +223,9 @@ private:
 
     std::shared_ptr<ui::Slot> discSlot(int i) {
         auto s       = std::make_shared<ui::CallbackSlot>();
-        s->onDisplay = [this, i](Player& p) {
+        s->onDisplay = [this, i](Player&) {
             auto d = disc(mCtx, i);
-            if (d.empty()) return ItemStack{};
-            auto stack  = game::ItemConv::toStack(d, 1);
-            auto status = Service::get().status(mCtx.backpack().uuid(), mCtx.slot());
-            if (status && status->index == i) {
-                game::ItemConv::setDisplay(stack, "", {trFor(p, "abp.jukebox.now_playing", "§a▶ Playing")});
-            }
-            return stack;
+            return d.empty() ? ItemStack{} : game::ItemConv::toStack(d, 1);
         };
         s->onTake = [this, i](Player&, int) {
             if (!isJukebox(mCtx)) return ItemStack{};
@@ -239,29 +242,6 @@ private:
         return s;
     }
 
-    std::shared_ptr<ui::Slot> statusSlot() {
-        auto s       = std::make_shared<ui::CallbackSlot>();
-        s->onDisplay = [this](Player& p) {
-            auto status = Service::get().status(mCtx.backpack().uuid(), mCtx.slot());
-            int  n      = discSlots(mCtx);
-            auto occ    = occupiedDiscs(mCtx);
-            int  discs  = static_cast<int>(std::count(occ.begin(), occ.end(), true));
-            std::vector<std::string> lore;
-            std::string              name;
-            if (status) {
-                auto info = discInfo(disc(mCtx, status->index));
-                name      = trFor(p, "abp.jukebox.status.playing", "§aNow playing: §f{}", info ? info->title : std::string("?"));
-                lore.push_back(trFor(p, "abp.jukebox.status.time", "§7{} / {}", formatTime(status->elapsedTicks), formatTime(status->durationTicks)));
-            } else {
-                name = trFor(p, "abp.jukebox.status.stopped", "§7Not playing");
-            }
-            lore.push_back(trFor(p, "abp.jukebox.discs", "§7Discs: {}/{}", discs, n));
-            lore.push_back(trFor(p, "abp.jukebox.hint", "§7Put music discs into the slots below"));
-            return ui::icon("minecraft:jukebox", name, lore);
-        };
-        return s;
-    }
-
     UpgradeContext mCtx;
 };
 
@@ -272,19 +252,7 @@ public:
     void onRemove(UpgradeContext const& ctx) override { Service::get().stop(ctx.backpack().uuid(), ctx.slot()); }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
-        return std::make_shared<JukeboxMenu>(ctx.withPlayer(nullptr), displayName(*this, &player));
-    }
-
-    std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
-        std::vector<std::string> out;
-        auto                     occ = occupiedDiscs(ctx);
-        out.push_back(trFor(player, "abp.jukebox.discs", "§7Discs: {}/{}", std::count(occ.begin(), occ.end(), true), occ.size()));
-        if (auto status = Service::get().status(ctx.backpack().uuid(), ctx.slot())) {
-            if (auto info = discInfo(disc(ctx, status->index))) {
-                out.push_back(trFor(player, "abp.jukebox.status.playing", "§aNow playing: §f{}", info->title));
-            }
-        }
-        return out;
+        return std::make_shared<JukeboxMenu>(ctx.withPlayer(nullptr), trFor(player, "abp.jukebox.tab", "Jukebox"));
     }
 };
 
@@ -303,6 +271,9 @@ public:
         };
         return i;
     }
+    std::vector<std::string> describe(Player& player, UpgradeContext const&) const override {
+        return {trFor(player, "abp.jukebox.tooltip", "§7Portable Jukebox")};
+    }
 };
 
 class AdvancedJukeboxUpgrade : public JukeboxUpgradeBase {
@@ -320,7 +291,63 @@ public:
         };
         return i;
     }
+    std::vector<std::string> describe(Player& player, UpgradeContext const&) const override {
+        return {
+            trFor(player, "abp.jukebox.advanced_tooltip1", "§7Portable Jukebox with support for more music discs"),
+            trFor(player, "abp.jukebox.advanced_tooltip2", "§7Also more playback options"),
+        };
+    }
 };
+
+// ---- native tab data / actions (client/ui/tabs/jukebox) ------------------------------------------
+
+nlohmann::json tabData(Player& player, UpgradeContext const& ctx) {
+    if (!isJukebox(ctx)) return nlohmann::json::object();
+    int            n   = discSlots(ctx);
+    bool           adv = isAdvanced(ctx);
+    nlohmann::json discs    = nlohmann::json::array();
+    nlohmann::json discMenu = nlohmann::json::array();
+    for (int i = 0; i < n; ++i) {
+        auto d = disc(ctx, i);
+        discs.push_back(d.empty() ? nlohmann::json(nullptr) : d.toJson());
+        discMenu.push_back(discMenuSlot(i, n));
+    }
+    nlohmann::json j{
+        {"advanced", adv},
+        {"slotsInRow", slotsInRow(ctx)},
+        {"discs", std::move(discs)},
+        {"discMenu", std::move(discMenu)},
+        {"shuffle", shuffle(ctx)},
+        {"repeat", std::string(core::repeatModeId(repeatMode(ctx)))},
+        {"playing", -1},
+        // SC tab label / closed tab tooltip.
+        {"tabLabel", trFor(player, "abp.jukebox.tab", "Jukebox")},
+        {"tabTooltip", adv ? trFor(player, "abp.jukebox.tab.advanced_tooltip", "Advanced Jukebox") : trFor(player, "abp.jukebox.tab.tooltip", "Jukebox")},
+    };
+    if (auto st = Service::get().status(ctx.backpack().uuid(), ctx.slot())) {
+        j["playing"]  = st->index;
+        j["elapsed"]  = st->elapsedTicks / 20 * 20; // whole seconds: one screen patch per second
+        j["duration"] = st->durationTicks;
+    }
+    auto title   = j["tabLabel"];
+    auto tooltip = j["tabTooltip"];
+    return nlohmann::json{{"jukebox", std::move(j)}, {"tabLabel", std::move(title)}, {"tabTooltip", std::move(tooltip)}};
+}
+
+bool tabAction(Player& player, UpgradeContext const& ctx, nlohmann::json const& data) {
+    if (!isJukebox(ctx) || !data.contains("jukebox")) return false;
+    auto  op  = data.value("jukebox", std::string{});
+    auto& svc = Service::get();
+    auto  c   = ctx.withPlayer(&player);
+    if (op == "play") (void)svc.play(c, &player);
+    else if (op == "stop") svc.stop(ctx.backpack().uuid(), ctx.slot());
+    else if (op == "next" && isAdvanced(ctx)) (void)svc.next(c);
+    else if (op == "previous" && isAdvanced(ctx)) (void)svc.previous(c);
+    else if (op == "shuffle" && isAdvanced(ctx)) setShuffle(c, !shuffle(c));
+    else if (op == "repeat" && isAdvanced(ctx)) setRepeatMode(c, core::nextRepeatMode(repeatMode(c)));
+    else return false;
+    return true;
+}
 
 } // namespace
 
@@ -328,3 +355,5 @@ public:
 
 ABP_REGISTER_UPGRADE(abp::upgrade::jukebox::JukeboxUpgrade);
 ABP_REGISTER_UPGRADE(abp::upgrade::jukebox::AdvancedJukeboxUpgrade);
+ABP_REGISTER_TAB_DATA(abp::net::TabDataProvider{"jukebox", &abp::upgrade::jukebox::tabData});
+ABP_REGISTER_TAB_ACTION(abp::net::TabActionHandler{"jukebox", &abp::upgrade::jukebox::tabAction});

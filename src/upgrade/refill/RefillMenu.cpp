@@ -1,8 +1,8 @@
-// Refill settings menu: ghost filter slots, per-slot target buttons (advanced), NBT toggle, clear,
-// back to the backpack's upgrades page.
+// Refill settings menu (chest UI of simulated players; players get the native tab): ghost filter
+// slots, per-slot target buttons (advanced), clear, back to the backpack's upgrades page.
 //
 // Basic (single chest):            Advanced (double chest):
-//   row 0  ghosts 1-9                row 0  ghosts 1-9
+//   row 0  ghosts 1-6                row 0  ghosts 1-9
 //   row 1  filler                    row 1  targets of ghosts 1-9
 //   row 2  controls                  row 2  ghosts 10-12 (centred)
 //                                    row 3  targets of ghosts 10-12
@@ -26,28 +26,31 @@ namespace abp::upgrade::refill {
 
 namespace {
 
+std::string targetDescription(Player& player, Target t) {
+    switch (t) {
+    case Target::Any:
+        return trFor(player, "abp.refill.target_slot.any.tooltip", "Any slot");
+    case Target::MainHand:
+        return trFor(player, "abp.refill.target_slot.main_hand.tooltip", "Main hand");
+    case Target::Offhand:
+        return trFor(player, "abp.refill.target_slot.off_hand.tooltip", "Off hand");
+    default:
+        return trFor(player, "abp.refill.target_slot.hotbar.tooltip", "Hotbar slot {}", static_cast<int>(t) - static_cast<int>(Target::Hotbar1) + 1);
+    }
+}
+
 ItemStack targetIcon(Player& player, Target t) {
+    auto name = trFor(player, "abp.refill.target_slot.tooltip", "Refill {}", "§2" + targetDescription(player, t));
     std::vector<std::string> lore{trFor(player, "abp.refill.target.click", "§7Click to change the target slot")};
     switch (t) {
     case Target::Any:
-        return ui::icon("minecraft:chest", trFor(player, "abp.refill.target.any", "Target: any slot"), lore);
+        return ui::icon("minecraft:chest", name, lore);
     case Target::MainHand:
-        return ui::icon(
-            "minecraft:iron_sword",
-            trFor(player, "abp.refill.target.main_hand", "Target: main hand"),
-            lore
-        );
+        return ui::icon("minecraft:iron_sword", name, lore);
     case Target::Offhand:
-        return ui::icon("minecraft:shield", trFor(player, "abp.refill.target.offhand", "Target: offhand"), lore);
-    default: {
-        int k = static_cast<int>(t) - static_cast<int>(Target::Hotbar1) + 1;
-        return ui::icon(
-            "minecraft:frame",
-            trFor(player, "abp.refill.target.hotbar", "Target: hotbar slot {}", k),
-            lore,
-            k
-        );
-    }
+        return ui::icon("minecraft:shield", name, lore);
+    default:
+        return ui::icon("minecraft:frame", name, lore, static_cast<int>(t) - static_cast<int>(Target::Hotbar1) + 1);
     }
 }
 
@@ -75,10 +78,8 @@ public:
                     },
                     [this, i](core::ItemStackData const& d) {
                         if (!valid()) return;
-                        auto s = load(mCtx, mSlots);
-                        if (!d.empty() && s.filter.hasGhost(d)) return; // no duplicates
-                        s.filter.setGhost(i, d);
-                        save(mCtx, s);
+                        (void)setGhost(mCtx, mAdvanced, i, d);
+                        invalidate();
                     }
                 )
             );
@@ -88,10 +89,8 @@ public:
                     targetPos(i),
                     std::make_shared<ui::ButtonSlot>(targetIcon(player, t), [this, i](ui::ClickContext const&) {
                         if (!valid()) return;
-                        auto  s = load(mCtx, mSlots);
-                        auto& t = s.targets[static_cast<std::size_t>(i)];
-                        t       = nextTarget(t);
-                        save(mCtx, s);
+                        auto t = nextTarget(load(mCtx, mSlots).targets[static_cast<std::size_t>(i)]);
+                        setTarget(mCtx, mAdvanced, i, t);
                         log().info("refill: filter slot {} target set to {}", i + 1, static_cast<int>(t));
                         invalidate();
                     })
@@ -100,41 +99,7 @@ public:
         }
 
         int         control = size() - 9;
-        auto const& s       = current;
         for (int i = 0; i < 9; ++i) setSlot(control + i, filler("minecraft:black_stained_glass_pane"));
-        std::vector<std::string> help{
-            trFor(player, "abp.refill.help1", "§7Put items into the slots above."),
-            trFor(player, "abp.refill.help2", "§7When you run low on them, they are refilled from the backpack."),
-        };
-        if (mAdvanced) {
-            help.push_back(
-                trFor(player, "abp.refill.help3", "§7The button below each slot picks where the item goes.")
-            );
-            help.push_back(
-                trFor(player, "abp.refill.help4", "§7Pick block (middle click) also takes blocks from the backpack.")
-            );
-        }
-        setSlot(
-            control,
-            std::make_shared<ui::StaticSlot>(
-                ui::icon("minecraft:book", trFor(player, "abp.refill.help_title", "Refill"), help)
-            )
-        );
-        auto onOff =
-            s.filter.matchNbt ? trFor(player, "abp.filter.on", "§aOn") : trFor(player, "abp.filter.off", "§cOff");
-        setSlot(
-            control + 3,
-            std::make_shared<ui::ButtonSlot>(
-                ui::icon("minecraft:enchanted_book", trFor(player, "abp.filter.nbt", "Match NBT: {}", onOff)),
-                [this](ui::ClickContext const&) {
-                    if (!valid()) return;
-                    auto s            = load(mCtx, mSlots);
-                    s.filter.matchNbt = !s.filter.matchNbt;
-                    save(mCtx, s);
-                    invalidate();
-                }
-            )
-        );
         setSlot(
             control + 7,
             std::make_shared<ui::ButtonSlot>(

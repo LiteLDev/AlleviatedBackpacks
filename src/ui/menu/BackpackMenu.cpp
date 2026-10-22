@@ -505,7 +505,7 @@ bool BackpackMenu::openFor(Player& player, game::ItemLocation where) {
     if (!bp) return false;
     if (changed) game::setItemAt(player, where, item);
     auto title = item.getCustomName();
-    if (title.empty()) title = tierName(player, bp->tier());
+    if (title.empty()) title = tierName(player, game::backpackTierOf(item).value_or(bp->tier())); // the item's name (SB: hover name)
     return MenuManager::get().open(player, std::make_shared<BackpackMenu>(bp, where, title));
 }
 

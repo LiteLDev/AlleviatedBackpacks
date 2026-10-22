@@ -58,6 +58,9 @@ using SlotPreferenceFn = std::function<std::vector<int>(ItemStackData const& sta
 /// True if `slot` is blocked: inaccessible for every insert (any source) and for sorting, like
 /// Sophisticated Core's `IInventorySlotBlocker` (e.g. slots covered by a captured mob).
 using SlotBlockerFn = std::function<bool(int slot)>;
+/// Whether `slot` is infinite (Infinity upgrade): extracting from it hands out items without
+/// ever depleting the slot.
+using InfiniteSlotFn = std::function<bool(int slot)>;
 
 struct InsertResult {
     ItemStackData remainder; ///< what could not be inserted (empty when all went in or was voided)
@@ -123,6 +126,9 @@ public:
     /// Checks whether an insert of `stack` into `slot` (-1 = whole-stack check) is allowed.
     [[nodiscard]] InsertVerdict checkInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const;
     [[nodiscard]] bool canExtract(int slot, int amount, AccessContext const& ctx) const;
+    /// True if an infinite-slot hook claims `slot` (extraction does not deplete it; the amount
+    /// handed out is not limited by the stored count).
+    [[nodiscard]] bool isInfinite(int slot) const;
 
     // ---- hooks -------------------------------------------------------------------------------
     void addInsertFilter(std::string owner, int priority, InsertFilterFn fn);
@@ -133,9 +139,12 @@ public:
     void addSlotPreference(std::string owner, int priority, SlotPreferenceFn fn);
     /// Blocks slots (see `SlotBlockerFn`). Removed like the other hooks.
     void addSlotBlocker(std::string owner, SlotBlockerFn fn);
+    /// Marks slots as infinite (see `InfiniteSlotFn`).
+    void addInfiniteSlots(std::string owner, InfiniteSlotFn fn);
     /// Removes every hook registered with `owner`.
     void removeHooks(std::string const& owner);
-    /// Removes all filters, limit modifiers, slot preferences and slot blockers (listeners stay).
+    /// Removes all filters, limit modifiers, slot preferences, slot blockers and infinite-slot
+    /// hooks (listeners stay).
     void clearFilters();
     /// Removes every hook (filters, modifiers, listeners) not owned by `keepOwner`.
     void clearHooksExcept(std::string_view keepOwner);
@@ -166,6 +175,7 @@ private:
     std::vector<Hook<ChangeListenerFn>> mListeners;
     std::vector<Hook<SlotPreferenceFn>> mPreferences;
     std::vector<Hook<SlotBlockerFn>>    mBlockers;
+    std::vector<Hook<InfiniteSlotFn>>   mInfinite;
 };
 
 } // namespace abp::core

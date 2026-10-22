@@ -1,5 +1,5 @@
 {
   "abp.everlasting.name": "Everlasting Upgrade",
-  "abp.everlasting.describe1": "§7Dropped, this backpack never despawns",
-  "abp.everlasting.describe2": "§7and can't be destroyed or lost in the void."
+  "abp.everlasting.describe1": "§7Backpack becomes indestructible",
+  "abp.everlasting.describe2": "§7Can't despawn or fall into void"
 }

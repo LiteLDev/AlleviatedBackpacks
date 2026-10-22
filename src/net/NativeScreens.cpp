@@ -16,6 +16,7 @@
 #include "core/Appearance.h"
 #include "core/Sorting.h"
 #include "feature/gui/Gui.h"
+#include "feature/gui/SbSettings.h"
 #include "game/Backpack.h"
 #include "game/ItemConv.h"
 #include "mod/I18n.h"
@@ -227,6 +228,8 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
     if (area == Area::Storage) {
         content = bp->inventory().at(index);
         maxTake = std::clamp(content.maxStack, 1, 255);
+        // SC Infinity: an infinite slot reports Integer.MAX_VALUE, so a click takes a full stack.
+        if (!content.empty() && bp->inventory().isInfinite(index)) content.count = std::max(content.count, maxTake);
     } else {
         content = bp->data().upgrades[static_cast<std::size_t>(index)].item;
     }
@@ -376,73 +379,7 @@ bool clickGenericSlot(Player& p, ui::Menu& menu, int index, int button, bool shi
 
 std::string translatedUpgradeName(Player& p, upgrade::IUpgrade const& type) { return upgrade::displayName(type, &p); }
 
-// ---- native settings screen (SC SettingsScreen: main / no sort / memory tabs) ----------------------
-
-/// SC MainSettingsContainer context: edits go to the player's global settings or this backpack.
-std::unordered_map<std::int64_t, std::string> gSettingsContext;
-
-std::string contextOf(Player const& p) {
-    auto it = gSettingsContext.find(keyOf(p));
-    return it == gSettingsContext.end() ? std::string("backpack") : it->second;
-}
-
-/// Main settings keys as SB names them -> our option keys and defaults.
-struct MainOption {
-    char const* name;
-    char const* key;
-    bool        def;
-};
-constexpr MainOption kMainOptions[] = {
-    {"shiftClickIntoOpenTab", feature::gui::kOpenTabFirst, true},
-    {"keepTabOpen", "keepTabOpen", true},
-    {"keepSearchPhrase", "keepSearchPhrase", false},
-};
-
-/// Backpack-level settings of the native screens that the GUI unit doesn't know
-/// (`settings["companion"]` of the backpack data).
-nlohmann::json companionSection(game::Backpack const& bp) {
-    auto it = bp.data().settings.find("companion");
-    return it != bp.data().settings.end() && it->is_object() ? *it : nlohmann::json::object();
-}
-
-void setCompanionOption(game::Backpack& bp, std::string const& key, nlohmann::json value) {
-    auto& s = bp.data().settings["companion"];
-    if (!s.is_object()) s = nlohmann::json::object();
-    s[key] = std::move(value);
-    bp.markDirty();
-}
-
-bool optionValue(Player& p, game::Backpack const& bp, MainOption const& o, std::string const& context) {
-    bool       gui = std::string_view(o.key) == feature::gui::kOpenTabFirst;
-    auto const bpj = gui ? feature::gui::backpackOverrides(bp) : companionSection(bp);
-    auto const pj  = feature::gui::playerOverrides(p);
-    if (context == "backpack" && bpj.contains(o.key) && bpj[o.key].is_boolean()) return bpj[o.key].get<bool>();
-    if (pj.contains(o.key) && pj[o.key].is_boolean()) return pj[o.key].get<bool>();
-    if (std::string_view(o.key) == feature::gui::kOpenTabFirst) return feature::gui::effective(&p, bp).openTabFirst;
-    return o.def;
-}
-
-constexpr char const* kNoSortColorKey     = "noSortColor";
-constexpr char const* kMemoryMatchNbtKey  = "memoryMatchNbt";
-constexpr int         kDefaultNoSortColor = static_cast<int>(core::DyeColor::Lime);
-
-int noSortDye(game::Backpack const& bp) {
-    auto j = companionSection(bp);
-    if (j.contains(kNoSortColorKey) && j[kNoSortColorKey].is_number_integer()) {
-        int v = j[kNoSortColorKey].get<int>();
-        if (v >= 0 && v < static_cast<int>(core::kDyes.size())) return v;
-    }
-    return kDefaultNoSortColor;
-}
-
-nlohmann::json settingsJson(Player& p, game::Backpack& bp) {
-    auto           context = contextOf(p);
-    nlohmann::json j{{"context", context}};
-    for (auto const& o : kMainOptions) j[o.name] = optionValue(p, bp, o, context);
-    j["noSortColor"]    = noSortDye(bp);
-    j["memoryMatchNbt"] = companionSection(bp).value(kMemoryMatchNbtKey, false);
-    return j;
-}
+// ---- native settings screen: feature/gui/SbSettings.h (P2-2) -------------------------------------------
 
 // ---- upgrade tabs bridged from the upgrades' settings menus ------------------------------------------
 // Until an upgrade has its own native tab, its settings menu (`IUpgrade::createSettingsMenu`, e.g.
@@ -522,7 +459,12 @@ bool clickSlotObject(Player& p, std::shared_ptr<ui::Slot> slot, int button, bool
 
 bool handleSettingsAction(Player& player, ui::BackpackMenu& menu, NativeSession& s, std::string const& action, nlohmann::json const& body) {
     auto bp = menu.backpack();
-    if (action == "settings") return true; // the settings screen is a client view of this session
+    if (action == "settings") {
+        // The settings screen is a client view of this session; SB opens a new settings container.
+        feature::gui::settingsScreenOpened(player, *bp);
+        s.dirty = true;
+        return true;
+    }
     int slot = body.value("slot", -1);
     if (action == "upgradeSettings" || action == "tab") {
         if (slot < 0 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
@@ -558,63 +500,9 @@ bool handleSettingsAction(Player& player, ui::BackpackMenu& menu, NativeSession&
         }
         return false;
     }
-    // "setting": the native settings screen.
-    auto what = body.value("what", std::string{});
-    auto op   = body.value("op", std::string{});
-    int  idx  = body.value("index", -1);
-    auto& inv = bp->inventory();
-    s.dirty   = true;
-    if (what == "context") {
-        gSettingsContext[keyOf(player)] = contextOf(player) == "backpack" ? "player" : "backpack";
-        return true;
-    }
-    if (what == "option") {
-        auto name = body.value("name", std::string{});
-        for (auto const& o : kMainOptions) {
-            if (name != o.name) continue;
-            auto context = contextOf(player);
-            bool next    = !optionValue(player, *bp, o, context);
-            if (context == "player") feature::gui::setPlayerOption(player, o.key, nlohmann::json(next));
-            else if (std::string_view(o.key) == feature::gui::kOpenTabFirst) feature::gui::setBackpackOption(*bp, o.key, nlohmann::json(next));
-            else setCompanionOption(*bp, o.key, nlohmann::json(next));
-            return true;
-        }
-        return false;
-    }
-    if (what == "memory") {
-        if (op == "selectAll") feature::gui::memorizeAll(*bp);
-        else if (op == "unselectAll") feature::gui::clearMemory(*bp);
-        else if (idx < 0 || idx >= inv.size()) return false;
-        else if (op == "select") {
-            if (inv.at(idx).empty()) return false; // SC: only slots with an item can be memorized
-            feature::gui::setMemory(*bp, idx, inv.at(idx));
-        } else if (op == "unselect") {
-            feature::gui::setMemory(*bp, idx, {});
-        } else {
-            return false;
-        }
-        return true;
-    }
-    if (what == "noSort") {
-        if (op == "selectAll") feature::gui::setNoSortAll(*bp, true);
-        else if (op == "unselectAll") feature::gui::setNoSortAll(*bp, false);
-        else if (idx < 0 || idx >= inv.size()) return false;
-        else if (op == "select") feature::gui::setNoSort(*bp, idx, true);
-        else if (op == "unselect") feature::gui::setNoSort(*bp, idx, false);
-        else return false;
-        return true;
-    }
-    if (what == "noSortColor") {
-        int n    = static_cast<int>(core::kDyes.size());
-        int next = (noSortDye(*bp) + (body.value("dir", 1) >= 0 ? 1 : n - 1)) % n;
-        setCompanionOption(*bp, kNoSortColorKey, nlohmann::json(next));
-        return true;
-    }
-    if (what == "memoryMatchNbt") {
-        setCompanionOption(*bp, kMemoryMatchNbtKey, nlohmann::json(!companionSection(*bp).value(kMemoryMatchNbtKey, false)));
-        return true;
-    }
-    return false;
+    // "setting": the native settings screen (feature/gui/SettingsScreen.cpp).
+    s.dirty = true;
+    return feature::gui::handleSettingsScreenAction(player, *bp, body);
 }
 } // namespace
 
@@ -669,8 +557,8 @@ BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu) {
     m.stackMultiplier = upgrade::stack::totalMultiplier(bp);
     m.mainColor       = bp.data().mainColor;
     m.accentColor     = bp.data().accentColor;
-    m.noSortColor     = core::kDyes[static_cast<std::size_t>(noSortDye(bp))].argb & 0xFFFFFF;
-    m.extra["settings"] = settingsJson(player, bp);
+    m.noSortColor     = core::kDyes[static_cast<std::size_t>(feature::gui::noSortColor(bp))].argb & 0xFFFFFF;
+    m.extra["settings"] = feature::gui::settingsScreenJson(player, bp);
     return m;
 }
 
@@ -717,7 +605,20 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
 
     auto area = areaOf(body);
     int  idx  = body.value("index", -1);
-    if (action == "dropCursor") {
+    bool intercepted = false;
+    if (action == "click" && body.value("button", 0) == 1 && !body.value("shift", false) && !cursorOf(player).isNull()
+        && (area == Area::Inventory || (area == Area::Storage && menu))) {
+        for (auto const& h : ScreenClickInterceptRegistry::entries()) {
+            if (h.handle && h.handle(player, menu, area == Area::Storage ? "storage" : "inventory", idx)) {
+                intercepted = true;
+                break;
+            }
+        }
+    }
+    if (intercepted) {
+        items = true;
+        ok    = true;
+    } else if (action == "dropCursor") {
         items       = true;
         auto cursor = cursorOf(player);
         if (cursor.isNull()) return false;
@@ -888,7 +789,6 @@ ui::MenuManager::Presentation presentationFor(Player& player, ui::Menu&) {
 
 void forgetPlayer(Player const& p) {
     forgetTabMenus(p);
-    gSettingsContext.erase(keyOf(p));
     gSessions.erase(keyOf(p));
     detail::forgetContentsRates(p);
 }
@@ -912,7 +812,6 @@ public:
         ll::event::EventBus::getInstance().removeListener(mDisconnect);
         gSessions.clear();
         gTabMenus.clear();
-        gSettingsContext.clear();
     }
 
 private:

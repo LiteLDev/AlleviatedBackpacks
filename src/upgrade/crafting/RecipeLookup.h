@@ -31,9 +31,9 @@ struct CraftMatch {
 /// A 3x3 crafting grid, row-major (index = row * 3 + column).
 using Grid = std::array<ItemStack, 9>;
 
-/// Finds the recipe the crafting table would use for `grid` (shaped, shapeless, multi recipes;
-/// the lowest `priority` wins when several match). Scans the registry: cache the result.
-[[nodiscard]] std::optional<CraftMatch> matchCrafting(Grid const& grid);
+/// Every recipe matching `grid` with its result (SC `getRecipesFor`, the choices of the result
+/// cycler), best first: lowest `priority`, then registry order. Scans the registry: cache it.
+[[nodiscard]] std::vector<CraftMatch> matchAllCrafting(Grid const& grid);
 
 /// One stonecutter choice for an input item.
 struct StonecutterOption {

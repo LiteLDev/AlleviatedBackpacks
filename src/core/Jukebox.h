@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <random>
 #include <string_view>
@@ -8,32 +9,35 @@
 
 namespace abp::core {
 
-/// What the jukebox does when a track ends by itself.
+/// What the jukebox does when a track ends by itself (SC `RepeatMode`, default `None`).
 enum class RepeatMode {
-    All,  ///< play the next disc, wrapping around after the last one
+    All,  ///< play the next disc of the playlist, starting over after the last one
     One,  ///< play the same disc again
-    None, ///< play the next disc, stop after the last one
+    None, ///< play the rest of the playlist, then stop
 };
 
-[[nodiscard]] std::string_view           repeatModeId(RepeatMode mode);             ///< "all", "one", "none"
+[[nodiscard]] std::string_view           repeatModeId(RepeatMode mode); ///< "all", "one", "no"
+/// Also accepts "none" (phase-1 settings).
 [[nodiscard]] std::optional<RepeatMode> repeatModeFromId(std::string_view id);
-[[nodiscard]] RepeatMode                 nextRepeatMode(RepeatMode mode);           ///< All -> One -> None -> All
+[[nodiscard]] RepeatMode                 nextRepeatMode(RepeatMode mode); ///< All -> One -> None -> All
 
-/// Play order of a jukebox's disc slots (pure logic; the game layer owns the sound).
+/// Play order of a jukebox's disc slots (pure logic; the game layer owns the sound). Follows
+/// Sophisticated Core's `JukeboxUpgradeWrapper`:
 ///
-/// Slots are indices into the jukebox's disc slots; `occupied[i]` tells whether slot i holds a
-/// disc. Every call takes the current occupancy, so discs added or removed while playing are
-/// picked up (new discs join the order, removed ones are skipped).
-///
-/// - In order: slot order, wrapping after the last occupied slot.
-/// - Shuffled: a random permutation of the occupied slots; reshuffled after each full pass
-///   (never starting the new pass with the disc that just ended, when there is a choice).
+/// - a playlist (the occupied slots in slot order, shuffled when shuffle is on) is consumed from
+///   the front; "next" moves the playing slot into a history (capped at the slot count) and plays
+///   the playlist's next slot, rebuilding the playlist when it ran out;
+/// - "previous" puts the playing slot back at the front of the playlist and plays the last slot of
+///   the history (nothing happens when the history is empty);
+/// - discs added while playing join the end of the playlist, removed ones leave playlist and
+///   history (every call takes the current occupancy);
+/// - toggling shuffle rebuilds the playlist without the playing slot.
 class JukeboxQueue {
 public:
     explicit JukeboxQueue(std::uint32_t seed = 0x5eed1234u) : mRng(seed) {}
 
-    /// Starts a new pass. With `startWith` (an occupied slot) that slot plays first; otherwise the
-    /// first slot of the order. Returns the slot to play, nullopt when nothing is occupied.
+    /// Starts playing: builds the playlist and plays its first slot (or `startWith` when it is
+    /// occupied). Returns the slot to play, nullopt when nothing is occupied.
     std::optional<int> start(std::vector<bool> const& occupied, bool shuffle, std::optional<int> startWith = std::nullopt);
 
     /// The slot currently playing (nullopt before `start` / after the queue ran out).
@@ -42,24 +46,26 @@ public:
 
     /// The current track ended by itself: the next slot according to `mode`, or nullopt to stop.
     std::optional<int> onTrackEnd(std::vector<bool> const& occupied, RepeatMode mode);
-    /// "Next" button: always moves on (wrapping), whatever the repeat mode.
+    /// "Next" button (SC `playNext()`): the next slot, starting the playlist over when it ran out.
     std::optional<int> skipNext(std::vector<bool> const& occupied);
-    /// "Previous" button: the slot before the current one (wrapping).
+    /// "Previous" button (SC `playPrevious()`): the last slot of the history; nullopt (keep
+    /// playing) when the history is empty.
     std::optional<int> skipPrevious(std::vector<bool> const& occupied);
-    /// Turns shuffle on/off while playing; the current disc keeps playing.
+    /// Turns shuffle on/off; the playlist is rebuilt without the playing slot.
     void setShuffle(std::vector<bool> const& occupied, bool shuffle);
 
-    /// The planned order of the current pass (tests / UI).
-    [[nodiscard]] std::vector<int> const& order() const { return mOrder; }
+    /// The remaining playlist (tests / UI).
+    [[nodiscard]] std::vector<int> order() const { return {mPlaylist.begin(), mPlaylist.end()}; }
+    [[nodiscard]] std::vector<int> history() const { return {mHistory.begin(), mHistory.end()}; }
 
 private:
-    void sync(std::vector<bool> const& occupied);
-    void rebuild(std::vector<bool> const& occupied, std::optional<int> first);
-    /// Advances; `wrapped` tells whether a new pass had to start.
-    std::optional<int> advance(std::vector<bool> const& occupied, bool& wrapped);
+    void               sync(std::vector<bool> const& occupied);
+    void               initPlaylist(std::vector<bool> const& occupied, bool excludeActive);
+    std::optional<int> playNext(std::vector<bool> const& occupied, bool startOverIfAtTheEnd);
 
-    std::vector<int>   mOrder;
-    int                mPos = -1;
+    std::deque<int>    mPlaylist;
+    std::deque<int>    mHistory;
+    std::vector<bool>  mKnown; ///< occupancy seen last (to find added / removed discs)
     std::optional<int> mCurrent;
     bool               mShuffle = false;
     std::mt19937       mRng;

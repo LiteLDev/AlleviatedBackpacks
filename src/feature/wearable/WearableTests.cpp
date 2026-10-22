@@ -18,6 +18,9 @@
 #include "mc/world/actor/ActorDefinitionIdentifier.h"
 #include "mc/world/actor/ActorType.h"
 #include "mc/world/actor/Mob.h"
+#include "mc/world/attribute/AttributeInstance.h"
+#include "mc/world/attribute/AttributeInstanceConstRef.h"
+#include "mc/world/attribute/SharedAttributes.h"
 #include "mc/world/actor/item/ItemActor.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/inventory/CraftingContainer.h"
@@ -33,6 +36,8 @@
 #include "mc/world/level/block/actor/ChestBlockActor.h"
 #include "mc/world/level/dimension/DimensionType.h"
 
+#include "core/WorldRules.h"
+#include "feature/admin/SbConfig.h"
 #include "feature/wearable/Wearable.h"
 #include "feature/wearable/WearableConfig.h"
 #include "game/Backpack.h"
@@ -44,6 +49,7 @@
 #include "selftest/SelfTest.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/jukebox/Jukebox.h"
 
 namespace abp::wearable {
 namespace {
@@ -270,76 +276,116 @@ ABP_REGISTER_SELFTEST("wearable.double_sneak_opens", [](Context& ctx) -> ll::cor
     sp.setArmor(ArmorSlot::Torso, ItemStack::EMPTY_ITEM());
 });
 
+
 // ---- mobs --------------------------------------------------------------------------------------
 
-ABP_REGISTER_SELFTEST("wearable.tier_rolls", [](Context& ctx) {
-    ConfigGuard  guard;
+/// Restores SB's server config when a test ends.
+struct SbGuard {
+    admin::SbServerConfig saved = admin::sbServer();
+    SbGuard()                   = default;
+    SbGuard(SbGuard const&)            = delete;
+    SbGuard& operator=(SbGuard const&) = delete;
+    ~SbGuard() { config::mut<admin::SbServerConfig>() = saved; }
+    admin::SbServerConfig::EntityBackpackAdditions& add() { return config::mut<admin::SbServerConfig>().entityBackpackAdditions; }
+};
+
+ABP_REGISTER_SELFTEST("wearable.tier_choice", [](Context& ctx) {
+    SbGuard      guard;
     std::mt19937 engine(1234);
-    int          counts[3][6]{};
-    for (int dim = 0; dim < 3; ++dim) {
-        for (int i = 0; i < 2000; ++i) {
-            auto t = rollTier(dim, 2, engine);
-            ctx.require(t.has_value(), "a tier is always rolled");
-            ++counts[dim][static_cast<int>(*t)];
-        }
-    }
-    ctx.check(counts[0][0] > counts[0][3], "overworld: leather is more common than gold");
-    ctx.check(counts[1][0] == 0 && counts[1][1] == 0, "nether: no leather/copper backpacks");
-    ctx.check(counts[2][4] > counts[2][2], "end: diamond is more common than iron");
-    // Hard difficulty favours better tiers.
-    int normalGold = 0, hardGold = 0;
+    int          low[6]{}, high[6]{};
     for (int i = 0; i < 4000; ++i) {
-        if (static_cast<int>(*rollTier(0, 2, engine)) >= 3) ++normalGold;
-        if (static_cast<int>(*rollTier(0, 3, engine)) >= 3) ++hardGold;
+        ++low[static_cast<int>(rollTier(0.0f, engine))];
+        ++high[static_cast<int>(rollTier(6.75f, engine))];
     }
-    ctx.check(hardGold > normalGold, "hard rolls better tiers (" + std::to_string(hardGold) + " vs " + std::to_string(normalGold) + ")");
-    ctx.check(spawnChance(3) > spawnChance(1), "hard has a higher spawn chance than easy");
-    guard.cfg().mobs.chance = 5.0f;
-    ctx.check(spawnChance(2) == 1.0, "chance is clamped to 1");
-    ctx.check(isEligibleMob("minecraft:zombie") && !isEligibleMob("minecraft:cow"), "eligible mobs from config");
+    ctx.check(low[0] > low[1] && low[1] > low[2] && low[2] > low[3], "weights 625/250/125/25: leather most common");
+    ctx.check(high[0] == 0 && high[1] == 0, "high local difficulty: iron or better");
+    guard.add().localDifficultyEffectsBackpackSpawns = false;
+    int any = 0;
+    for (int i = 0; i < 2000; ++i) any += rollTier(6.75f, engine) == Tier::Leather ? 1 : 0;
+    ctx.check(any > 0, "local difficulty ignored when localDifficultyEffectsBackpackSpawns is off");
+    guard.add() = {};
+    guard.add().leatherWeight = guard.add().copperWeight = guard.add().ironWeight = 0;
+    guard.add().goldWeight = guard.add().diamondWeight = 0;
+    ctx.check(rollTier(0.0f, engine) == Tier::Netherite, "only netherite weighs anything");
+    ctx.check(isEligibleMob("minecraft:zombie") && isEligibleMob("minecraft:enderman") && !isEligibleMob("minecraft:cow"), "entityLootTableList");
+    ctx.check(lootTableFor("minecraft:wither_skeleton") == "chests/nether_bridge", "loot table per entity");
+    auto egg = spawnEggColors("minecraft:zombie");
+    ctx.check(egg && egg->first == 0x00AFAF && egg->second == 0x799C65, "zombie spawn egg colours");
 });
 
 ABP_REGISTER_SELFTEST("wearable.mob_spawns_with_backpack", [](Context& ctx) -> ll::coro::CoroTask<> {
     co_await groundPlayer(ctx);
     DifficultyGuard difficulty(ctx.player().getLevel());
-    ConfigGuard guard;
-    auto&       c = guard.cfg().mobs;
-    c.enabled     = true;
-    c.chance      = 1.0f;
-    c.difficultyMultiplier.clear();
-    c.equipArmor      = true;
-    c.buffWithEffects = true;
-    auto* zombie      = spawnMob(ctx, "minecraft:zombie", 3);
-    auto  chest       = zombie->getArmor(ArmorSlot::Torso);
+    SbGuard         guard;
+    guard.add().chance       = 1.0;
+    guard.add().playJukebox  = false;
+    // Vanilla may give a zombie a chestplate at spawn; SB then leaves it alone. Try a few.
+    Mob*      zombie = nullptr;
+    ItemStack chest;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        zombie = spawnMob(ctx, "minecraft:zombie", 3);
+        co_await ctx.ticks(2); // added one tick after the spawn (raid check)
+        chest = zombie->getArmor(ArmorSlot::Torso);
+        if (game::isBackpack(chest)) break;
+        ctx.info("attempt " + std::to_string(attempt) + ": chest slot " + (chest.isNull() ? std::string("empty") : chest.getTypeName()));
+        zombie->despawn();
+    }
     ctx.check(game::isBackpack(chest), "zombie wears a backpack");
     ctx.check(isMobWorn(chest), "marked as a mob backpack");
     ctx.check(!game::backpackUuid(chest).has_value(), "no storage yet (contents are created lazily)");
     auto loot = pendingLoot(chest);
-    ctx.check(loot && loot->table == "chests/simple_dungeon", "pending loot table from config");
-    ctx.check(!zombie->getArmor(ArmorSlot::Feet).isNull(), "matching armor equipped");
+    ctx.require(loot.has_value(), "pending data");
+    ctx.check(loot->mainColor == 0xFF00AFAFu && loot->accentColor == 0xFF799C65u, "spawn egg colours");
+    auto tier = game::backpackTierOf(chest).value_or(Tier::Leather);
+    if (core::minDifficultyOf(tier) > 0 || !loot->table.empty()) {
+        ctx.check(loot->table == "chests/simple_dungeon", "zombie loot table: " + loot->table);
+        ctx.check(loot->lootFactor > 0.0f && loot->lootFactor <= (core::minDifficultyOf(tier) + 2) / 3.0f + 0.01f, "loot factor");
+    }
     zombie->despawn();
 
     auto* cow = spawnMob(ctx, "minecraft:cow", -3);
+    co_await ctx.ticks(2);
     ctx.check(cow->getArmor(ArmorSlot::Torso).isNull(), "cows never get backpacks");
     cow->despawn();
 
-    c.chance     = 0.0f;
-    auto* plain  = spawnMob(ctx, "minecraft:zombie", 3);
+    guard.add().chance = 0.0;
+    auto* plain        = spawnMob(ctx, "minecraft:zombie", 3);
+    co_await ctx.ticks(2);
     ctx.check(!game::isBackpack(plain->getArmor(ArmorSlot::Torso)), "chance 0: no backpack");
     plain->despawn();
+});
+
+ABP_REGISTER_SELFTEST("wearable.mob_buffs", [](Context& ctx) -> ll::coro::CoroTask<> {
+    co_await groundPlayer(ctx);
+    DifficultyGuard difficulty(ctx.player().getLevel());
+    SbGuard         guard;
+    guard.add().chance = 0.0;
+    auto* zombie       = spawnMob(ctx, "minecraft:zombie", 3);
+    auto  base         = [&] { return zombie->getAttribute(SharedAttributes::HEALTH()).mPtr->mDefaultMaxValue; };
+    float before       = base();
+    ctx.require(equipMob(*zombie, Tier::Gold, false), "equip");
+    ctx.check(std::abs(base() - before * 3) < 0.01f, "gold (min difficulty 2): base max health * 3 = " + std::to_string(base()));
+    ctx.check(zombie->getMaxHealth() >= static_cast<int>(before * 3), "max health includes the bonus");
+    ctx.check(zombie->hasAnyEffects(), "potion buffs applied");
+    bool headOk = false;
+    auto const& helmet = zombie->getArmor(ArmorSlot::Head);
+    for (auto id : {"minecraft:diamond_helmet", "minecraft:golden_helmet"}) headOk = headOk || helmet.getTypeName() == id;
+    ctx.check(headOk, "gold tier helmet is diamond or golden: " + helmet.getTypeName());
+    zombie->despawn();
 });
 
 ABP_REGISTER_SELFTEST("wearable.mob_drops_to_players_only", [](Context& ctx) -> ll::coro::CoroTask<> {
     co_await groundPlayer(ctx);
     DifficultyGuard difficulty(ctx.player().getLevel());
-    ConfigGuard guard;
-    guard.cfg().mobs.chance                      = 0.0f;
-    guard.cfg().mobs.dropChanceNotKilledByPlayer = 0.0f;
+    SbGuard         guard;
+    guard.add().chance             = 0.0;
+    guard.add().backpackDropChance = 1.0; // (1 + looting) * tier multiplier >= 1: always
+    guard.add().dropToFakePlayers  = true; // the test player is a simulated player
     auto& player = ctx.player();
     auto& level  = player.getLevel();
 
     auto* zombie = spawnMob(ctx, "minecraft:zombie", 3);
-    ctx.require(equipMob(*zombie, Tier::Gold), "equip");
+    ctx.require(equipMob(*zombie, Tier::Gold, false), "equip");
     auto pos = zombie->getPosition();
     for (auto* old : backpackDropsNear(level, pos)) old->remove();
     zombie->die(ActorDamageByActorSource(player, SharedTypes::Legacy::ActorDamageCause::EntityAttack));
@@ -353,13 +399,43 @@ ABP_REGISTER_SELFTEST("wearable.mob_drops_to_players_only", [](Context& ctx) -> 
     }
     for (auto* d : drops) d->remove();
 
+    // dropToFakePlayers off (SB default): a simulated player's kill drops nothing.
+    guard.add().dropToFakePlayers = false;
+    auto* fake = spawnMob(ctx, "minecraft:zombie", -3);
+    ctx.require(equipMob(*fake, Tier::Iron, false), "equip");
+    auto posFake = fake->getPosition();
+    fake->die(ActorDamageByActorSource(player, SharedTypes::Legacy::ActorDamageCause::EntityAttack));
+    ctx.check(backpackDropsNear(level, posFake).empty(), "no drop to fake players");
+
     auto* other = spawnMob(ctx, "minecraft:zombie", -3);
-    ctx.require(equipMob(*other, Tier::Iron), "equip");
+    ctx.require(equipMob(*other, Tier::Iron, false), "equip");
     auto pos2 = other->getPosition();
     other->die(ActorDamageSource(SharedTypes::Legacy::ActorDamageCause::Fall, ""));
     ctx.check(other->getArmor(ArmorSlot::Torso).isNull(), "backpack removed from the dead mob");
     ctx.check(backpackDropsNear(level, pos2).empty(), "not killed by a player: no backpack drop");
     co_await ctx.ticks(1);
+});
+
+ABP_REGISTER_SELFTEST("wearable.mob_jukebox", [](Context& ctx) -> ll::coro::CoroTask<> {
+    co_await groundPlayer(ctx);
+    DifficultyGuard difficulty(ctx.player().getLevel());
+    SbGuard         guard;
+    guard.add().chance = 0.0;
+    auto* zombie       = spawnMob(ctx, "minecraft:zombie", 3);
+    ctx.require(equipMob(*zombie, Tier::Iron, true), "equip with a jukebox");
+    auto chest = zombie->getArmor(ArmorSlot::Torso);
+    auto uuid  = game::backpackUuid(chest);
+    ctx.require(uuid.has_value(), "jukebox mobs get their storage at spawn");
+    auto bp = game::Storage::get().find(*uuid);
+    ctx.require(bp != nullptr, "storage");
+    ctx.check(upgrade::hasActive(*bp, "jukebox"), "a jukebox upgrade is installed");
+    ctx.check(bp->data().mainColor == 0xFF00AFAFu, "colours applied to the storage");
+    co_await ctx.ticks(25);
+    ctx.check(upgrade::jukebox::Service::get().playing(*uuid, 0), "the mob plays its music disc");
+    zombie->die(ActorDamageSource(SharedTypes::Legacy::ActorDamageCause::Fall, ""));
+    co_await ctx.ticks(2);
+    ctx.check(!upgrade::jukebox::Service::get().playing(*uuid, 0), "music stops with the mob");
+    ctx.check(game::Storage::get().find(*uuid) == nullptr, "no drop: the storage is gone");
 });
 
 ABP_REGISTER_SELFTEST("wearable.lazy_loot", [](Context& ctx) {
@@ -369,8 +445,14 @@ ABP_REGISTER_SELFTEST("wearable.lazy_loot", [](Context& ctx) {
     auto                   probe = std::make_shared<ProbeUpgrade>();
     upgrade::ScopedUpgrade scoped(probe);
 
-    PendingLoot loot{.table = "chests/simple_dungeon", .rolls = 2, .dimension = 0, .seed = 4242, .upgrades = true};
-    auto        item = makeMobBackpack(Tier::Iron, loot);
+    PendingLoot loot;
+    loot.table       = "chests/simple_dungeon";
+    loot.lootFactor  = 2.0f;
+    loot.seed        = 4242;
+    loot.upgrades    = true;
+    loot.mainColor   = 0xFF112233u;
+    loot.accentColor = 0xFF445566u;
+    auto item = makeMobBackpack(Tier::Iron, loot);
     ctx.require(!item.isNull(), "mob backpack item");
     ctx.check(!game::backpackUuid(item), "no uuid before the first open");
     bool changed = false;
@@ -379,11 +461,14 @@ ABP_REGISTER_SELFTEST("wearable.lazy_loot", [](Context& ctx) {
     auto uuid = bp->uuid();
     ctx.check(game::backpackUuid(item) == uuid, "uuid written into the item");
     ctx.check(!pendingLoot(item) && !isMobWorn(item), "pending loot consumed");
+    ctx.check(bp->data().mainColor == 0xFF112233u && bp->data().accentColor == 0xFF445566u, "colours applied");
     auto stored = bp->inventory().count([](core::ItemStackData const& s) { return !s.empty(); });
     ctx.check(stored > 0, "loot generated into the backpack (" + std::to_string(stored) + " items)");
+    bool noBackpacks = bp->inventory().count([](core::ItemStackData const& s) { return game::isBackpack(s); }) == 0;
+    ctx.check(noBackpacks, "backpacks are removed from generated loot (SB)");
     int installed = 0;
     for (auto const& u : bp->data().upgrades) installed += u.empty() ? 0 : 1;
-    ctx.check(installed > 0, "random upgrades installed");
+    ctx.check(installed > 0, "random upgrades installed (extra, on)");
     auto again = game::Storage::get().forItem(item, &changed);
     ctx.check(again == bp && !changed, "second open reuses the backpack");
     ctx.check(bp->inventory().count([](core::ItemStackData const& s) { return !s.empty(); }) == stored, "no refill");
@@ -392,26 +477,65 @@ ABP_REGISTER_SELFTEST("wearable.lazy_loot", [](Context& ctx) {
 
 // ---- loot chests -------------------------------------------------------------------------------
 
+ABP_REGISTER_SELFTEST("wearable.chest_loot_tables", [](Context& ctx) {
+    auto const* dungeon = injectTableFor("chests/simple_dungeon");
+    ctx.require(dungeon != nullptr, "simple_dungeon has an inject table");
+    ctx.check(dungeon->emptyWeight == 90 && dungeon->entries.size() == 3, "simple_dungeon: 3 entries, empty 90");
+    auto const* mineshaft = injectTableFor("chests/abandoned_mineshaft");
+    ctx.check(mineshaft && mineshaft->emptyWeight == 84 && mineshaft->entries.size() == 5, "abandoned_mineshaft");
+    ctx.check(injectTableFor("chests/shipwrecktreasure") && injectTableFor("chests/end_city_treasure"), "Bedrock table names");
+    ctx.check(injectTableFor("chests/village/village_weaponsmith") == nullptr, "only SB's tables");
+    ctx.check(normalizeTableName("loot_tables/chests/simple_dungeon.json") == "chests/simple_dungeon", "normalize");
+});
+
 ABP_REGISTER_SELFTEST("wearable.chest_loot", [](Context& ctx) -> ll::coro::CoroTask<> {
     co_await groundPlayer(ctx);
-    ConfigGuard guard;
-    guard.cfg().chestLoot.enabled = true;
-    guard.cfg().chestLoot.tables["chests/simple_dungeon"] =
-        WearableConfig::ChestLootEntry{1.0f, {{"alleviatedbackpacks:iron_backpack", 1}}};
-    ctx.check(normalizeTableName("loot_tables/chests/simple_dungeon.json") == "chests/simple_dungeon", "normalize");
+    auto& common = config::mut<admin::SbCommonConfig>();
+    struct Restore {
+        admin::SbCommonConfig& c;
+        bool                   saved;
+        ~Restore() { c.chestLootEnabled = saved; }
+    } restore{common, common.chestLootEnabled};
+    common.chestLootEnabled = true;
 
+    // spawn_bonus_chest: leather backpack 100, empty 0 -> always one.
+    auto box = std::make_unique<CraftingContainer>(9, 3);
+    for (int i = 0; i < 20; ++i) {
+        box->removeAllItems();
+        ctx.require(injectChestLoot("loot_tables/chests/spawn_bonus_chest.json", *box) == "alleviatedbackpacks:leather_backpack", "bonus chest backpack");
+    }
+    // simple_dungeon: one roll, 10% of rolls give something.
+    int hits = 0;
+    for (int i = 0; i < 2000; ++i) {
+        box->removeAllItems();
+        auto id = injectChestLoot("loot_tables/chests/simple_dungeon.json", *box);
+        if (id.empty()) continue;
+        ++hits;
+        ctx.require(
+            id == "alleviatedbackpacks:leather_backpack" || id == "alleviatedbackpacks:copper_backpack" || id == "alleviatedbackpacks:pickup_upgrade",
+            "simple_dungeon only gives its entries: " + id
+        );
+    }
+    ctx.check(hits > 120 && hits < 300, "about 10% of simple_dungeon rolls inject something: " + std::to_string(hits));
+    common.chestLootEnabled = false;
+    box->removeAllItems();
+    ctx.check(injectChestLoot("loot_tables/chests/spawn_bonus_chest.json", *box).empty(), "chestLootEnabled off");
+    common.chestLootEnabled = true;
+
+    // Vanilla fill + injection, as a loot chest is unpacked (a double-chest sized container, so the
+    // bonus chest loot leaves room for the injected backpack).
     auto& player = ctx.player();
     auto& level  = player.getLevel();
-    auto  box    = std::make_unique<CraftingContainer>(9, 3);
     Random random(42, false);
-    Util::LootTableUtils::fillContainer(level, *box, random, "loot_tables/chests/simple_dungeon.json", DimensionType(0), nullptr);
+    box = std::make_unique<CraftingContainer>(9, 6);
+    Util::LootTableUtils::fillContainer(level, *box, random, "loot_tables/chests/spawn_bonus_chest.json", DimensionType(0), nullptr);
     ctx.check(countItems(*box) > 1, "vanilla loot generated");
-    ctx.check(countId(*box, "alleviatedbackpacks:iron_backpack") == 1, "backpack injected into a filled container");
+    ctx.check(countId(*box, "alleviatedbackpacks:leather_backpack") == 1, "backpack injected into a filled container");
     box->removeAllItems();
     {
         SuppressInjection none;
-        Util::LootTableUtils::fillContainer(level, *box, random, "loot_tables/chests/simple_dungeon.json", DimensionType(0), nullptr);
-        ctx.check(countId(*box, "alleviatedbackpacks:iron_backpack") == 0, "no injection while suppressed");
+        Util::LootTableUtils::fillContainer(level, *box, random, "loot_tables/chests/spawn_bonus_chest.json", DimensionType(0), nullptr);
+        ctx.check(countId(*box, "alleviatedbackpacks:leather_backpack") == 0, "no injection while suppressed");
     }
     box->removeAllItems();
 
@@ -429,16 +553,21 @@ ABP_REGISTER_SELFTEST("wearable.chest_loot", [](Context& ctx) -> ll::coro::CoroT
         "chest block actor (placed=" + std::to_string(placed) + " block=" + region.getBlock(pos).getTypeName()
             + " actor=" + std::to_string(actor != nullptr) + ")"
     );
-    auto* chest = static_cast<ChestBlockActor*>(actor);
-    chest->setLootTable("loot_tables/chests/simple_dungeon.json", 99);
+    auto*      chest     = static_cast<ChestBlockActor*>(actor);
     Container& container = *chest;
-    chest->unPackLootTable(level, container, DimensionType(0), nullptr);
-    int backpacks = countId(container, "alleviatedbackpacks:iron_backpack");
-    int items     = countItems(container);
-    container.removeAllItems();
+    int        tries = 0, injected = 0, items = 0;
+    for (; tries < 80 && injected == 0; ++tries) {
+        chest->setLootTable("loot_tables/chests/simple_dungeon.json", 99 + tries);
+        chest->unPackLootTable(level, container, DimensionType(0), nullptr);
+        injected = countId(container, "alleviatedbackpacks:leather_backpack") + countId(container, "alleviatedbackpacks:copper_backpack")
+                 + countId(container, "alleviatedbackpacks:pickup_upgrade");
+        items = countItems(container);
+        ctx.check(injected <= 1, "at most one injected item per chest");
+        container.removeAllItems();
+    }
     region.setBlock(pos, *air, 3, nullptr, BlockChangeContext{});
     ctx.check(items > 1, "chest got vanilla loot");
-    ctx.check(backpacks == 1, "chest got exactly one backpack (" + std::to_string(backpacks) + ")");
+    ctx.check(injected == 1, "a real dungeon chest got SB's loot after " + std::to_string(tries) + " chests");
 });
 
 } // namespace

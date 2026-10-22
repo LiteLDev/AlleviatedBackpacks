@@ -1,0 +1,23 @@
+{
+  "abp.linked.tooltip.blank": "右键点击兼容的存储容器，或与之合成",
+  "abp.linked.tooltip.bound": "右键点击兼容的存储容器，或与之合成，将其添加至链接的容器分组",
+  "abp.linked.tooltip.linker_target": "链接至：{}",
+  "abp.linked.tooltip.linker_pending": "合成时链接",
+  "abp.linked.tooltip.primary": "主链接",
+  "abp.linked.tooltip.secondary": "已链接",
+  "abp.linked.tooltip.primary_named": "{}（{}）",
+  "abp.linked.tooltip.secondary_named": "{}（{}）",
+  "abp.linked.tooltip.group": "链接的容器分组：{}",
+  "abp.linked.tooltip.endpoint": "链接的容器端点：{}",
+
+  "abp.linked.status.already_linked": "容器已被链接",
+  "abp.linked.status.unsupported_endpoint": "容器无法被链接",
+  "abp.linked.status.incompatible_endpoint": "容器不兼容当前链接的容器分组",
+  "abp.linked.status.endpoint_has_contents": "容器存在内容物",
+
+  "abp.access.cannot_open": "该背包无法被其他玩家打开",
+  "abp.access.setting.on": "其他玩家可以打开",
+  "abp.access.setting.on.tooltip": "当该背包被穿戴且设置为可见时，其他玩家可以对该玩家后背右击打开它",
+  "abp.access.setting.off": "其他玩家不可打开",
+  "abp.access.setting.off.tooltip": "即使该背包已被穿戴，其他玩家也无法通过对该玩家后背右击打开它"
+}

@@ -137,6 +137,15 @@ SlotCache& slotCache(game::Backpack& bp) {
 
 void invalidate(game::Backpack& bp) { bp.transient<SlotCache>(kCacheKey).valid = false; }
 
+constexpr char const* kIgnoreNbtKey = "memoryIgnoreNbt";
+
+/// A memory entry: SC remembers the Item only (ignore NBT) or the whole stack (match NBT).
+core::ItemStackData memoryEntry(core::ItemStackData const& item, bool ignoreNbt) {
+    if (item.empty()) return {};
+    if (!ignoreNbt) return item.withCount(1);
+    return core::ItemStackData::of(item.id, 1, item.maxStack, item.aux);
+}
+
 void writeMemory(game::Backpack& bp, std::vector<core::ItemStackData> const& mem) {
     nlohmann::json j = nlohmann::json::object();
     for (std::size_t i = 0; i < mem.size(); ++i) {
@@ -184,6 +193,7 @@ Options apply(Options o, nlohmann::json const& j) {
     auto flag = [&](char const* key, bool& out) {
         if (auto it = j.find(key); it != j.end() && it->is_boolean()) out = it->get<bool>();
     };
+    flag("openTabFirst", o.openTabFirst); // phase-1 name of the option, read as a fallback
     flag(kOpenTabFirst, o.openTabFirst);
     flag(kNotifications, o.notifications);
     flag(kKeepHotbar, o.keepHotbar);
@@ -213,7 +223,7 @@ void setPlayerOptions(Player& player, nlohmann::json const& patch) {
 nlohmann::json backpackOverrides(game::Backpack const& backpack) {
     nlohmann::json out = nlohmann::json::object();
     if (auto const* g = sectionOf(backpack)) {
-        for (auto const* key : {kSortBy, kOpenTabFirst, kNotifications, kKeepHotbar}) {
+        for (auto const* key : {kSortBy, "openTabFirst", kOpenTabFirst, kNotifications, kKeepHotbar}) {
             if (auto it = g->find(key); it != g->end()) out[key] = *it;
         }
     }
@@ -253,18 +263,66 @@ std::vector<core::ItemStackData> const& memory(game::Backpack& backpack) { retur
 void setMemory(game::Backpack& backpack, int slot, core::ItemStackData const& item) {
     auto mem = slotCache(backpack).memory;
     if (slot < 0 || slot >= static_cast<int>(mem.size())) return;
-    mem[static_cast<std::size_t>(slot)] = item.empty() ? core::ItemStackData{} : item.withCount(1);
+    mem[static_cast<std::size_t>(slot)] = item.empty() ? core::ItemStackData{} : memoryEntry(item, memoryIgnoresNbt(backpack));
     writeMemory(backpack, mem);
 }
 
 void memorizeAll(game::Backpack& backpack) {
-    auto  mem = slotCache(backpack).memory;
-    auto& inv = backpack.inventory();
+    // SC MemorySettingsCategory.selectSlots(0, slots): every slot with an item remembers it.
+    auto  mem    = slotCache(backpack).memory;
+    auto& inv    = backpack.inventory();
+    bool  ignore = memoryIgnoresNbt(backpack);
     for (int i = 0; i < inv.size() && i < static_cast<int>(mem.size()); ++i) {
-        if (mem[static_cast<std::size_t>(i)].empty() && !inv.at(i).empty()) mem[static_cast<std::size_t>(i)] = inv.at(i).withCount(1);
+        if (!inv.at(i).empty()) mem[static_cast<std::size_t>(i)] = memoryEntry(inv.at(i), ignore);
     }
     writeMemory(backpack, mem);
 }
+
+bool memoryIgnoresNbt(game::Backpack const& backpack) {
+    if (auto const* g = sectionOf(backpack)) {
+        if (auto it = g->find(kIgnoreNbtKey); it != g->end() && it->is_boolean()) return it->get<bool>();
+    }
+    // Older data (G2 companion section): "memoryMatchNbt".
+    auto const& s = backpack.data().settings;
+    if (s.is_object()) {
+        if (auto c = s.find("companion"); c != s.end() && c->is_object()) {
+            if (auto it = c->find("memoryMatchNbt"); it != c->end() && it->is_boolean()) return !it->get<bool>();
+        }
+    }
+    return true;
+}
+
+void setMemoryIgnoreNbt(game::Backpack& backpack, bool ignore) {
+    if (memoryIgnoresNbt(backpack) == ignore) return;
+    // SC setIgnoreNbt: Ignore -> Match takes the stack in the slot (or the plain item); Match ->
+    // Ignore keeps the item only. Then every selected slot is selected again.
+    auto  mem = slotCache(backpack).memory;
+    auto& inv = backpack.inventory();
+    for (int i = 0; i < static_cast<int>(mem.size()); ++i) {
+        auto& m = mem[static_cast<std::size_t>(i)];
+        if (m.empty()) continue;
+        auto const& cur = i < inv.size() ? inv.at(i) : core::ItemStackData{};
+        m               = memoryEntry(cur.empty() ? m : cur, ignore); // selectSlot again: the slot's stack wins
+    }
+    auto& g = section(backpack);
+    g[kIgnoreNbtKey] = ignore;
+    writeMemory(backpack, mem);
+}
+
+bool memoryAccepts(bool ignoreNbt, core::ItemStackData const& remembered, core::ItemStackData const& item) {
+    if (remembered.empty() || item.empty()) return false;
+    return ignoreNbt ? core::memoryMatches(remembered, item) : remembered.sameItem(item);
+}
+
+namespace detail {
+nlohmann::json&       guiSection(game::Backpack& backpack) { return section(backpack); }
+nlohmann::json const* guiSectionOf(game::Backpack const& backpack) { return sectionOf(backpack); }
+void                  slotSettingsChanged(game::Backpack& backpack, bool rebuildHooks) {
+    backpack.markDirty();
+    invalidate(backpack);
+    if (rebuildHooks) backpack.rebuildHooks();
+}
+} // namespace detail
 
 void clearMemory(game::Backpack& backpack) { writeMemory(backpack, {}); }
 
@@ -304,17 +362,18 @@ ABP_REGISTER_BACKPACK_HOOKS([](abp::game::Backpack& bp) {
     using namespace abp;
     auto const& mem = feature::gui::memory(bp);
     if (std::none_of(mem.begin(), mem.end(), [](core::ItemStackData const& m) { return !m.empty(); })) return;
-    auto& inv = bp.inventory();
-    inv.addInsertFilter("gui:memory", 100, [mem](core::InsertQuery const& q) {
+    auto& inv    = bp.inventory();
+    bool  ignore = feature::gui::memoryIgnoresNbt(bp);
+    inv.addInsertFilter("gui:memory", 100, [mem, ignore](core::InsertQuery const& q) {
         if (q.slot < 0 || q.ctx.source == core::Source::Internal) return core::InsertVerdict::Allow;
         if (q.slot >= static_cast<int>(mem.size())) return core::InsertVerdict::Allow;
         auto const& m = mem[static_cast<std::size_t>(q.slot)];
-        return (m.empty() || core::memoryMatches(m, q.stack)) ? core::InsertVerdict::Allow : core::InsertVerdict::Deny;
+        return (m.empty() || feature::gui::memoryAccepts(ignore, m, q.stack)) ? core::InsertVerdict::Allow : core::InsertVerdict::Deny;
     });
-    inv.addSlotPreference("gui:memory", 0, [mem](core::ItemStackData const& stack) {
+    inv.addSlotPreference("gui:memory", 0, [mem, ignore](core::ItemStackData const& stack) {
         std::vector<int> out;
         for (std::size_t i = 0; i < mem.size(); ++i) {
-            if (core::memoryMatches(mem[i], stack)) out.push_back(static_cast<int>(i));
+            if (feature::gui::memoryAccepts(ignore, mem[i], stack)) out.push_back(static_cast<int>(i));
         }
         return out;
     });

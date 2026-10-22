@@ -8,13 +8,16 @@
       "crafting_table"
     ],
     "pattern": [
-      "DGD",
-      "RPR",
-      "DGD"
+      "DID",
+      "GPG",
+      "RRR"
     ],
     "key": {
       "D": {
         "item": "minecraft:diamond"
+      },
+      "I": {
+        "item": "minecraft:dispenser"
       },
       "G": {
         "item": "minecraft:gold_ingot"

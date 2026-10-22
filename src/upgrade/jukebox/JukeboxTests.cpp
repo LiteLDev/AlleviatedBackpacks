@@ -19,6 +19,9 @@
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "feature/placed/TestSite.h"
+#include "net/Companion.h"
+#include "net/NativeScreens.h"
 #include "upgrade/jukebox/Jukebox.h"
 
 namespace abp::upgrade::jukebox {
@@ -106,21 +109,28 @@ ABP_REGISTER_SELFTEST("jukebox.items", [](Context& ctx) {
         auto* u = byId(id);
         ctx.require(u != nullptr, std::string(id) + " registered");
         ctx.check(!game::ItemConv::make(u->info().itemId).isNull(), u->info().itemId + " exists in the behavior pack");
-        ctx.check(u->info().hasSettings, std::string(id) + " has a menu");
+        ctx.check(u->info().hasSettings, std::string(id) + " has a tab");
     }
     auto bp = ctx.createBackpack(Tier::Gold);
     ctx.installUpgrade(bp, std::string(kBasicId));
     ctx.check(
         !upgrade::canInstall(bp, 1, item("alleviatedbackpacks:advanced_jukebox_upgrade"), nullptr),
-        "only one jukebox per backpack"
+        "only one jukebox per backpack (group jukebox_upgrades)"
     );
     UpgradeContext uc(bp, 0);
     ctx.check(discSlots(uc) == kBasicSlots, "basic: 1 disc slot");
-    ctx.check(repeatMode(uc) == core::RepeatMode::None && !shuffle(uc), "basic plays once, no shuffle");
+    ctx.check(repeatMode(uc) == core::RepeatMode::None && !shuffle(uc), "SC defaults: no repeat, no shuffle");
     auto adv = ctx.createBackpack(Tier::Gold);
     ctx.installUpgrade(adv, std::string(kAdvancedId));
-    ctx.check(discSlots(UpgradeContext(adv, 0)) == kAdvancedSlots, "advanced: 12 disc slots");
-    ctx.check(repeatMode(UpgradeContext(adv, 0)) == core::RepeatMode::All, "advanced repeats all by default");
+    ctx.check(discSlots(UpgradeContext(adv, 0)) == 12, "advanced: 12 disc slots by default");
+    ctx.check(slotsInRow(UpgradeContext(adv, 0)) == 4, "advanced: 4 per row");
+    ctx.check(repeatMode(UpgradeContext(adv, 0)) == core::RepeatMode::None, "advanced: Repeat Disabled by default");
+    struct SlotsGuard {
+        int saved = config::get<JukeboxConfig>().advancedSlots;
+        ~SlotsGuard() { config::mut<JukeboxConfig>().advancedSlots = saved; }
+    } guard;
+    config::mut<JukeboxConfig>().advancedSlots = 99;
+    ctx.check(discSlots(UpgradeContext(adv, 0)) == 16, "configurable up to 16");
 });
 
 ABP_REGISTER_SELFTEST("jukebox.disc_info", [](Context& ctx) {
@@ -135,20 +145,20 @@ ABP_REGISTER_SELFTEST("jukebox.disc_info", [](Context& ctx) {
         auto info = discInfo(stack);
         ctx.require(info.has_value(), id + " is a disc");
         ctx.check(info->soundEvent == "record." + id.substr(std::string("minecraft:music_disc_").size()), id + " sound " + info->soundEvent);
-        ctx.check(!info->key.empty(), id + " has our 2D sound");
+        ctx.check(!info->key.empty(), id + " has our positional copy");
         ctx.check(info->durationTicks >= 60 * 20 && info->durationTicks <= 400 * 20, id + " duration " + std::to_string(info->durationTicks));
     }
     ctx.check(found >= 20, "vanilla discs found: " + std::to_string(found));
     auto cat = discInfo(game::ItemConv::make(kCat));
     ctx.require(cat.has_value(), "cat");
     ctx.check(std::abs(cat->durationTicks - 185 * 20) <= 3 * 20, "cat lasts ~3:05 (" + formatTime(cat->durationTicks) + ")");
-    ctx.check(followSoundName(*cat) == "abp.jukebox.cat" && blockSoundName(*cat) == "abp.jukebox3d.cat", "sound names");
+    ctx.check(soundName(*cat) == "abp.jukebox3d.cat", "sound name");
     ctx.check(!discInfo(game::ItemConv::make("minecraft:stone")), "stone is no disc");
     ctx.check(!discInfo(core::ItemStackData{}), "empty is no disc");
     ctx.check(formatTime(185 * 20) == "3:05", "formatTime");
 });
 
-// ---- menu ------------------------------------------------------------------------------------------
+// ---- menu (the server side of the native tab's disc slots) -------------------------------------------
 
 ABP_REGISTER_SELFTEST("jukebox.menu_discs", [](Context& ctx) {
     auto& mm     = ui::MenuManager::get();
@@ -165,7 +175,8 @@ ABP_REGISTER_SELFTEST("jukebox.menu_discs", [](Context& ctx) {
     ctx.check(player.getInventory().getItem(3).isNull(), "disc left the inventory");
     (void)mm.simulate(player, {Action::Place, {Where::Inventory, 5}, {Where::Menu, 11}, 5});
     ctx.check(player.getInventory().getItem(5).mCount == 5, "non-discs are refused");
-    ctx.check(occupiedDiscs(s.ctx()) == std::vector<bool>{true, false, false, false, false, false, false, false, false, false, false, false}, "one disc");
+    auto occ = occupiedDiscs(s.ctx());
+    ctx.check(std::count(occ.begin(), occ.end(), true) == 1 && occ[0], "one disc");
 
     ctx.check(mm.simulate(player, {Action::Take, {Where::Inventory, 4}, {Where::Cursor, 0}, 1}), "blocks to cursor");
     ctx.check(!mm.simulate(player, {Action::Place, {Where::Cursor, 0}, {Where::Menu, 10}, 1}), "occupied disc slot refuses");
@@ -184,28 +195,37 @@ ABP_REGISTER_SELFTEST("jukebox.menu_discs", [](Context& ctx) {
     ctx.check(cats == 1, "cat returned to the inventory (" + std::to_string(cats) + ")");
 });
 
-ABP_REGISTER_SELFTEST("jukebox.buttons", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto& player = ctx.player();
-    auto  s      = carriedJukebox(ctx, kAdvancedId, {kCat});
-    ctx.require(openMenu(ctx, player, s), "open");
-    press(player, 52);
-    ctx.check(shuffle(s.ctx()), "shuffle on");
-    press(player, 52);
-    ctx.check(!shuffle(s.ctx()), "shuffle off");
-    press(player, 53);
-    ctx.check(repeatMode(s.ctx()) == core::RepeatMode::One, "repeat one");
-    press(player, 53);
-    ctx.check(repeatMode(s.ctx()) == core::RepeatMode::None, "repeat none");
-    press(player, 53);
-    ctx.check(repeatMode(s.ctx()) == core::RepeatMode::All, "repeat all");
-    press(player, 45);
-    bool back = false;
-    for (int i = 0; i < 40 && !back; ++i) {
-        co_await ctx.ticks(1);
-        back = std::dynamic_pointer_cast<ui::BackpackMenu>(ui::MenuManager::get().current(player)) != nullptr;
-    }
-    ctx.check(back, "back reopens the backpack");
-    ui::MenuManager::get().close(player);
+// The native tab's buttons (TabAction "jukebox": play / stop / next / previous / shuffle / repeat).
+ABP_REGISTER_SELFTEST("jukebox.tab_actions", [](Context& ctx) {
+    Recorder rec(2000);
+    auto&    svc    = Service::get();
+    auto&    player = ctx.player();
+    auto     s      = carriedJukebox(ctx, kAdvancedId, {kCat, kBlocks});
+    auto     act    = [&](std::string const& op) {
+        for (auto const& h : net::TabActionRegistry::entries()) {
+            if (h.upgrade == "jukebox") return h.handle(player, s.ctx(), nlohmann::json{{"jukebox", op}});
+        }
+        return false;
+    };
+    ctx.check(act("shuffle") && shuffle(s.ctx()), "Shuffle Enabled");
+    ctx.check(act("shuffle") && !shuffle(s.ctx()), "Shuffle Disabled");
+    ctx.check(act("repeat") && repeatMode(s.ctx()) == core::RepeatMode::All, "Repeat Disabled -> Repeat All");
+    ctx.check(act("repeat") && repeatMode(s.ctx()) == core::RepeatMode::One, "-> Repeat One");
+    ctx.check(act("repeat") && repeatMode(s.ctx()) == core::RepeatMode::None, "-> Repeat Disabled");
+    ctx.check(act("next") && !svc.playing(s.bp->uuid(), s.slot), "Next does nothing while stopped");
+    ctx.check(act("play") && svc.playing(s.bp->uuid(), s.slot), "Play");
+    ctx.check(svc.status(s.bp->uuid(), s.slot)->index == 0, "first disc");
+    ctx.check(act("next") && svc.status(s.bp->uuid(), s.slot)->index == 1, "Next");
+    ctx.check(act("previous") && svc.status(s.bp->uuid(), s.slot)->index == 0, "Previous");
+    ctx.check(act("stop") && !svc.playing(s.bp->uuid(), s.slot), "Stop");
+    // Tab data the native tab draws from.
+    nlohmann::json data;
+    for (auto const& p : net::TabDataRegistry::entries())
+        if (p.upgrade == "jukebox") data = p.data(player, s.ctx());
+    auto const& j = data["jukebox"];
+    ctx.check(j.value("advanced", false) && j.value("slotsInRow", 0) == 4, "tab data: advanced, 4 per row");
+    ctx.check(j["discs"].size() == 12 && j["discMenu"].size() == 12, "tab data: 12 disc slots");
+    ctx.check(j.value("tabLabel", std::string{}) == "Jukebox", "tab title");
 });
 
 // ---- playback --------------------------------------------------------------------------------------
@@ -216,23 +236,23 @@ ABP_REGISTER_SELFTEST("jukebox.play_stop", [](Context& ctx) -> ll::coro::CoroTas
     auto&    player = ctx.player();
     auto     s      = carriedJukebox(ctx, kBasicId, {kCat});
     ctx.require(openMenu(ctx, player, s), "open");
-    press(player, 48);
+    press(player, 49);
     ctx.require(svc.playing(s.bp->uuid(), s.slot), "playing after Play");
     auto const* play = rec.last(SoundEvent::Kind::Play, idOf(player));
-    ctx.require(play != nullptr, "the carrier got a PlaySound");
-    ctx.check(play->sound == "abp.jukebox.cat", "2D record sound: " + play->sound);
-    ctx.check(!play->positional && play->volume == 1.0f, "carrier hears it at full volume, in their ears");
+    ctx.require(play != nullptr, "the carrier got the sound");
+    ctx.check(play->sound == "abp.jukebox3d.cat", "record sound: " + play->sound);
+    ctx.check(play->entity == idOf(player), "attached to the carrier");
+    ctx.check(svc.emitterEntity(s.bp->uuid(), s.slot) == idOf(player), "emitter: the carrier");
     co_await ctx.ticks(25);
     auto st = svc.status(s.bp->uuid(), s.slot);
     ctx.require(st.has_value(), "still playing");
     ctx.check(st->elapsedTicks >= 20, "time advances");
     ctx.check(rec.count(SoundEvent::Kind::Play, idOf(player)) == 1, "no re-sends while playing");
-    // (The simulated player may have fallen away from the fake chest meanwhile: reopen the menu.)
+    ctx.check(svc.play(s.ctx(), &player) && rec.count(SoundEvent::Kind::Play, idOf(player)) == 1, "Play while playing does nothing");
     ctx.require(openMenu(ctx, player, s), "reopen");
-    press(player, 49);
+    press(player, 48);
     ctx.check(!svc.playing(s.bp->uuid(), s.slot), "stopped after Stop");
-    auto const* stop = rec.last(SoundEvent::Kind::Stop, idOf(player));
-    ctx.check(stop && stop->sound == "abp.jukebox.cat", "StopSound sent");
+    ctx.check(rec.last(SoundEvent::Kind::Stop, idOf(player)) != nullptr, "stop sent");
     ui::MenuManager::get().close(player);
 });
 
@@ -257,6 +277,7 @@ ABP_REGISTER_SELFTEST("jukebox.playlist", [](Context& ctx) -> ll::coro::CoroTask
         auto st = svc.status(uuid, s.slot);
         return st ? st->index : -1;
     };
+    setRepeatMode(s.ctx(), core::RepeatMode::All);
     ctx.require(svc.play(s.ctx(), &player), "play");
     ctx.check(index() == 0, "starts with the first disc");
     co_await ctx.ticks(25);
@@ -264,60 +285,34 @@ ABP_REGISTER_SELFTEST("jukebox.playlist", [](Context& ctx) -> ll::coro::CoroTask
     co_await ctx.ticks(20);
     ctx.check(index() == 3, "skips the empty slot (" + std::to_string(index()) + ")");
     auto const* play = rec.last(SoundEvent::Kind::Play, idOf(player));
-    ctx.check(play && play->sound == "abp.jukebox.far", "far is playing");
+    ctx.check(play && play->sound == "abp.jukebox3d.far", "far is playing");
     ctx.check(rec.last(SoundEvent::Kind::Stop, idOf(player)) != nullptr, "previous track stopped");
     co_await ctx.ticks(20);
-    ctx.check(index() == 0, "repeat all wraps (" + std::to_string(index()) + ")");
+    ctx.check(index() == 0, "repeat all starts over (" + std::to_string(index()) + ")");
 
     ctx.check(svc.next(s.ctx()) && index() == 1, "next");
-    ctx.check(svc.previous(s.ctx()) && index() == 0, "previous");
-    ctx.check(svc.previous(s.ctx()) && index() == 3, "previous wraps");
+    ctx.check(svc.previous(s.ctx()) && index() == 0, "previous plays the history");
 
     setRepeatMode(s.ctx(), core::RepeatMode::One);
     co_await ctx.ticks(25);
-    ctx.check(index() == 3, "repeat one keeps the disc");
+    ctx.check(index() == 0, "repeat one keeps the disc");
 
     setRepeatMode(s.ctx(), core::RepeatMode::None);
-    co_await ctx.ticks(20);
-    ctx.check(!svc.playing(uuid, s.slot), "repeat off stops after the last disc");
+    co_await ctx.ticks(60);
+    ctx.check(!svc.playing(uuid, s.slot), "repeat disabled stops at the end of the playlist");
 
-    // The playing disc taken out: the next one plays.
-    setRepeatMode(s.ctx(), core::RepeatMode::All);
+    // SC: taking out (or swapping) the playing disc stops the playback.
     svc.setDurationOverride(2000);
     ctx.require(svc.play(s.ctx(), &player, 1), "play from disc 2");
     ctx.check(index() == 1, "started at disc 2");
     setDisc(s.ctx(), 1, {});
-    co_await ctx.ticks(12);
-    ctx.check(index() == 3, "removing the playing disc moves on (" + std::to_string(index()) + ")");
-    // Swapping the playing disc for another plays the new one.
-    setDisc(s.ctx(), 3, item(kBlocks));
-    co_await ctx.ticks(12);
-    auto const* swapped = rec.last(SoundEvent::Kind::Play, idOf(player));
-    ctx.check(index() == 3 && swapped && swapped->sound == "abp.jukebox.blocks", "swapped disc plays");
-    // Repeat off: taking out the last disc of the pass stops.
-    setRepeatMode(s.ctx(), core::RepeatMode::None);
+    ctx.check(!svc.playing(uuid, s.slot), "removing the playing disc stops");
+    ctx.require(svc.play(s.ctx(), &player, 3), "play from disc 4");
+    setDisc(s.ctx(), 0, {});
+    ctx.check(svc.playing(uuid, s.slot), "another disc slot changing keeps playing");
     setDisc(s.ctx(), 3, {});
-    co_await ctx.ticks(12);
-    ctx.check(!svc.playing(uuid, s.slot), "repeat off: removing the last disc stops");
-});
-
-ABP_REGISTER_SELFTEST("jukebox.same_disc_two_backpacks", [](Context& ctx) -> ll::coro::CoroTask<> {
-    // StopSound works by sound name: stopping one backpack must not leave a listener of another
-    // backpack playing the same disc in silence.
-    Recorder rec;
-    auto&    svc    = Service::get();
-    auto&    player = ctx.player();
-    auto     a      = carriedJukebox(ctx, kBasicId, {kCat}, 0);
-    auto     b      = carriedJukebox(ctx, kBasicId, {kCat}, 1);
-    ctx.require(svc.play(a.ctx(), &player) && svc.play(b.ctx(), &player), "play both");
-    ctx.check(rec.count(SoundEvent::Kind::Play, idOf(player)) == 2, "two sounds");
-    co_await ctx.ticks(20);
-    svc.stop(a.bp->uuid(), a.slot);
-    co_await ctx.ticks(12);
-    ctx.check(rec.count(SoundEvent::Kind::Play, idOf(player)) == 3, "the other backpack's sound is sent again");
-    auto const* again = rec.last(SoundEvent::Kind::Play, idOf(player));
-    ctx.check(again && again->offset > 0.25f, "resumed at its position");
-    svc.stop(b.bp->uuid(), b.slot);
+    setDisc(s.ctx(), 3, item(kBlocks));
+    ctx.check(!svc.playing(uuid, s.slot), "swapping the playing disc stops");
 });
 
 ABP_REGISTER_SELFTEST("jukebox.shuffle", [](Context& ctx) -> ll::coro::CoroTask<> {
@@ -325,22 +320,21 @@ ABP_REGISTER_SELFTEST("jukebox.shuffle", [](Context& ctx) -> ll::coro::CoroTask<
     auto&    svc    = Service::get();
     auto&    player = ctx.player();
     std::vector<std::string_view> discs;
-    for (int i = 0; i < kAdvancedSlots; ++i) discs.push_back(vanillaDiscIds()[static_cast<std::size_t>(i)]);
+    for (int i = 0; i < 12; ++i) discs.push_back(vanillaDiscIds()[static_cast<std::size_t>(i)]);
     auto s = carriedJukebox(ctx, kAdvancedId, discs);
     setShuffle(s.ctx(), true);
     ctx.require(svc.play(s.ctx(), &player), "play");
     std::vector<int> seen{svc.status(s.bp->uuid(), s.slot)->index};
-    // 12 tracks of 10 ticks: sample every tick for one full pass.
-    for (int i = 0; i < 115; ++i) {
+    // 12 tracks of 10 ticks (repeat disabled: one pass, then it stops).
+    for (int i = 0; i < 125 && svc.playing(s.bp->uuid(), s.slot); ++i) {
         co_await ctx.ticks(1);
         auto st = svc.status(s.bp->uuid(), s.slot);
-        ctx.require(st.has_value(), "still playing");
-        if (seen.back() != st->index) seen.push_back(st->index);
+        if (st && seen.back() != st->index) seen.push_back(st->index);
     }
     auto sorted = seen;
     std::sort(sorted.begin(), sorted.end());
     ctx.check(std::unique(sorted.begin(), sorted.end()) == sorted.end(), "no disc twice in one pass");
-    ctx.check(seen.size() >= 10, "went through the discs (" + std::to_string(seen.size()) + ")");
+    ctx.check(seen.size() == 12, "went through all discs (" + std::to_string(seen.size()) + ")");
     ctx.check(!std::is_sorted(seen.begin(), seen.end()), "order is shuffled");
     svc.stop(s.bp->uuid(), s.slot);
 });
@@ -354,9 +348,9 @@ ABP_REGISTER_SELFTEST("jukebox.stops_when_dropped", [](Context& ctx) -> ll::coro
     auto     s      = carriedJukebox(ctx, kBasicId, {kCat}, sel.slot);
     ctx.require(svc.play(s.ctx(), &player), "play");
     ctx.require(static_cast<SimulatedPlayer&>(player).simulateDropSelectedItem(), "drop the backpack");
-    co_await ctx.ticks(15);
-    ctx.check(!svc.playing(s.bp->uuid(), s.slot), "dropping the backpack stops the music");
-    ctx.check(rec.last(SoundEvent::Kind::Stop, idOf(player)) != nullptr, "StopSound sent to the former carrier");
+    co_await ctx.ticks(10); // SC: keep-alive every 5 ticks, dropped after 10 without one
+    ctx.check(!svc.playing(s.bp->uuid(), s.slot), "dropping the backpack stops the music within 10 ticks");
+    ctx.check(rec.last(SoundEvent::Kind::Stop, idOf(player)) != nullptr, "stop sent to the former carrier");
 });
 
 ABP_REGISTER_SELFTEST("jukebox.stops_on_disable_and_remove", [](Context& ctx) -> ll::coro::CoroTask<> {
@@ -402,75 +396,72 @@ ABP_REGISTER_SELFTEST("jukebox.carrier_leaves", [](Context& ctx) -> ll::coro::Co
     ctx.check(!svc.playing(bp->uuid(), slot), "the carrier leaving stops the music");
 });
 
+// SC: the play payload goes to every player within 128 blocks, once, when the disc starts; the
+// companion gets the entity-attached sound, others the vanilla positional fallback.
 ABP_REGISTER_SELFTEST("jukebox.listeners", [](Context& ctx) -> ll::coro::CoroTask<> {
     Recorder rec;
-    auto&    svc       = Service::get();
-    struct RangeGuard {
-        int saved = config::mut<JukeboxConfig>().range;
-        RangeGuard() { config::mut<JukeboxConfig>().range = 16; }
-        ~RangeGuard() { config::mut<JukeboxConfig>().range = saved; }
-    } guard;
-    auto& carrier = ctx.player();
-    auto& other   = ctx.spawnPlayer();
-    auto  s       = carriedJukebox(ctx, kBasicId, {kCat});
-    // Simulated players may be falling (unresolved spawn height): teleport both together so they
-    // fall side by side and keep their horizontal distance.
+    auto&    svc     = Service::get();
+    auto&    carrier = ctx.player();
+    auto&    near    = ctx.spawnPlayer();
+    auto&    far     = ctx.spawnPlayer();
+    auto     s       = carriedJukebox(ctx, kBasicId, {kCat});
+    struct CompanionGuard {
+        Player& p;
+        explicit CompanionGuard(Player& pl) : p(pl) { net::setCompanion(p, net::CompanionInfo{"test", {"native_screen"}}); }
+        ~CompanionGuard() { net::setCompanion(p, std::nullopt); }
+    } companion(near);
     auto base  = carrier.getFeetPos();
-    auto place = [&](float dx) {
+    auto place = [&] {
         carrier.teleport(base, carrier.getDimensionId());
-        other.teleport(Vec3{base.x + dx, base.y, base.z}, carrier.getDimensionId());
+        near.teleport(Vec3{base.x + 6.0f, base.y, base.z}, carrier.getDimensionId());
+        far.teleport(Vec3{base.x + 140.0f, base.y, base.z}, carrier.getDimensionId());
     };
-    place(6.0f);
+    place();
     co_await ctx.ticks(1);
     ctx.require(svc.play(s.ctx(), &carrier), "play");
     auto heard = svc.listeners(s.bp->uuid(), s.slot);
-    ctx.check(std::find(heard.begin(), heard.end(), idOf(other)) != heard.end(), "a nearby player hears it");
-    auto const* play = rec.last(SoundEvent::Kind::Play, idOf(other));
-    ctx.check(play && play->volume < 1.0f && play->volume >= 0.25f, "quieter for a player further away");
-
-    place(40.0f);
-    co_await ctx.ticks(12);
-    heard = svc.listeners(s.bp->uuid(), s.slot);
-    ctx.check(std::find(heard.begin(), heard.end(), idOf(other)) == heard.end(), "out of range: stops hearing it");
-    ctx.check(rec.last(SoundEvent::Kind::Stop, idOf(other)) != nullptr, "StopSound when leaving the range");
-
-    co_await ctx.ticks(20);
-    place(3.0f);
-    co_await ctx.ticks(12);
-    play = rec.last(SoundEvent::Kind::Play, idOf(other));
-    ctx.check(
-        rec.count(SoundEvent::Kind::Play, idOf(other)) == 2 && play && play->offset > 1.0f,
-        "back in range: joins mid-track (plays=" + std::to_string(rec.count(SoundEvent::Kind::Play, idOf(other)))
-            + " offset=" + std::to_string(play ? play->offset : -1.0f) + ")"
-    );
-    ctx.check(rec.count(SoundEvent::Kind::Play, idOf(carrier)) == 1, "the carrier's sound is never restarted");
+    ctx.check(std::find(heard.begin(), heard.end(), idOf(near)) != heard.end(), "a player 6 blocks away gets it");
+    ctx.check(std::find(heard.begin(), heard.end(), idOf(far)) == heard.end(), "a player 140 blocks away doesn't");
+    auto const* play = rec.last(SoundEvent::Kind::Play, idOf(near));
+    ctx.check(play && play->companion && play->entity == idOf(carrier), "companion: sound attached to the carrier");
+    auto const* own = rec.last(SoundEvent::Kind::Play, idOf(carrier));
+    ctx.check(own && !own->companion, "no client mod: vanilla positional fallback");
     svc.stop(s.bp->uuid(), s.slot);
+    auto const* stop = rec.last(SoundEvent::Kind::Stop, idOf(near));
+    ctx.check(stop && stop->companion, "companion: JukeboxStop");
 });
 
+// A placed backpack plays at its block; placing a carried one / picking a placed one up stops it.
 ABP_REGISTER_SELFTEST("jukebox.placed", [](Context& ctx) -> ll::coro::CoroTask<> {
     Recorder rec;
-    auto&    svc    = Service::get();
-    auto&    player = ctx.player();
-    auto     bp     = ctx.createBackpack(Tier::Leather);
-    int      slot   = ctx.installUpgrade(bp, std::string(kBasicId));
+    auto&    svc = Service::get();
+    auto&    sp  = ctx.spawnPlayer();
+    co_await placed::test::toGround(ctx, sp);
+    placed::test::Site site(sp);
+    auto pos = site.at(0, 1);
+    site.set(pos, "minecraft:air");
+    auto bp   = ctx.createBackpack(Tier::Leather);
+    int  slot = ctx.installUpgrade(bp, std::string(kBasicId));
     setDisc(UpgradeContext(bp, slot), 0, item(kCat));
-    std::string reason;
-    ctx.check(!svc.play(UpgradeContext(bp, slot), &player, std::nullopt, &reason), "not carried, not placed: refused");
-    ctx.check(!reason.empty(), "with a reason");
-    auto at  = player.getFeetPos();
-    int  dim = static_cast<int>(player.getDimensionId());
-    svc.tickPlaced(bp, dim, at);
-    ctx.require(svc.play(UpgradeContext(bp, slot), &player), "a placed backpack plays");
-    auto const* play = rec.last(SoundEvent::Kind::Play, idOf(player));
-    ctx.require(play != nullptr, "a nearby player hears it");
-    ctx.check(play->positional && play->sound == "abp.jukebox3d.cat", "3D sound at the block: " + play->sound);
-    for (int i = 0; i < 10; ++i) {
-        svc.tickPlaced(bp, dim, at);
-        co_await ctx.ticks(5);
-    }
+    ctx.require(ctx.give(sp, ctx.backpackItem(*bp), 0) == 0, "carry it");
+    ctx.require(svc.play(UpgradeContext(bp, slot), &sp), "play carried");
+    ctx.check(svc.emitterEntity(bp->uuid(), slot).has_value(), "attached to the carrier");
+    // Place it (the item leaves the inventory).
+    sp.getInventory().removeItem(0, 1);
+    site.touch(pos);
+    auto stack = ctx.backpackItem(*bp);
+    ctx.require(placed::PlacedBackpacks::get().place(site.region(), pos, stack, 2) == placed::PlacedBackpacks::PlaceResult::Ok, "place");
+    co_await ctx.ticks(6);
+    ctx.check(!svc.playing(bp->uuid(), slot), "placing the backpack stops the disc");
+    ctx.require(svc.play(UpgradeContext(bp, slot), &sp), "play at the placed backpack");
+    ctx.check(!svc.emitterEntity(bp->uuid(), slot).has_value(), "plays at the block");
+    auto const* play = rec.last(SoundEvent::Kind::Play, idOf(sp));
+    ctx.require(play != nullptr, "a nearby player gets it");
+    ctx.check(!play->entity && std::abs(play->pos.x - (static_cast<float>(pos.x) + 0.5f)) < 0.01f, "at the block centre");
+    co_await ctx.ticks(30);
     ctx.check(svc.playing(bp->uuid(), slot), "keeps playing while placed");
-    co_await ctx.ticks(50);
-    ctx.check(!svc.playing(bp->uuid(), slot), "stops once the block no longer reports");
+    (void)placed::PlacedBackpacks::get().take(site.region(), pos);
+    ctx.check(!svc.playing(bp->uuid(), slot), "picking it up stops the disc");
 });
 
 } // namespace

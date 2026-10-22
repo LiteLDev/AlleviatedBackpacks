@@ -2,16 +2,15 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
+#include <random>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 #include "ll/api/service/Bedrock.h"
 
 #include "mc/deps/core/string/HashedString.h"
 #include "mc/deps/nbt/CompoundTag.h"
+#include "mc/world/actor/item/ExperienceOrb.h"
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemInstance.h"
 #include "mc/world/item/ItemStack.h"
@@ -20,10 +19,14 @@
 #include "mc/world/level/Level.h"
 #include "mc/world/level/block/actor/FurnaceBlockActor.h"
 
+#include "api/BackpackCapabilities.h"
+#include "api/abp/Fluid.h"
+#include "api/abp/Xp.h"
 #include "game/ItemConv.h"
 #include "mod/Config.h"
 #include "mod/I18n.h"
 #include "mod/Log.h"
+#include "upgrade/UpgradeManager.h"
 
 ABP_REGISTER_CONFIG("cooking", abp::upgrade::cooking::CookingConfig);
 
@@ -34,29 +37,29 @@ namespace {
 constexpr char const* kStateKey       = "state";
 constexpr char const* kInputFilterKey = "inputFilter";
 constexpr char const* kFuelFilterKey  = "fuelFilter";
-constexpr char const* kProductsKey    = "products";
-constexpr char const* kPendingXpKey   = "xpPending"; ///< result id -> items whose XP nobody got yet
+constexpr int         kPlacedBatchTicks = 10; ///< placed: game ticks simulated per advance()
 
 /// Per-world caches of recipe results and fuel values (cleared when the level changes).
 struct Caches {
-    Level const*                                                   level = nullptr;
+    Level const*                                                        level = nullptr;
     std::unordered_map<std::string, std::optional<core::ItemStackData>> recipes;
-    std::unordered_map<std::string, int>                           fuel;
+    std::unordered_map<std::string, int>                                fuel;
+    std::unordered_map<std::string, float>                              xp;
 };
 
 Caches& caches(Level const* level) {
     static Caches c;
-    if (c.level != level || c.recipes.size() > 4096 || c.fuel.size() > 4096) {
+    if (c.level != level || c.recipes.size() > 4096 || c.fuel.size() > 4096 || c.xp.size() > 4096) {
         c.level = level;
         c.recipes.clear();
         c.fuel.clear();
+        c.xp.clear();
     }
     return c;
 }
 
-std::string cacheKey(Kind kind, core::ItemStackData const& item) {
-    return std::to_string(static_cast<int>(kind)) + "|" + item.id + "|" + std::to_string(item.aux) + "|"
-         + std::to_string(item.nbtHash());
+std::string cacheKey(int kind, core::ItemStackData const& item) {
+    return std::to_string(kind) + "|" + item.id + "|" + std::to_string(item.aux) + "|" + std::to_string(item.nbtHash());
 }
 
 std::string_view idSuffix(Kind kind) {
@@ -70,44 +73,39 @@ std::string_view idSuffix(Kind kind) {
     }
 }
 
+/// SB item names (en_US lang).
 std::string_view nameFallback(Kind kind, bool automatic) {
     switch (kind) {
     case Kind::Smoking:
-        return automatic ? "Auto-Smoking Upgrade" : "Smoking Upgrade";
+        return automatic ? "Auto-smoking Upgrade" : "Smoking Upgrade";
     case Kind::Blasting:
-        return automatic ? "Auto-Blasting Upgrade" : "Blasting Upgrade";
+        return automatic ? "Auto-blasting Upgrade" : "Blasting Upgrade";
     default:
-        return automatic ? "Auto-Smelting Upgrade" : "Smelting Upgrade";
+        return automatic ? "Auto-smelting Upgrade" : "Smelting Upgrade";
     }
 }
 
-core::Filter filterAt(UpgradeContext const& ctx, char const* key, int slots) {
-    auto const& s = ctx.settings();
-    auto        it = s.find(key);
-    return core::Filter::fromJson(it != s.end() ? *it : nlohmann::json::object(), slots);
+double clampMultiplier(double v) { return std::clamp(std::isfinite(v) ? v : 1.0, 0.25, 4.0); }
+
+/// Runtime cooldowns of one upgrade (SC keeps them in the wrapper).
+struct Cooldowns {
+    int cooldown = 0, output = 0, fuel = 0, input = 0;
+};
+
+core::Filter filterAt(UpgradeContext const& ctx, char const* key, int slots, bool emptyAllowsAll) {
+    auto const& s  = ctx.settings();
+    core::Filter f(slots);
+    if (s.is_object()) {
+        if (auto it = s.find(key); it != s.end()) f = core::Filter::fromJson(*it, slots);
+    }
+    f.emptyAllowsAll = emptyAllowsAll;
+    return f;
 }
 
-int filterSlots(int configured) { return std::clamp(configured, 1, 9); }
-
-/// Ids of items this Auto upgrade has produced (not cooked again unless explicitly filtered).
-std::unordered_set<std::string> productIds(UpgradeContext const& ctx) {
-    std::unordered_set<std::string> out;
-    auto const&                     s  = ctx.settings();
-    auto                            it = s.find(kProductsKey);
-    if (it == s.end() || !it->is_array()) return out;
-    for (auto const& v : *it)
-        if (v.is_string()) out.insert(v.get<std::string>());
-    return out;
+std::mt19937& rng() {
+    static std::mt19937 r{std::random_device{}()};
+    return r;
 }
-
-void setProductIds(UpgradeContext const& ctx, std::unordered_set<std::string> const& ids) {
-    std::vector<std::string> sorted(ids.begin(), ids.end());
-    std::sort(sorted.begin(), sorted.end());
-    ctx.settings()[kProductsKey] = sorted; // saved together with the state
-}
-
-constexpr std::size_t kMaxProducts = 512;
-constexpr int         kPlacedBatchTicks = 10; ///< placed: game ticks simulated per advance()
 
 } // namespace
 
@@ -124,25 +122,16 @@ std::string_view recipeTag(Kind kind) {
     }
 }
 
-int burnInterval(Kind kind) { return kind == Kind::Smelting ? 200 : 100; }
+int recipeTime(Kind kind) { return kind == Kind::Smelting ? 200 : 100; }
 
-std::string_view blockId(Kind kind) {
-    switch (kind) {
-    case Kind::Smoking:
-        return "minecraft:smoker";
-    case Kind::Blasting:
-        return "minecraft:blast_furnace";
-    default:
-        return "minecraft:furnace";
-    }
-}
+float burnTimeModifier(Kind kind) { return kind == Kind::Smelting ? 1.f : 0.5f; }
 
 std::optional<core::ItemStackData> recipeResult(Kind kind, core::ItemStackData const& input) {
     if (input.empty()) return std::nullopt;
     auto level = ll::service::getLevel();
     if (!level) return std::nullopt;
     auto& cache = caches(level.as_ptr());
-    auto  key   = cacheKey(kind, input);
+    auto  key   = cacheKey(static_cast<int>(kind), input);
     if (auto it = cache.recipes.find(key); it != cache.recipes.end()) return it->second;
     std::optional<core::ItemStackData> out;
     auto                               stack = game::ItemConv::toStack(input, 1);
@@ -159,72 +148,71 @@ std::optional<core::ItemStackData> recipeResult(Kind kind, core::ItemStackData c
     return out;
 }
 
-int vanillaBurnTicks(Kind kind, core::ItemStackData const& fuel) {
+int furnaceBurnTicks(core::ItemStackData const& fuel) {
     if (fuel.empty()) return 0;
     auto  level = ll::service::getLevel();
     auto& cache = caches(level ? level.as_ptr() : nullptr);
-    auto  key   = cacheKey(kind, fuel);
+    auto  key   = cacheKey(-1, fuel);
     if (auto it = cache.fuel.find(key); it != cache.fuel.end()) return it->second;
     int  ticks = 0;
     auto stack = game::ItemConv::toStack(fuel, 1);
-    if (!stack.isNull()) {
-        ticks = static_cast<int>(std::lround(FurnaceBlockActor::getBurnDuration(stack, static_cast<float>(burnInterval(kind)))));
-    }
-    cache.fuel.emplace(std::move(key), std::max(0, ticks));
-    return std::max(0, ticks);
+    if (!stack.isNull()) ticks = static_cast<int>(std::lround(FurnaceBlockActor::getBurnDuration(stack, 200.f)));
+    ticks = std::max(0, ticks);
+    cache.fuel.emplace(std::move(key), ticks);
+    return ticks;
 }
 
-int xpFor(core::ItemStackData const& output, int count) {
-    if (output.empty() || count <= 0) return 0;
-    auto stack = game::ItemConv::toStack(output, 1);
-    if (stack.isNull()) return 0;
-    return std::max(0, FurnaceBlockActor::getXPRewardFromSmeltingItems(stack, count));
+float smeltingExperience(core::ItemStackData const& result) {
+    if (result.empty()) return 0;
+    auto  level = ll::service::getLevel();
+    auto& cache = caches(level ? level.as_ptr() : nullptr);
+    auto  key   = cacheKey(-2, result);
+    if (auto it = cache.xp.find(key); it != cache.xp.end()) return it->second;
+    float xp    = 0;
+    auto  stack = game::ItemConv::toStack(result, 1);
+    if (!stack.isNull()) xp = std::max(0.f, FurnaceBlockActor::_getXPRewardMultiplier(stack));
+    cache.xp.emplace(std::move(key), xp);
+    return xp;
 }
 
-CookEnv makeEnv(Kind kind) {
-    auto const& cfg   = config::get<CookingConfig>();
-    double      speed = cfg.cookingSpeedMultiplier > 0.01 ? cfg.cookingSpeedMultiplier : 1.0;
-    double      fuel  = cfg.fuelEfficiencyMultiplier > 0.01 ? cfg.fuelEfficiencyMultiplier : 1.0;
-    CookEnv     env;
-    env.cookTime = std::max(1, static_cast<int>(std::lround(burnInterval(kind) / speed)));
-    env.result   = [kind](core::ItemStackData const& in) { return recipeResult(kind, in); };
-    // Fuel lasts as many items as in the vanilla block, also when the speed multiplier changes.
-    env.burnTicks = [kind, speed, fuel](core::ItemStackData const& f) {
-        int base = vanillaBurnTicks(kind, f);
-        return base <= 0 ? 0 : std::max(1, static_cast<int>(std::lround(base * fuel / speed)));
-    };
-    // The game's own fuel consumption: one item less, or its leftover (lava bucket -> bucket).
-    env.afterBurn = [](core::ItemStackData const& f) -> core::ItemStackData {
-        auto stack = game::ItemConv::toStack(f, f.count);
-        if (!stack.isNull()) {
-            stack.useAsFuel();
-            auto left = game::ItemConv::toData(stack);
-            if (!(left.sameItem(f) && left.count == f.count)) return left;
-        }
-        if (f.id == "minecraft:lava_bucket" && f.count <= 1) {
-            return game::ItemConv::toData(game::ItemConv::make("minecraft:bucket", 1));
-        }
-        return f.withCount(f.count - 1);
-    };
-    return env;
-}
-
-// ---- upgrade -------------------------------------------------------------------------------------
+// ---- upgrade ------------------------------------------------------------------------------------
 
 CookingUpgrade::CookingUpgrade(Kind kind, bool automatic) : mKind(kind), mAuto(automatic) {
-    std::string base = std::string(idSuffix(kind));
-    std::string id   = automatic ? "auto_" + base : base;
+    std::string base   = std::string(idSuffix(kind));
+    std::string id     = automatic ? "auto_" + base : base;
     mInfo.id           = id;
     mInfo.itemId       = "alleviatedbackpacks:" + id + "_upgrade";
     mInfo.nameKey      = "abp.cooking." + id + ".name";
     mInfo.nameFallback = std::string(nameFallback(kind, automatic));
     mInfo.tier         = automatic ? UpgradeTier::Advanced : UpgradeTier::Basic;
-    // Like Sophisticated Backpacks: one cooking upgrade per backpack.
-    mInfo.group          = "cooking";
+    // SB: maxUpgradesPerStorage cooking_upgrades = 1.
+    mInfo.group          = std::string(kGroup);
     mInfo.maxPerBackpack = 1;
     mInfo.hasSettings    = true;
     mInfo.toggleable     = true;
 }
+
+namespace {
+CookingUpgradeConfig manualConfig(Kind kind) {
+    auto const& c = config::get<CookingConfig>();
+    return kind == Kind::Smoking ? c.smokingUpgrade : kind == Kind::Blasting ? c.blastingUpgrade : c.smeltingUpgrade;
+}
+AutoCookingUpgradeConfig autoConfig(Kind kind) {
+    auto const& c = config::get<CookingConfig>();
+    return kind == Kind::Smoking ? c.autoSmokingUpgrade : kind == Kind::Blasting ? c.autoBlastingUpgrade : c.autoSmeltingUpgrade;
+}
+} // namespace
+
+double CookingUpgrade::speedMultiplier() const {
+    return clampMultiplier(mAuto ? autoConfig(mKind).smeltingSpeedMultiplier : manualConfig(mKind).smeltingSpeedMultiplier);
+}
+double CookingUpgrade::fuelMultiplier() const {
+    return clampMultiplier(mAuto ? autoConfig(mKind).fuelEfficiencyMultiplier : manualConfig(mKind).fuelEfficiencyMultiplier);
+}
+int CookingUpgrade::inputFilterSlots() const { return std::clamp(autoConfig(mKind).inputFilterSlots, 1, 20); }
+int CookingUpgrade::inputFilterSlotsInRow() const { return std::clamp(autoConfig(mKind).inputFilterSlotsInRow, 1, 6); }
+int CookingUpgrade::fuelFilterSlots() const { return std::clamp(autoConfig(mKind).fuelFilterSlots, 1, 20); }
+int CookingUpgrade::fuelFilterSlotsInRow() const { return std::clamp(autoConfig(mKind).fuelFilterSlotsInRow, 1, 6); }
 
 bool CookingUpgrade::installedAt(UpgradeContext const& ctx) const {
     auto const& slots = ctx.backpack().data().upgrades;
@@ -234,98 +222,100 @@ bool CookingUpgrade::installedAt(UpgradeContext const& ctx) const {
 }
 
 CookState CookingUpgrade::state(UpgradeContext const& ctx) {
-    auto const& s  = ctx.settings();
-    auto        it = s.find(kStateKey);
+    auto const& s = ctx.settings();
+    if (!s.is_object()) return {};
+    auto it = s.find(kStateKey);
     return it != s.end() ? CookState::fromJson(*it) : CookState{};
 }
 
 void CookingUpgrade::setState(UpgradeContext const& ctx, CookState const& state) {
-    ctx.settings()[kStateKey] = state.toJson();
+    auto& s = ctx.settings();
+    if (!s.is_object()) s = nlohmann::json::object();
+    s[kStateKey] = state.toJson();
     ctx.saveSettings(false);
 }
 
-core::Filter CookingUpgrade::inputFilter(UpgradeContext const& ctx) {
-    return filterAt(ctx, kInputFilterKey, filterSlots(config::get<CookingConfig>().autoInputFilterSlots));
+core::Filter CookingUpgrade::inputFilter(UpgradeContext const& ctx) const {
+    return filterAt(ctx, kInputFilterKey, inputFilterSlots(), false);
 }
 
-core::Filter CookingUpgrade::fuelFilter(UpgradeContext const& ctx) {
-    return filterAt(ctx, kFuelFilterKey, filterSlots(config::get<CookingConfig>().autoFuelFilterSlots));
+core::Filter CookingUpgrade::fuelFilter(UpgradeContext const& ctx) const {
+    return filterAt(ctx, kFuelFilterKey, fuelFilterSlots(), true);
 }
 
 void CookingUpgrade::setInputFilter(UpgradeContext const& ctx, core::Filter const& filter) {
-    ctx.settings()[kInputFilterKey] = filter.toJson();
+    auto& s = ctx.settings();
+    if (!s.is_object()) s = nlohmann::json::object();
+    s[kInputFilterKey] = filter.toJson();
     ctx.saveSettings(false);
 }
 
 void CookingUpgrade::setFuelFilter(UpgradeContext const& ctx, core::Filter const& filter) {
-    ctx.settings()[kFuelFilterKey] = filter.toJson();
+    auto& s = ctx.settings();
+    if (!s.is_object()) s = nlohmann::json::object();
+    s[kFuelFilterKey] = filter.toJson();
     ctx.saveSettings(false);
 }
 
-bool CookingUpgrade::advance(UpgradeContext const& ctx, Player* carrier, int ticks) const {
-    if (!installedAt(ctx) || ticks <= 0) return false;
-    auto st      = state(ctx);
-    auto env     = makeEnv(mKind);
-    bool changed = false;
-    if (!mAuto) {
-        for (int i = 0; i < ticks; ++i) changed |= step(st, env);
-    } else {
-        // Items made per result kind ("id#aux"): their experience is stored and claimed below.
-        std::unordered_map<std::string, int> produced;
-        auto products = productIds(ctx);
-        bool newProduct = false;
-        env.onProduce   = [&](core::ItemStackData const& r) {
-            produced[r.id + "#" + std::to_string(r.aux)] += r.count;
-            if (products.size() < kMaxProducts && products.insert(r.id).second) newProduct = true;
-        };
-        auto    inFilter   = inputFilter(ctx);
-        auto    fuelFilter = CookingUpgrade::fuelFilter(ctx);
-        AutoEnv a{ctx.backpack().inventory(), inFilter, fuelFilter, &game::ItemConv::tags(), {core::Source::Upgrade, carrier}};
-        a.isProduct = [&products](core::ItemStackData const& item) { return products.contains(item.id); };
-        changed |= autoExchange(st, env, a);
-        // A storage scan that found nothing is not repeated within this call.
-        bool outFailed   = !st.output.empty();
-        bool inputFailed = st.input.empty();
-        bool fuelFailed  = needsFuel(st, env);
-        for (int i = 0; i < ticks; ++i) {
-            if (!st.output.empty() && !outFailed) {
-                if (pushOutput(st, a)) changed = true;
-                outFailed = !st.output.empty();
-            }
-            if (st.input.empty() && !inputFailed) {
-                if (pullInput(st, env, a)) {
-                    changed    = true;
-                    fuelFailed = false;
-                } else {
-                    inputFailed = true;
-                }
-            }
-            if (!fuelFailed && needsFuel(st, env)) {
-                if (pullFuel(st, env, a)) changed = true;
-                else fuelFailed = true;
-            }
-            changed |= step(st, env);
+CookEnv CookingUpgrade::env(UpgradeContext const& ctx) const {
+    CookEnv e;
+    Kind    kind = mKind;
+    e.result     = [kind](core::ItemStackData const& in) { return recipeResult(kind, in); };
+    float mod    = burnTimeModifier(kind);
+    e.burnTicks  = [mod](core::ItemStackData const& f) { return static_cast<int>(static_cast<float>(furnaceBurnTicks(f)) * mod); };
+    // The fuel's remainder (lava bucket -> bucket), else one item less.
+    e.afterBurn = [](core::ItemStackData const& f) -> core::ItemStackData {
+        auto stack = game::ItemConv::toStack(f, f.count);
+        if (!stack.isNull()) {
+            stack.useAsFuel();
+            auto left = game::ItemConv::toData(stack);
+            if (!(left.sameItem(f) && left.count == f.count)) return left;
         }
-        if (!outFailed) changed |= pushOutput(st, a);
-        // Stored results keep their experience until a player claims it: the carrier right away,
-        // otherwise (placed) whoever opens the menu or carries the backpack next.
-        if (!produced.empty()) {
-            auto& pending = ctx.settings()[kPendingXpKey];
-            if (!pending.is_object()) pending = nlohmann::json::object();
-            for (auto const& [key, n] : produced) {
-                auto it   = pending.find(key);
-                int  have = it != pending.end() && it->is_number_integer() ? std::max(0, it->get<int>()) : 0;
-                pending[key] = have + n;
-            }
-        }
-        if (carrier) claimPendingXp(ctx, *carrier);
-        if (newProduct) setProductIds(ctx, products);
+        if (f.id == "minecraft:lava_bucket" && f.count <= 1) return game::ItemConv::toData(game::ItemConv::make("minecraft:bucket", 1));
+        return f.withCount(f.count - 1);
+    };
+    e.experience               = [](core::ItemStackData const& r) { return smeltingExperience(r); };
+    e.recipeTime               = recipeTime(kind);
+    e.cookingSpeedMultiplier   = speedMultiplier();
+    e.fuelEfficiencyMultiplier = fuelMultiplier();
+    if (mAuto) {
+        auto in        = inputFilter(ctx);
+        auto fuel      = fuelFilter(ctx);
+        e.inputAllowed = [in](core::ItemStackData const& d) { return in.passes(d, &game::ItemConv::tags()); };
+        e.fuelAllowed  = [fuel](core::ItemStackData const& d) { return fuel.passes(d, &game::ItemConv::tags()); };
     }
-    if (changed) setState(ctx, st);
-    return changed;
+    return e;
 }
 
-void CookingUpgrade::onTick(TickContext const& tick) { advance(tick.ctx, &tick.player, std::max(1, tick.interval)); }
+bool CookingUpgrade::advance(UpgradeContext const& ctx, int ticks) const {
+    if (!installedAt(ctx) || ticks <= 0) return false;
+    auto  before = state(ctx);
+    auto  s      = before;
+    auto& cd     = ctx.transient<Cooldowns>();
+    s.cooldown       = cd.cooldown;
+    s.outputCooldown = cd.output;
+    s.fuelCooldown   = cd.fuel;
+    s.inputCooldown  = cd.input;
+    auto e           = env(ctx);
+    if (!mAuto) {
+        runManual(s, e, ticks);
+    } else {
+        AutoEnv a{ctx.backpack().inventory(), core::AccessContext{core::Source::Upgrade, ctx.player()}, [&ctx](CookState& st) {
+                      pushExperienceToTanks(ctx, st);
+                  }};
+        runAuto(s, e, a, ticks);
+    }
+    cd = Cooldowns{s.cooldown, s.outputCooldown, s.fuelCooldown, s.inputCooldown};
+    // An idle furnace only advances its clock: nothing depends on it then, so don't persist it.
+    auto idle = [](CookState const& x) { return !x.burning() && !x.cooking; };
+    auto same = s;
+    same.clock = before.clock;
+    if (idle(before) && idle(s) && same.sameData(before)) return false;
+    setState(ctx, s);
+    return true;
+}
+
+void CookingUpgrade::onTick(TickContext const& tick) { advance(tick.ctx.withPlayer(&tick.player), std::max(1, tick.interval)); }
 
 void CookingUpgrade::onPlacedTick(PlacedTickContext const& tick) {
     // Placed ticks come often: run the furnace in batches like the carried tick does.
@@ -337,52 +327,71 @@ void CookingUpgrade::onPlacedTick(PlacedTickContext const& tick) {
     if (b.ticks < kPlacedBatchTicks) return;
     int n   = b.ticks;
     b.ticks = 0;
-    advance(tick.ctx, nullptr, n);
+    advance(tick.ctx, n);
 }
 
 void CookingUpgrade::onRemove(UpgradeContext const& ctx) {
-    if (auto* p = ctx.player()) claimPendingXp(ctx, *p);
+    auto s = state(ctx);
+    s.stop();
+    setState(ctx, s);
+    ctx.transient<Cooldowns>() = {};
 }
 
-int CookingUpgrade::claimPendingXp(UpgradeContext const& ctx, Player& player) {
-    auto& s  = ctx.settings();
-    auto  it = s.find(kPendingXpKey);
-    if (it == s.end()) return 0;
-    int xp = 0;
-    if (it->is_object()) {
-        for (auto const& [key, n] : it->items()) {
-            if (!n.is_number_integer()) continue;
-            auto hash = key.rfind('#');
-            int  aux  = 0;
-            if (hash != std::string::npos) aux = std::atoi(key.c_str() + hash + 1);
-            auto item = game::ItemConv::toData(game::ItemConv::make(key.substr(0, hash), 1, aux));
-            xp += xpFor(item, n.get<int>());
-        }
+int CookingUpgrade::popExperience(UpgradeContext const& ctx, Player& player) {
+    auto  s      = state(ctx);
+    float stored = s.storedXp;
+    int   whole  = static_cast<int>(std::floor(stored));
+    float frac   = stored - static_cast<float>(whole);
+    if (frac != 0.f && std::uniform_real_distribution<float>(0.f, 1.f)(rng()) < frac) ++whole;
+    if (whole > 0) {
+        ExperienceOrb::spawnOrbs(player.getDimensionBlockSource(), player.getPosition(), whole, ExperienceOrb::DropType::NoType, nullptr);
     }
-    s.erase(it);
-    ctx.saveSettings(false);
-    if (xp > 0) player.addExperience(xp);
-    return xp;
+    s.storedXp = std::max(0.f, stored - static_cast<float>(whole));
+    if (s.storedXp != stored) setState(ctx, s);
+    return whole;
 }
 
-std::shared_ptr<ui::Menu> CookingUpgrade::createSettingsMenu(Player& player, UpgradeContext const& ctx) {
-    return makeMenu(player, *this, ctx);
+void CookingUpgrade::pushExperienceToTanks(UpgradeContext const& ctx, CookState& state) {
+    if (state.storedXp <= 0) return;
+    auto handler = api::backpack::fluidHandler(ctx.backpackPtr());
+    if (!handler) return;
+    int amount = api::xp::experienceToLiquid(state.storedXp);
+    if (amount <= 0) return;
+    int filled = handler->fill(api::FluidStack{std::string(api::fluids::Experience), amount}, false);
+    if (filled > 0) state.storedXp = std::max(0.f, state.storedXp - api::xp::liquidToExperience(filled));
 }
 
-std::vector<std::string> CookingUpgrade::describe(Player& player, UpgradeContext const& ctx) const {
-    if (!installedAt(ctx)) return {};
-    auto                     st = state(ctx);
+std::vector<std::string> CookingUpgrade::describe(Player& player, UpgradeContext const&) const {
+    // SB item tooltips (gray).
     std::vector<std::string> out;
-    out.push_back(trFor(player, "abp.cooking.describe.slots", "§7Input {} · Fuel {} · Output {}", st.input.count, st.fuel.count, st.output.count));
-    if (st.burning() && st.cook > 0) {
-        out.push_back(trFor(player, "abp.cooking.describe.cooking", "§6Cooking {}%", st.cookPercent()));
+    switch (mKind) {
+    case Kind::Smoking:
+        out.push_back(trFor(player, "abp.cooking.tooltip.smoking", "§7Smoking food in an upgrade tab"));
+        break;
+    case Kind::Blasting:
+        out.push_back(trFor(player, "abp.cooking.tooltip.blasting", "§7Blasting ores and metal stuff in an upgrade tab"));
+        break;
+    default:
+        out.push_back(trFor(player, "abp.cooking.tooltip.smelting", "§7Smelting in an upgrade tab"));
+        break;
     }
+    if (mAuto) out.push_back(trFor(player, "abp.cooking.tooltip.auto", "§7Automatically pulls/pushes items"));
     return out;
 }
 
 CookingUpgrade& upgradeOf(Kind kind, bool automatic) {
     std::string id = std::string(automatic ? "auto_" : "") + std::string(idSuffix(kind));
     return *static_cast<CookingUpgrade*>(byId(id));
+}
+
+CookingUpgrade* cookingAt(UpgradeContext const& ctx) {
+    auto const& slots = ctx.backpack().data().upgrades;
+    if (ctx.slot() < 0 || ctx.slot() >= static_cast<int>(slots.size())) return nullptr;
+    auto const& s = slots[static_cast<std::size_t>(ctx.slot())];
+    if (s.empty()) return nullptr;
+    auto* type = upgradeFor(s.item);
+    if (!type || type->info().group != kGroup) return nullptr;
+    return static_cast<CookingUpgrade*>(type);
 }
 
 // ---- registration -------------------------------------------------------------------------------

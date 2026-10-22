@@ -53,6 +53,7 @@
 #include "mc/world/phys/HitResult.h"
 #include "mc/world/phys/HitResultType.h"
 
+#include "core/Capacity.h"
 #include "core/Codec.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
@@ -69,6 +70,7 @@
 #include "net/Packets.h"
 #include "upgrade/IUpgrade.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/tank/Columns.h"
 
 ABP_REGISTER_CONFIG("mobcatcher", abp::upgrade::mobcatcher::MobCatcherConfig);
 
@@ -553,12 +555,12 @@ ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
 });
 
 /// Captured mob types of carried backpacks, for the client's muffled ambient sounds.
-ABP_REGISTER_RENDER_INFO([](game::Backpack const& backpack, core::screen::RenderInfo& info) {
+ABP_REGISTER_RENDER_INFO([](game::Backpack& backpack, nlohmann::json& extra) {
     auto mobs = capturedMobs(backpack);
     if (mobs.empty()) return;
     nlohmann::json arr = nlohmann::json::array();
     for (auto const& m : mobs) arr.push_back(nlohmann::json{{"id", m.id}, {"entityType", m.entityType}});
-    info.extra["mobCatcher"] = std::move(arr);
+    extra["mobCatcher"] = std::move(arr);
 });
 
 // ---- capture by interaction ---------------------------------------------------------------------------
@@ -726,7 +728,12 @@ void saveCapturedMobs(game::Backpack& backpack, std::vector<CapturedMob> const& 
     backpack.rebuildHooks();
 }
 
-int columnsOf(game::Backpack const& backpack) { return columnsFor(backpack.data().inventory.size()); }
+int columnsOf(game::Backpack const& backpack) {
+    // SB getColumns: the layout's width (9 / 12) minus the columns taken by Tank / Battery parts.
+    int taken = upgrade::columns::expected(backpack);
+    int base  = core::capacity::baseSlotsFor(backpack.data().inventory.size(), taken);
+    return std::max(1, columnsFor(base) - taken);
+}
 
 std::optional<bool> bestCatcher(game::Backpack const& backpack) {
     std::optional<bool> best;
