@@ -228,8 +228,9 @@ public:
         // not reliable (ignored under synthetic input), and an uncaptured key also reaches vanilla's
         // key bindings.
         if (vk == VK_ESCAPE_ || vk == 'E') return true;
-        if (m->kind == "menu") return vk == 'Q' || (vk >= '1' && vk <= '9');
         using input::KeyAction;
+        // Open Backpack closes a menu screen; captured so vanilla (B = emote) never sees it.
+        if (m->kind == "menu") return vk == 'Q' || (vk >= '1' && vk <= '9') || input::keyMatches(KeyAction::OpenBackpack, vk);
         if (input::keyMatches(KeyAction::OpenBackpack, vk) || input::keyMatches(KeyAction::Sort, vk)
             || input::keyMatches(KeyAction::TransferToStorage, vk) || input::keyMatches(KeyAction::TransferToInventory, vk)) {
             return true;
