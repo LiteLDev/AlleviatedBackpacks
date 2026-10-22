@@ -74,9 +74,11 @@ if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a fake chest was 
 Press-Key 'E'
 Start-Sleep -Milliseconds 1500
 
-# The secondary (a copper backpack item) opens the shared leather storage: 27 slots.
-Press-Key '3'
-Start-Sleep -Milliseconds 1000
+# The secondary (a copper backpack item) opens the shared leather storage: 27 slots. Only the
+# copper backpack stays in the inventory, so Open Backpack (B) picks it.
+Invoke-Chat '/replaceitem entity @s slot.hotbar 0 air'
+Invoke-Chat '/replaceitem entity @s slot.hotbar 1 air'
+Start-Sleep -Milliseconds 500
 $mark = Get-LogMark
 Press-Key 'B'
 Wait-LogLine "companion: native screen \d+ for 'Copper Backpack' \(27 slots" 10 -Since $mark | Out-Null
