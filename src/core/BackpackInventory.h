@@ -37,6 +37,9 @@ struct InsertQuery {
     int                      slot; ///< -1 = whole-stack check before automatic placement
     ItemStackData const&     stack;
     AccessContext const&     ctx;
+    /// True for `insertInto` (the slot was chosen by the caller, e.g. a GUI click), false for
+    /// the slots `insert` tries during automatic placement (and the whole-stack check).
+    bool direct = false;
 };
 
 struct ExtractQuery {
@@ -52,6 +55,12 @@ using ExtractFilterFn = std::function<bool(ExtractQuery const&)>; ///< false = d
 /// Returns the new per-slot limit given the current one (start: `item.maxStack`).
 using LimitModifierFn = std::function<int(int slot, ItemStackData const& item, int currentLimit)>;
 using ChangeListenerFn = std::function<void(int slot)>; ///< slot -1 = many / resized
+/// Runs after a (non-simulated) `insert` / `insertInto` put items into `slot` (once per slot the
+/// operation touched, after the whole operation finished; SC `IInsertResponseUpgrade.onAfterInsert`).
+using InsertListenerFn = std::function<void(int slot, AccessContext const& ctx)>;
+/// Runs after a (non-simulated) `extract` took items from `slot`; `original` is the slot content
+/// before the extraction (SC `IExtractResponseUpgrade.onAfterExtract`).
+using ExtractListenerFn = std::function<void(int slot, ItemStackData const& original, AccessContext const& ctx)>;
 /// Slots that `insert()` should try first for `stack` (e.g. memory slots), in order. Filters still
 /// apply; slots out of range are ignored.
 using SlotPreferenceFn = std::function<std::vector<int>(ItemStackData const& stack)>;
@@ -115,6 +124,8 @@ public:
 
     /// Checks whether an insert of `stack` into `slot` (-1 = whole-stack check) is allowed.
     [[nodiscard]] InsertVerdict checkInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const;
+    /// `checkInsert` as `insertInto` asks it (`InsertQuery::direct`).
+    [[nodiscard]] InsertVerdict checkDirectInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const;
     [[nodiscard]] bool canExtract(int slot, int amount, AccessContext const& ctx) const;
 
     // ---- hooks -------------------------------------------------------------------------------
@@ -122,6 +133,11 @@ public:
     void addExtractFilter(std::string owner, int priority, ExtractFilterFn fn);
     void addLimitModifier(std::string owner, int priority, LimitModifierFn fn);
     void addChangeListener(std::string owner, ChangeListenerFn fn);
+    /// See `InsertListenerFn`. Listeners may insert / extract themselves (nested operations
+    /// notify their own listeners).
+    void addInsertListener(std::string owner, InsertListenerFn fn);
+    /// See `ExtractListenerFn`.
+    void addExtractListener(std::string owner, ExtractListenerFn fn);
     /// Preferred slots for automatic placement: `insert()` fills them before any other slot.
     void addSlotPreference(std::string owner, int priority, SlotPreferenceFn fn);
     /// Removes every hook registered with `owner`.
@@ -156,6 +172,10 @@ private:
     std::vector<Hook<LimitModifierFn>>  mLimitModifiers;
     std::vector<Hook<ChangeListenerFn>> mListeners;
     std::vector<Hook<SlotPreferenceFn>> mPreferences;
+    std::vector<Hook<InsertListenerFn>>  mInsertListeners;
+    std::vector<Hook<ExtractListenerFn>> mExtractListeners;
+
+    void notifyInserted(std::vector<int> const& slots, AccessContext const& ctx);
 };
 
 } // namespace abp::core

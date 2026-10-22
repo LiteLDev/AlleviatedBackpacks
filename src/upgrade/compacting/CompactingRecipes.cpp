@@ -39,9 +39,9 @@ struct Cache {
 };
 Cache gCache;
 
-std::string cacheKey(core::ItemStackData const& item, int gridSize) {
-    return item.id + '|' + std::to_string(item.aux) + '|' + std::to_string(item.nbtHash()) + '|'
-         + std::to_string(gridSize);
+std::string cacheKey(core::ItemStackData const& item, Shape const& shape) {
+    return item.id + '|' + std::to_string(item.aux) + '|' + std::to_string(item.nbtHash()) + '|' + std::to_string(shape.width) + 'x'
+         + std::to_string(shape.height) + ':' + std::to_string(shape.filled);
 }
 
 /// One-count game stack of a recipe result, keeping block states.
@@ -63,85 +63,92 @@ ItemInstance const* singleResult(Recipe const& recipe) {
     return &results.front();
 }
 
-/// Collects one entry per filled crafting cell into `out`; false unless the recipe fills exactly a
-/// `gridSize` x `gridSize` grid (shapeless: that many items).
-bool collectIngredients(Recipe const& recipe, int gridSize, std::vector<RecipeIngredient const*>& out) {
-    out.clear();
+bool sameKind(core::ItemStackData const& a, core::ItemStackData const& b) { return a.id == b.id && a.aux == b.aux; }
+
+/// True if `recipe` crafts `stack` laid out as `shape` (shaped: same size, filled cells exactly
+/// where the shape has them, possibly mirrored; shapeless: `shape.count` ingredients).
+bool matchesShape(Recipe const& recipe, Shape const& shape, ItemStack const& stack) {
     if (recipe.isShapeless()) {
+        int n = 0;
         for (auto const& ing : *recipe.mMyIngredients) {
             if (ing.isNull()) continue;
-            for (int i = 0; i < std::max<int>(ing.mStackSize, 1); ++i) out.push_back(&ing);
+            if (!recipe.itemValidForRecipe(ing, stack)) return false;
+            n += std::max<int>(ing.mStackSize, 1);
         }
-        return static_cast<int>(out.size()) == gridSize * gridSize;
+        return n == shape.count;
     }
     int w = recipe.mWidth;
     int h = recipe.mHeight;
-    if (w != gridSize || h != gridSize) return false;
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            auto const& ing = recipe.getIngredient(x, y);
-            if (ing.isNull() || ing.mStackSize > 1) return false;
-            out.push_back(&ing);
+    if (w != shape.width || h != shape.height) return false;
+    for (int mirror = 0; mirror < 2; ++mirror) {
+        bool ok = true;
+        for (int y = 0; y < h && ok; ++y) {
+            for (int x = 0; x < w && ok; ++x) {
+                auto const& ing    = recipe.getIngredient(mirror ? w - 1 - x : x, y);
+                bool        filled = shape.isFilled(x, y);
+                if (ing.isNull()) ok = !filled;
+                else ok = filled && ing.mStackSize <= 1 && recipe.itemValidForRecipe(ing, stack);
+            }
         }
+        if (ok) return true;
     }
-    return static_cast<int>(out.size()) == gridSize * gridSize;
+    return false;
 }
 
-bool sameKind(core::ItemStackData const& a, core::ItemStackData const& b) { return a.id == b.id && a.aux == b.aux; }
-
-/// True if one `result` crafts back into exactly `expected` items of `original`.
-bool isReversible(Recipes const& recipes, core::ItemStackData const& result, core::ItemStackData const& original, int expected) {
+/// True if one `result` crafts (1x1) back into exactly `count` items of `original`.
+bool isReversible(Recipes const& recipes, core::ItemStackData const& result, core::ItemStackData const& original, int count) {
     auto resultStack = game::ItemConv::toStack(result, 1);
     if (resultStack.isNull()) return false;
     bool found = false;
     recipes.forEachRecipeFor(HashedString(kCraftingTag), [&](Recipe const& recipe) {
         if (found) return;
         auto const* out = singleResult(recipe);
-        if (!out || out->mCount != expected) return;
-        std::vector<RecipeIngredient const*> ings;
+        if (!out || out->mCount != count) return;
+        RecipeIngredient const* only = nullptr;
+        int                     n    = 0;
         if (recipe.isShapeless()) {
-            if (!collectIngredients(recipe, 1, ings)) return;
+            for (auto const& ing : *recipe.mMyIngredients) {
+                if (ing.isNull()) continue;
+                only  = &ing;
+                n    += std::max<int>(ing.mStackSize, 1);
+            }
         } else {
-            // A 1x1 shaped recipe (or a bigger shape with a single filled cell).
-            int w = recipe.mWidth;
-            int h = recipe.mHeight;
-            for (int y = 0; y < h; ++y) {
-                for (int x = 0; x < w; ++x) {
+            for (int y = 0; y < recipe.mHeight; ++y) {
+                for (int x = 0; x < recipe.mWidth; ++x) {
                     auto const& ing = recipe.getIngredient(x, y);
                     if (ing.isNull()) continue;
-                    if (ing.mStackSize > 1) return;
-                    ings.push_back(&ing);
+                    only  = &ing;
+                    n    += std::max<int>(ing.mStackSize, 1);
                 }
             }
-            if (ings.size() != 1) return;
         }
-        if (!recipe.itemValidForRecipe(*ings.front(), resultStack)) return;
+        if (n != 1 || !only || !recipe.itemValidForRecipe(*only, resultStack)) return;
         if (!sameKind(toData(*out), original)) return;
         found = true;
     });
     return found;
 }
 
-std::optional<Compaction> lookup(Recipes const& recipes, core::ItemStackData const& item, int gridSize) {
+std::optional<Compaction> lookup(Recipes const& recipes, core::ItemStackData const& item, Shape const& shape) {
     auto stack = game::ItemConv::toStack(item, 1);
     if (stack.isNull() || stack.mUserData || item.damage > 0) return std::nullopt;
-    int                                  need = gridSize * gridSize;
-    std::optional<Compaction>            best;
-    std::vector<RecipeIngredient const*> ings;
+    // SC: one matching recipe -> it; several -> the first whose result crafts back into the item,
+    // else the first.
+    std::optional<Compaction> first;
+    std::optional<Compaction> reversible;
     recipes.forEachRecipeFor(HashedString(kCraftingTag), [&](Recipe const& recipe) {
-        if (best && best->reversible) return; // a reversible match wins; keep the first one
+        if (reversible) return;
         auto const* out = singleResult(recipe);
-        if (!out || !collectIngredients(recipe, gridSize, ings)) return;
-        for (auto const* ing : ings) {
-            if (!recipe.itemValidForRecipe(*ing, stack)) return;
-        }
+        if (!out || !matchesShape(recipe, shape, stack)) return;
         auto result = toData(*out);
-        if (result.empty() || sameKind(result, item)) return;
-        result.count   = out->mCount;
-        bool reversible = need % result.count == 0 && isReversible(recipes, result.withCount(1), item, need / result.count);
-        if (!best || reversible) best = Compaction{result, need, reversible};
+        if (result.empty()) return;
+        result.count = out->mCount;
+        bool       rev = isReversible(recipes, result.withCount(1), item, shape.count);
+        Compaction c{result, shape.count, rev};
+        if (rev) reversible = c;
+        else if (!first) first = c;
     });
-    return best;
+    return reversible ? reversible : first;
 }
 
 void dropCache() {
@@ -193,8 +200,8 @@ private:
 
 } // namespace
 
-std::optional<Compaction> findCompaction(core::ItemStackData const& item, int gridSize) {
-    if (item.empty() || (gridSize != 2 && gridSize != 3)) return std::nullopt;
+std::optional<Compaction> findCompaction(core::ItemStackData const& item, Shape const& shape) {
+    if (item.empty() || shape.count < 1) return std::nullopt;
     auto level = ll::service::getLevel();
     if (!level) return std::nullopt;
     Recipes const& recipes = level->getRecipes();
@@ -204,16 +211,68 @@ std::optional<Compaction> findCompaction(core::ItemStackData const& item, int gr
         gCache.generation = gen;
         gCache.recipes    = &recipes;
     }
-    auto key = cacheKey(item, gridSize);
+    auto key = cacheKey(item.withCount(1), shape);
     if (auto it = gCache.entries.find(key); it != gCache.entries.end()) return it->second;
     std::optional<Compaction> found;
     try {
-        found = lookup(recipes, item, gridSize);
+        found = lookup(recipes, item, shape);
     } catch (std::exception const& e) {
         log().error("compacting recipe lookup for {} failed: {}", item.id, e.what());
     }
     gCache.entries.emplace(std::move(key), found);
     return found;
+}
+
+std::optional<Compaction> findCompaction(core::ItemStackData const& item, int gridSize) {
+    if (gridSize != 2 && gridSize != 3) return std::nullopt;
+    return findCompaction(item, Shape::full(gridSize));
+}
+
+bool uncompactMatches(core::ItemStackData const& result, core::ItemStackData const& item, int count) {
+    auto level = ll::service::getLevel();
+    if (!level || result.empty() || item.empty()) return false;
+    try {
+        return isReversible(level->getRecipes(), result.withCount(1), item, count);
+    } catch (std::exception const& e) {
+        log().error("uncompacting recipe lookup for {} failed: {}", result.id, e.what());
+        return false;
+    }
+}
+
+namespace {
+/// SC `isPartOfCompactingLoop`.
+bool isPartOfCompactingLoop(core::ItemStackData const& first, core::ItemStackData const& firstResult) {
+    std::vector<core::ItemStackData> queue{firstResult.withCount(1)};
+    std::vector<core::ItemStackData> seen;
+    int                              iterations = 0;
+    while (!queue.empty()) {
+        auto it = queue.front();
+        queue.erase(queue.begin());
+        for (int grid : {2, 3}) {
+            auto c = findCompaction(it, grid);
+            if (!c) continue;
+            if (sameKind(c->result, first)) return true;
+            for (auto const& s : seen) {
+                if (sameKind(s, c->result)) return false; // a loop the first item isn't part of
+            }
+            queue.push_back(c->result.withCount(1));
+        }
+        seen.push_back(it);
+        if (++iterations > 30) return true; // too many follow-ups to tell: don't compact
+    }
+    return false;
+}
+} // namespace
+
+CompactingShapes compactingShapes(core::ItemStackData const& item) {
+    CompactingShapes out;
+    for (int grid : {2, 3}) {
+        auto c = findCompaction(item, grid);
+        if (!c || sameKind(c->result, item) || isPartOfCompactingLoop(item, c->result)) continue;
+        (grid == 2 ? out.twoByTwo : out.threeByThree)                       = true;
+        (grid == 2 ? out.twoByTwoUncraftable : out.threeByThreeUncraftable) = c->reversible;
+    }
+    return out;
 }
 
 void invalidateCache() { gGeneration.fetch_add(1); }

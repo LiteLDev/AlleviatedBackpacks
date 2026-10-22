@@ -1,16 +1,22 @@
-// Compacting upgrade (basic: 2x2 recipes; advanced: 3x3 and 2x2).
+// Compacting upgrade (basic: 2x2 recipes; advanced: 3x3 then 2x2), as Sophisticated Core's
+// CompactingUpgradeWrapper:
 //
-// Whenever items enter the backpack (any source: GUI, pickup, automation, other upgrades), the
-// upgrade looks up the game's own crafting recipes for "n x n copies of this item" and turns full
-// sets into the crafted result (iron ingots -> iron block, nuggets -> ingot -> block, wheat -> hay
-// bale, ...). By default only recipes that can be crafted back are used (as in Sophisticated
-// Backpacks). Results that don't fit are never forced in: the inputs stay as they were.
-//
-// The inventory change listener only records which item kinds grew; the compaction itself runs at
-// the end of the server tick, outside of any inventory operation (no re-entrant inventory edits
-// while other listeners are still being notified, and one pass per item kind per tick).
+// - Items inserted by anything but the GUI (pickup, magnet, automation, other upgrades) are
+//   compacted right after the insert, using the game's own crafting recipes for "n x n copies of
+//   this item"; produced results compact further (nuggets -> ingots -> blocks).
+// - "Compact Only Uncraftable" (default): only recipes whose result crafts back into the items;
+//   "Compact Anything" uses any recipe. Additional shapes from the config (default "111/101/111")
+//   are tried when the full grids give nothing (always only when reversible, as SC).
+// - "Works in GUI as well" (default off): slots changed in the GUI are compacted on the next tick.
+//   Otherwise a full slot whose result has no room is remembered and retried as soon as that
+//   result is taken out.
+// - A craft only happens when its result fits (checked before taking the inputs, as SC).
 
+#include "upgrade/compacting/Compacting.h"
+
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -20,307 +26,328 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 
-#include "core/Filter.h"
 #include "game/Backpack.h"
 #include "game/ItemConv.h"
+#include "mod/Config.h"
 #include "mod/I18n.h"
 #include "mod/Log.h"
 #include "mod/Module.h"
-#include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/FilterMenu.h"
-#include "ui/menu/MenuManager.h"
-#include "upgrade/IUpgrade.h"
 #include "upgrade/UpgradeManager.h"
-#include "upgrade/compacting/CompactingRecipes.h"
+
+ABP_REGISTER_CONFIG("compacting", abp::upgrade::compacting::CompactingConfig);
 
 namespace abp::upgrade::compacting {
 
+int filterSlots(bool advanced) {
+    auto const& c = config::get<CompactingConfig>();
+    return std::clamp(advanced ? c.advancedCompactingUpgrade.filterSlots : c.compactingUpgrade.filterSlots, 1, 20);
+}
+
+int slotsInRow(bool advanced) {
+    auto const& c = config::get<CompactingConfig>();
+    return std::clamp(advanced ? c.advancedCompactingUpgrade.slotsInRow : c.compactingUpgrade.slotsInRow, 1, 6);
+}
+
+CompactingSettings CompactingSettings::read(nlohmann::json const& settings, bool advanced) {
+    CompactingSettings s;
+    s.advanced    = advanced;
+    s.filter      = core::Filter(filterSlots(advanced));
+    s.filter.mode = core::FilterMode::Deny; // SC: block list by default
+    if (settings.is_object()) {
+        if (auto it = settings.find(kFilterKey); it != settings.end() && it->is_object()) {
+            s.filter = core::Filter::fromJson(*it, filterSlots(advanced));
+        }
+        if (auto it = settings.find(kCompactAnythingKey); it != settings.end() && it->is_boolean()) {
+            s.compactAnything = it->get<bool>();
+        } else if (auto old = settings.find("onlyUncraftable"); old != settings.end() && old->is_boolean()) {
+            s.compactAnything = !old->get<bool>(); // phase-1 key
+        }
+        if (auto it = settings.find(kWorkInGuiKey); it != settings.end() && it->is_boolean()) s.workInGui = it->get<bool>();
+    }
+    s.filter.emptyAllowsAll = false;
+    if (!advanced) {
+        s.filter.matchBy         = core::MatchBy::Item;
+        s.filter.matchNbt        = false;
+        s.filter.matchDurability = false;
+    }
+    return s;
+}
+
 namespace {
 
-constexpr int              kBasicFilterSlots    = 9;
-constexpr int              kAdvancedFilterSlots = 16;
-constexpr std::string_view kFilterKey           = "filter";
-constexpr std::string_view kOnlyReversibleKey   = "onlyUncraftable";
-/// Upper bound of compaction steps per drain (chains like nugget -> ingot -> block).
-constexpr int kMaxSteps = 64;
+bool sameKind(core::ItemStackData const& a, core::ItemStackData const& b) { return a.id == b.id && a.aux == b.aux; }
+
+/// SC `getVanillaCompactingDefinition`.
+std::optional<CompactingDefinition> vanilla(core::ItemStackData const& item, int grid) {
+    auto c = findCompaction(item, grid);
+    if (!c || c->result.empty()) return std::nullopt;
+    return CompactingDefinition{c->result, grid * grid};
+}
+
+/// SC `CompactingUpgradeConfig.getCompactingResult` (override shapes of the item first).
+std::optional<CompactingDefinition> configured(core::ItemStackData const& item, int maxSize) {
+    auto const& cfg = config::get<CompactingConfig>().compactingUpgrade;
+    auto        try_ = [&](Shape const& shape) -> std::optional<CompactingDefinition> {
+        if (!shape.fitsWithin(maxSize, maxSize)) return std::nullopt;
+        auto c = findCompaction(item, shape);
+        if (!c || c->result.empty() || sameKind(c->result, item)) return std::nullopt;
+        if (!uncompactMatches(c->result, item, shape.count)) return std::nullopt;
+        return CompactingDefinition{c->result, shape.count};
+    };
+    for (auto const& o : cfg.additionalCompactingShapeOverrides) {
+        auto parsed = ShapeOverride::parse(o);
+        if (!parsed || parsed->item != item.id) continue;
+        if (auto d = try_(parsed->shape)) return d;
+    }
+    for (auto const& text : cfg.additionalCompactingShapes) {
+        auto shape = Shape::parse(text);
+        if (!shape) continue;
+        if (auto d = try_(*shape)) return d;
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+std::optional<CompactingDefinition> compactingDefinition(core::ItemStackData const& item, bool advanced, bool compactAnything) {
+    if (item.empty()) return std::nullopt;
+    auto shapes = compactingShapes(item);
+    if (advanced && (shapes.threeByThreeUncraftable || (compactAnything && shapes.threeByThree))) return vanilla(item, 3);
+    if (shapes.twoByTwoUncraftable || (compactAnything && shapes.twoByTwo)) return vanilla(item, 2);
+    return configured(item, advanced ? 3 : 2);
+}
+
+namespace {
 
 core::AccessContext const kUpgradeAccess{core::Source::Upgrade};
-core::AccessContext const kInternalAccess{core::Source::Internal};
 
-bool onlyReversible(nlohmann::json const& settings) {
-    if (!settings.is_object()) return true;
-    auto it = settings.find(kOnlyReversibleKey);
-    return it == settings.end() || !it->is_boolean() || it->get<bool>();
-}
+std::string kindOf(core::ItemStackData const& item) { return item.id + '|' + std::to_string(item.aux); }
 
-core::Filter readFilter(nlohmann::json const& settings, bool advanced) {
-    nlohmann::json j = nlohmann::json::object();
-    if (settings.is_object()) {
-        if (auto it = settings.find(kFilterKey); it != settings.end()) j = *it;
-    }
-    auto f = core::Filter::fromJson(j, advanced ? kAdvancedFilterSlots : kBasicFilterSlots);
-    if (!advanced) f.matchBy = core::MatchBy::Item; // basic filters only match by item
-    return f;
-}
-
-// ---- compaction engine ---------------------------------------------------------------------------
-
-using Kinds = std::vector<core::ItemStackData>; ///< distinct item kinds (count 1)
-
-void addKind(Kinds& kinds, core::ItemStackData const& item) {
-    if (item.empty()) return;
-    for (auto const& k : kinds)
-        if (k.sameItem(item)) return;
-    kinds.push_back(item.withCount(1));
-}
-
-/// Runtime state of one installed compacting upgrade. Owned by its inventory change listener, so
-/// it dies with the hooks (rebuild, disable, removal); the scheduler only keeps weak references.
+/// Runtime state of one installed compacting upgrade (SC wrapper fields). Owned by its inventory
+/// listeners, so it dies with the hooks (rebuild, disable, removal); the scheduler only keeps weak
+/// references.
 struct Engine : std::enable_shared_from_this<Engine> {
     std::weak_ptr<game::Backpack> backpack;
-    core::Filter                  filter;
-    bool                          onlyReversible = true;
-    std::vector<int>              grids; ///< grid sizes to try, biggest first
+    CompactingSettings            settings;
+    std::set<int>                 slotsToCompact;
+    std::set<int>                 slotsToCompactAfterCurrent;
+    std::map<std::string, int>    fullSlotsToCompactLater; ///< result kind -> full slot waiting for room
+    bool                          compacting = false;
+    bool                          scheduled  = false;
 
-    std::vector<core::ItemStackData> snapshots; ///< last seen slot contents (tells growth from removal)
-    Kinds                            pending;   ///< kinds to look at on the next drain
-    Kinds                            blocked;   ///< kinds that had full sets but no room for the result
-    bool                             busy      = false;
-    bool                             scheduled = false;
-
-    void snapshotAll(core::BackpackInventory const& inv) {
-        snapshots.assign(static_cast<std::size_t>(inv.size()), {});
-        for (int i = 0; i < inv.size(); ++i) snapshots[static_cast<std::size_t>(i)] = inv.at(i);
+    [[nodiscard]] bool matches(core::ItemStackData const& item) const {
+        return !item.empty() && settings.filter.passes(item, &game::ItemConv::tags());
+    }
+    [[nodiscard]] std::optional<CompactingDefinition> definition(core::ItemStackData const& item) const {
+        return compactingDefinition(item, settings.advanced, settings.compactAnything);
     }
 
-    /// Change listener: remember what grew (or retry blocked kinds when something shrank).
-    void onChange(core::BackpackInventory const& inv, int slot);
-    /// Runs the pending compactions (end of tick).
-    void drain(core::BackpackInventory& inv);
+    void onAfterInsert(core::BackpackInventory& inv, int slot) {
+        if (compacting) {
+            slotsToCompactAfterCurrent.insert(slot);
+            return;
+        }
+        compactSlotAndQueued(inv, slot);
+    }
+
+    void onAfterExtract(core::ItemStackData const& original) {
+        auto it = fullSlotsToCompactLater.find(kindOf(original));
+        if (it == fullSlotsToCompactLater.end()) return;
+        slotsToCompact.insert(it->second);
+        schedule();
+    }
+
+    /// SC `onSlotChange` (a slot changed through the GUI).
+    void onSlotChange(core::BackpackInventory const& inv, int slot) {
+        if (settings.workInGui) {
+            slotsToCompact.insert(slot);
+            schedule();
+        } else {
+            calculateFullSlot(inv, slot);
+        }
+    }
+
     void schedule();
 
-    void compact(core::BackpackInventory& inv, core::ItemStackData const& item, Kinds& next);
-    static int  craftAll(core::BackpackInventory& inv, core::ItemStackData const& item, Compaction const& c);
-    static bool craft(core::BackpackInventory& inv, core::ItemStackData const& item, Compaction const& c, int times);
-    static void putBack(core::BackpackInventory& inv, std::vector<std::pair<int, core::ItemStackData>> const& taken);
+    /// SC `tick`: the slots queued by the GUI / extractions.
+    void drain() {
+        scheduled = false;
+        auto bp   = backpack.lock();
+        if (!bp || slotsToCompact.empty()) return;
+        auto slots = std::move(slotsToCompact);
+        slotsToCompact.clear();
+        for (int slot : slots) compactSlotAndQueued(bp->inventory(), slot);
+    }
+
+    void compactSlotAndQueued(core::BackpackInventory& inv, int slot) {
+        compacting = true;
+        try {
+            compactSlot(inv, slot);
+            while (!slotsToCompactAfterCurrent.empty()) {
+                auto next = std::move(slotsToCompactAfterCurrent);
+                slotsToCompactAfterCurrent.clear();
+                for (int s : next) compactSlot(inv, s);
+            }
+        } catch (std::exception const& e) {
+            log().error("compacting failed: {}", e.what());
+        }
+        slotsToCompactAfterCurrent.clear();
+        compacting = false;
+    }
+
+    void compactSlot(core::BackpackInventory& inv, int slot) {
+        if (slot < 0 || slot >= inv.size()) return;
+        auto stack = inv.at(slot);
+        if (stack.empty() || !matches(stack)) return;
+        if (auto def = definition(stack)) tryCompacting(inv, slot, stack, *def);
+    }
+
+    [[nodiscard]] static long long countOf(core::BackpackInventory const& inv, core::ItemStackData const& item) {
+        return inv.count([&](core::ItemStackData const& s) { return s.sameItem(item); });
+    }
+
+    /// SC `fitsResultAndRemainingItems` (simulated insert of the result).
+    [[nodiscard]] static bool fits(core::BackpackInventory& inv, core::ItemStackData const& result) {
+        return inv.insert(result, kUpgradeAccess, true).remainder.empty();
+    }
+
+    /// SC `InventoryHelper.extractFromInventory`: `amount` of `item` from the slots in order.
+    static void extract(core::BackpackInventory& inv, core::ItemStackData const& item, int amount) {
+        for (int i = 0; i < inv.size() && amount > 0; ++i) {
+            if (!inv.at(i).sameItem(item)) continue;
+            amount -= inv.extract(i, amount, kUpgradeAccess).count;
+        }
+    }
+
+    void tryCompacting(core::BackpackInventory& inv, int slot, core::ItemStackData const& stack, CompactingDefinition const& def) {
+        int total = def.count;
+        if (def.result.empty() || total <= 0) return;
+        for (int guard = 0; countOf(inv, stack) >= total && guard < 100000; ++guard) {
+            auto result = def.result;
+            if (!fits(inv, result)) {
+                if (inv.at(slot).sameItem(stack) && inv.at(slot).count >= inv.slotLimit(slot, stack)) {
+                    fullSlotsToCompactLater[kindOf(result)] = slot;
+                }
+                return;
+            }
+            fullSlotsToCompactLater.erase(kindOf(result));
+            extract(inv, stack, total);
+            (void)inv.insert(result, kUpgradeAccess);
+        }
+    }
+
+    void calculateFullSlot(core::BackpackInventory const& cinv, int slot) {
+        auto& inv = const_cast<core::BackpackInventory&>(cinv); // simulated inserts only
+        if (slot < 0 || slot >= inv.size()) return;
+        auto const& stack = inv.at(slot);
+        if (stack.empty() || !matches(stack) || stack.count < inv.slotLimit(slot, stack)) return;
+        auto def = definition(stack);
+        if (def && stack.count >= stack.maxStack && !def->result.empty() && !fits(inv, def->result)) {
+            fullSlotsToCompactLater[kindOf(def->result)] = slot;
+        }
+    }
+
+    void calculateFullSlots(core::BackpackInventory const& inv) {
+        for (int i = 0; i < inv.size(); ++i) calculateFullSlot(inv, i);
+    }
 };
 
-/// Engines with pending work, drained at the end of the server tick.
+/// Engines with queued slots, drained on the next server tick.
 std::vector<std::weak_ptr<Engine>> gScheduled;
 
 void Engine::schedule() {
-    if (scheduled || pending.empty()) return;
+    if (scheduled || slotsToCompact.empty()) return;
     scheduled = true;
     gScheduled.push_back(weak_from_this());
 }
 
-void Engine::onChange(core::BackpackInventory const& inv, int slot) {
-    if (slot < 0 || slot >= inv.size()) {
-        snapshotAll(inv);
-        return;
-    }
-    if (static_cast<std::size_t>(slot) >= snapshots.size()) snapshots.resize(static_cast<std::size_t>(slot) + 1);
-    auto&       prev = snapshots[static_cast<std::size_t>(slot)];
-    auto const& cur  = inv.at(slot);
-    bool        grew = !cur.empty() && (prev.empty() || !prev.sameItem(cur) || cur.count > prev.count);
-    bool shrank = !prev.empty() && (cur.empty() || !prev.sameItem(cur) || cur.count < prev.count);
-    prev        = cur;
-    if (busy) return; // our own crafting
-    if (grew) addKind(pending, cur);
-    if (shrank && !blocked.empty()) {
-        for (auto const& k : blocked) addKind(pending, k);
-        blocked.clear();
-    }
-    schedule();
-}
-
-void Engine::drain(core::BackpackInventory& inv) {
-    busy = true;
-    try {
-        Kinds work = std::move(pending);
-        pending.clear();
-        for (int steps = 0; !work.empty() && steps < kMaxSteps; ++steps) {
-            Kinds next;
-            for (auto const& item : work) compact(inv, item, next);
-            work = std::move(next);
-        }
-    } catch (std::exception const& e) {
-        log().error("compacting failed: {}", e.what());
-    }
-    busy = false;
-}
-
-/// Compacts every full set of `item` with its biggest usable grid size; adds produced results to
-/// `next` so that chains continue (nuggets -> ingots -> blocks).
-void Engine::compact(core::BackpackInventory& inv, core::ItemStackData const& item, Kinds& next) {
-    if (!filter.passes(item, &game::ItemConv::tags())) return;
-    for (int grid : grids) {
-        auto c = findCompaction(item, grid);
-        if (!c || (onlyReversible && !c->reversible)) continue;
-        // Like SB: the biggest usable shape wins (iron ingots make blocks, never trapdoors).
-        auto total = inv.count([&](core::ItemStackData const& s) { return s.sameItem(item); });
-        if (total < c->inputs) return;
-        if (craftAll(inv, item, *c) > 0) addKind(next, c->result);
-        if (inv.count([&](core::ItemStackData const& s) { return s.sameItem(item); }) >= c->inputs) {
-            addKind(blocked, item); // no room for (all) results: retry when space frees up
-        }
-        return;
-    }
-}
-
-/// Crafts as many sets as possible. Returns the number of crafts done.
-int Engine::craftAll(core::BackpackInventory& inv, core::ItemStackData const& item, Compaction const& c) {
-    auto total  = inv.count([&](core::ItemStackData const& s) { return s.sameItem(item); });
-    int  crafts = static_cast<int>(std::min<long long>(total / c.inputs, 1'000'000));
-    if (crafts <= 0) return 0;
-    if (craft(inv, item, c, crafts)) return crafts;
-    // Not everything fits: one craft at a time, as far as it goes.
-    int done = 0;
-    while (done < crafts && craft(inv, item, c, 1)) ++done;
-    return done;
-}
-
-/// Consumes `times` sets of `item` and inserts the results. All or nothing: when the inputs
-/// can't be taken or the results don't fit (or would be voided), everything is put back.
-bool Engine::craft(core::BackpackInventory& inv, core::ItemStackData const& item, Compaction const& c, int times) {
-    int                                               need = times * c.inputs;
-    std::vector<std::pair<int, core::ItemStackData>> taken;
-    int                                               got = 0;
-    for (int i = inv.size() - 1; i >= 0 && got < need; --i) {
-        auto const& cur = inv.at(i);
-        if (cur.empty() || !cur.sameItem(item)) continue;
-        auto e = inv.extract(i, need - got, kUpgradeAccess);
-        if (e.empty()) continue;
-        got += e.count;
-        taken.emplace_back(i, std::move(e));
-    }
-    auto results = c.result.withCount(times * c.result.count);
-    // Simulated after taking the inputs, so the space they free up counts.
-    auto sim = got < need ? core::InsertResult{} : inv.insert(results, kUpgradeAccess, true);
-    if (got < need || !sim.remainder.empty() || sim.voided > 0 || sim.inserted != results.count) {
-        putBack(inv, taken);
-        return false;
-    }
-    auto r = inv.insert(results, kUpgradeAccess);
-    if (!r.remainder.empty()) {
-        // Should not happen (the simulation said it fits): keep the inputs whole rather than the results.
-        auto back = inv.extractMatching([&](core::ItemStackData const& s) { return s.sameItem(c.result); }, r.inserted, kInternalAccess);
-        if (back.count != r.inserted) {
-            log().error("compacting: could not undo {} x{}; keeping them", c.result.id, r.inserted - back.count);
-            (void)inv.insert(back, kInternalAccess);
-            return true;
-        }
-        putBack(inv, taken);
-        return false;
-    }
-    return true;
-}
-
-void Engine::putBack(core::BackpackInventory& inv, std::vector<std::pair<int, core::ItemStackData>> const& taken) {
-    for (auto it = taken.rbegin(); it != taken.rend(); ++it) {
-        auto const& [slot, stack] = *it;
-        auto rest                 = inv.insertInto(slot, stack, kInternalAccess).remainder;
-        if (!rest.empty()) rest = inv.insert(rest, kInternalAccess).remainder;
-        if (rest.empty()) continue;
-        // Last resort (filters refused even internal moves): an empty slot, else the original slot
-        // even beyond its limit. Never drop items.
-        int target = -1;
-        for (int i = 0; i < inv.size() && target < 0; ++i)
-            if (inv.at(i).empty()) target = i;
-        if (target >= 0) {
-            inv.set(target, rest);
-        } else if (inv.at(slot).sameItem(rest)) {
-            inv.set(slot, inv.at(slot).withCount(inv.at(slot).count + rest.count));
-        } else {
-            log().error("compacting: could not put back {} x{}", rest.id, rest.count);
-        }
-    }
-}
-
-/// Drains scheduled engines at the end of every server tick.
 class CompactingScheduler {
 public:
     void install() {
-        mTick = ll::event::EventBus::getInstance().emplaceListener<ll::event::ServerLevelTickEvent>(
-            [](ll::event::ServerLevelTickEvent&) { drainAll(); },
-            ll::event::EventPriority::Low
-        );
+        mTick = ll::event::EventBus::getInstance().emplaceListener<ll::event::ServerLevelTickEvent>([](auto&) {
+            if (gScheduled.empty()) return;
+            auto list = std::move(gScheduled);
+            gScheduled.clear();
+            for (auto const& weak : list) {
+                if (auto engine = weak.lock()) engine->drain();
+            }
+        });
     }
     void uninstall() {
         ll::event::EventBus::getInstance().removeListener(mTick);
         gScheduled.clear();
     }
 
-    static void drainAll() {
-        if (gScheduled.empty()) return;
-        auto list = std::move(gScheduled);
-        gScheduled.clear();
-        for (auto const& weak : list) {
-            auto engine = weak.lock();
-            if (!engine) continue; // hooks were rebuilt / upgrade disabled or removed
-            engine->scheduled = false;
-            if (auto bp = engine->backpack.lock()) engine->drain(bp->inventory());
-        }
-    }
-
 private:
     ll::event::ListenerPtr mTick;
 };
 
+// ---- settings menu (chest fallback) ---------------------------------------------------------------
 
-// ---- settings menu -------------------------------------------------------------------------------
+bool alive(UpgradeContext const& ctx) {
+    auto const& slots = ctx.backpack().data().upgrades;
+    if (ctx.slot() < 0 || ctx.slot() >= static_cast<int>(slots.size())) return false;
+    auto* type = upgradeFor(slots[static_cast<std::size_t>(ctx.slot())].item);
+    return type && type->info().group == "compacting";
+}
 
-/// The filter editor plus an "only compact uncraftable items" toggle and a size hint.
+void writeSetting(UpgradeContext const& ctx, std::string_view key, nlohmann::json value) {
+    if (!alive(ctx)) return;
+    auto& j = ctx.settings();
+    if (!j.is_object()) j = nlohmann::json::object();
+    j[std::string(key)] = std::move(value);
+    ctx.saveSettings(true);
+}
+
 class CompactingMenu : public ui::FilterMenu {
 public:
+    static constexpr int kUncraftableOffset = 5;
+    static constexpr int kWorkInGuiOffset   = 6;
+
     CompactingMenu(std::string title, UpgradeContext ctx, bool advanced, Options options)
     : FilterMenu(
           std::move(title),
-          [ctx, advanced] { return readFilter(ctx.settings(), advanced); },
-          [ctx](core::Filter const& f) {
-              ctx.settings()[std::string(kFilterKey)] = f.toJson();
-              ctx.saveSettings(true);
-          },
+          [ctx, advanced] { return CompactingSettings::read(ctx.settings(), advanced).filter; },
+          [ctx](core::Filter const& f) { writeSetting(ctx, kFilterKey, f.toJson()); },
           std::move(options)
       ),
       mCtx(std::move(ctx)),
       mAdvanced(advanced) {}
 
-    static constexpr int kToggleOffset = 5; ///< control-row slot of the toggle
-    static constexpr int kInfoOffset   = 6;
-
     void build(Player& player) override {
         FilterMenu::build(player);
+        if (!alive(mCtx)) return;
         int  control = size() - 9;
-        bool only    = onlyReversible(mCtx.settings());
-        auto state   = only ? trFor(player, "abp.filter.on", "§aOn") : trFor(player, "abp.filter.off", "§cOff");
+        auto s       = CompactingSettings::read(mCtx.settings(), mAdvanced);
         setSlot(
-            control + kToggleOffset,
+            control + kUncraftableOffset,
             std::make_shared<ui::ButtonSlot>(
                 ui::icon(
-                    only ? "minecraft:crafting_table" : "minecraft:piston",
-                    trFor(player, "abp.compacting.only_uncraftable", "Only uncraftable: {}", state),
-                    {trFor(player, "abp.compacting.only_uncraftable.help1", "§7Only compact items that can be"),
-                     trFor(player, "abp.compacting.only_uncraftable.help2", "§7crafted back into the original items"),
-                     trFor(player, "abp.filter.click_to_toggle", "§7Click to toggle")}
+                    s.compactAnything ? "minecraft:piston" : "minecraft:crafting_table",
+                    s.compactAnything ? trFor(player, "abp.compacting.button.compact_anything", "Compact Anything")
+                                      : trFor(player, "abp.compacting.button.compact_only_uncraftable", "Compact Only Uncraftable")
                 ),
                 [this](ui::ClickContext const&) {
-                    auto& s                            = mCtx.settings();
-                    bool  next                         = !onlyReversible(s);
-                    s[std::string(kOnlyReversibleKey)] = next;
-                    mCtx.saveSettings(true);
+                    writeSetting(mCtx, kCompactAnythingKey, !CompactingSettings::read(mCtx.settings(), mAdvanced).compactAnything);
                     invalidate();
                 }
             )
         );
         setSlot(
-            control + kInfoOffset,
-            std::make_shared<ui::StaticSlot>(ui::icon(
-                mAdvanced ? "minecraft:iron_block" : "minecraft:quartz_block",
-                mAdvanced ? trFor(player, "abp.compacting.grid.advanced", "Compacts 3x3 and 2x2 recipes")
-                          : trFor(player, "abp.compacting.grid.basic", "Compacts 2x2 recipes")
-            ))
+            control + kWorkInGuiOffset,
+            std::make_shared<ui::ButtonSlot>(
+                ui::icon(
+                    "minecraft:chest",
+                    s.workInGui ? trFor(player, "abp.compacting.button.works_in_gui", "Works in GUI as well")
+                                : trFor(player, "abp.compacting.button.only_automatic", "Only works with other upgrades/automation")
+                ),
+                [this](ui::ClickContext const&) {
+                    writeSetting(mCtx, kWorkInGuiKey, !CompactingSettings::read(mCtx.settings(), mAdvanced).workInGui);
+                    invalidate();
+                }
+            )
         );
     }
 
@@ -336,55 +363,43 @@ public:
     [[nodiscard]] virtual bool advanced() const = 0;
 
     void attach(UpgradeContext const& ctx, core::BackpackInventory& inventory) override {
-        auto engine            = std::make_shared<Engine>();
-        engine->backpack       = ctx.backpackPtr();
-        engine->filter         = readFilter(ctx.settings(), advanced());
-        engine->onlyReversible = onlyReversible(ctx.settings());
-        engine->grids          = advanced() ? std::vector<int>{3, 2} : std::vector<int>{2};
-        engine->snapshotAll(inventory);
-        // Look at what is already stored too (new install, changed settings, loaded backpack).
-        for (int i = 0; i < inventory.size(); ++i) addKind(engine->pending, inventory.at(i));
-        engine->schedule();
-        inventory.addChangeListener(ctx.hookOwner(), [engine](int slot) {
+        auto engine      = std::make_shared<Engine>();
+        engine->backpack = ctx.backpackPtr();
+        engine->settings = CompactingSettings::read(ctx.settings(), advanced());
+        engine->calculateFullSlots(inventory);
+        inventory.addInsertListener(ctx.hookOwner(), [engine](int slot, core::AccessContext const& ac) {
             auto bp = engine->backpack.lock();
             if (!bp) return;
-            engine->onChange(bp->inventory(), slot);
+            if (ac.source == core::Source::Player) engine->onSlotChange(bp->inventory(), slot);
+            else engine->onAfterInsert(bp->inventory(), slot);
+        });
+        inventory.addExtractListener(ctx.hookOwner(), [engine](int slot, core::ItemStackData const& original, core::AccessContext const& ac) {
+            auto bp = engine->backpack.lock();
+            if (!bp) return;
+            engine->onAfterExtract(original);
+            if (ac.source == core::Source::Player) engine->onSlotChange(bp->inventory(), slot);
         });
     }
 
     std::shared_ptr<ui::Menu> createSettingsMenu(Player& player, UpgradeContext const& ctx) override {
         ui::FilterMenu::Options options;
-        options.slots        = advanced() ? kAdvancedFilterSlots : kBasicFilterSlots;
-        options.allowMatchBy = advanced();
-        // Items with custom data or damage never compact, so NBT / durability matching is moot.
-        options.allowNbt        = false;
-        options.allowDurability = false;
-        options.onBack       = [bp = ctx.backpackPtr()](Player& p) {
+        options.slots           = filterSlots(advanced());
+        options.allowMatchBy    = advanced();
+        options.allowNbt        = advanced();
+        options.allowDurability = advanced();
+        options.onBack          = [bp = ctx.backpackPtr()](Player& p) {
             ui::BackpackMenu::openBackpack(p, bp, {}, ui::BackpackMenu::View::Upgrades);
         };
         return std::make_shared<CompactingMenu>(displayName(*this, &player), ctx, advanced(), std::move(options));
     }
 
     [[nodiscard]] std::vector<std::string> describe(Player& player, UpgradeContext const& ctx) const override {
-        std::vector<std::string> lines;
-        lines.push_back(
-            advanced() ? trFor(player, "abp.compacting.grid.advanced", "Compacts 3x3 and 2x2 recipes")
-                       : trFor(player, "abp.compacting.grid.basic", "Compacts 2x2 recipes")
-        );
-        auto state = onlyReversible(ctx.settings()) ? trFor(player, "abp.filter.on", "§aOn")
-                                                    : trFor(player, "abp.filter.off", "§cOff");
-        lines.push_back(trFor(player, "abp.compacting.only_uncraftable", "Only uncraftable: {}", state));
-        auto filter = readFilter(ctx.settings(), advanced());
-        int  used   = 0;
-        for (auto const& g : filter.ghosts) used += g.empty() ? 0 : 1;
-        if (used > 0) {
-            lines.push_back(
-                filter.mode == core::FilterMode::Allow
-                    ? trFor(player, "abp.compacting.filter.allow", "§7Allow list: {} items", used)
-                    : trFor(player, "abp.compacting.filter.deny", "§7Deny list: {} items", used)
-            );
-        }
-        return lines;
+        auto s = CompactingSettings::read(ctx.settings(), advanced());
+        return {
+            "§7"
+            + (s.compactAnything ? trFor(player, "abp.compacting.button.compact_anything", "Compact Anything")
+                                 : trFor(player, "abp.compacting.button.compact_only_uncraftable", "Compact Only Uncraftable"))
+        };
     }
 };
 
@@ -392,13 +407,14 @@ class CompactingUpgrade final : public CompactingUpgradeBase {
 public:
     [[nodiscard]] UpgradeInfo const& info() const override {
         static UpgradeInfo const i{
-            .id           = "compacting",
-            .itemId       = "alleviatedbackpacks:compacting_upgrade",
-            .nameKey      = "abp.compacting.name",
-            .nameFallback = "Compacting Upgrade",
-            .tier         = UpgradeTier::Basic,
-            .group        = "compacting",
-            .hasSettings  = true,
+            .id             = std::string(kBasicId),
+            .itemId         = "alleviatedbackpacks:compacting_upgrade",
+            .nameKey        = "abp.compacting.name",
+            .nameFallback   = "Compacting Upgrade",
+            .tier           = UpgradeTier::Basic,
+            .group          = "compacting",
+            .maxPerBackpack = 9, // SB: no limit
+            .hasSettings    = true,
         };
         return i;
     }
@@ -409,13 +425,14 @@ class AdvancedCompactingUpgrade final : public CompactingUpgradeBase {
 public:
     [[nodiscard]] UpgradeInfo const& info() const override {
         static UpgradeInfo const i{
-            .id           = "advanced_compacting",
-            .itemId       = "alleviatedbackpacks:advanced_compacting_upgrade",
-            .nameKey      = "abp.compacting.advanced_name",
-            .nameFallback = "Advanced Compacting Upgrade",
-            .tier         = UpgradeTier::Advanced,
-            .group        = "compacting",
-            .hasSettings  = true,
+            .id             = std::string(kAdvancedId),
+            .itemId         = "alleviatedbackpacks:advanced_compacting_upgrade",
+            .nameKey        = "abp.compacting.advanced_name",
+            .nameFallback   = "Advanced Compacting Upgrade",
+            .tier           = UpgradeTier::Advanced,
+            .group          = "compacting",
+            .maxPerBackpack = 9,
+            .hasSettings    = true,
         };
         return i;
     }
@@ -428,318 +445,3 @@ public:
 ABP_REGISTER_UPGRADE(abp::upgrade::compacting::CompactingUpgrade);
 ABP_REGISTER_UPGRADE(abp::upgrade::compacting::AdvancedCompactingUpgrade);
 ABP_REGISTER_MODULE(abp::upgrade::compacting::CompactingScheduler);
-
-// ---- selftests -----------------------------------------------------------------------------------
-
-namespace abp::upgrade::compacting {
-namespace {
-
-using selftest::Context;
-using Where  = ui::MenuManager::SlotAddress::Where;
-using Action = ui::MenuManager::ActionType;
-
-core::ItemStackData data(std::string_view id, int count) {
-    return game::ItemConv::toData(game::ItemConv::make(id, count));
-}
-
-int countOf(game::Backpack& bp, std::string_view id) {
-    return static_cast<int>(bp.inventory().count([&](core::ItemStackData const& s) { return s.id == id; }));
-}
-
-std::string counts(game::Backpack& bp, std::initializer_list<std::string_view> ids) {
-    std::string out;
-    for (auto id : ids) out += std::string(id) + "=" + std::to_string(countOf(bp, id)) + " ";
-    return out;
-}
-
-void setOnlyReversible(std::shared_ptr<game::Backpack> const& bp, int slot, bool value) {
-    UpgradeContext ctx(bp, slot);
-    ctx.settings()[std::string(kOnlyReversibleKey)] = value;
-    ctx.saveSettings(true);
-}
-
-
-
-ABP_REGISTER_SELFTEST("compacting.recipe_lookup", [](Context& ctx) {
-    invalidateCache();
-    struct Case {
-        std::string_view item;
-        int              grid;
-        std::string_view result;
-        bool             reversible;
-    };
-    Case const cases[] = {
-        {"minecraft:iron_ingot",  3, "minecraft:iron_block",     true },
-        {"minecraft:iron_nugget", 3, "minecraft:iron_ingot",     true },
-        {"minecraft:gold_nugget", 3, "minecraft:gold_ingot",     true },
-        {"minecraft:wheat",       3, "minecraft:hay_block",      true },
-        {"minecraft:slime_ball",  3, "minecraft:slime",          true },
-        {"minecraft:redstone",    3, "minecraft:redstone_block", true },
-        {"minecraft:quartz",      2, "minecraft:quartz_block",   false},
-    };
-    for (auto const& c : cases) {
-        std::string name(c.item);
-        auto        found = findCompaction(data(c.item, 1), c.grid);
-        if (!found) {
-            ctx.check(false, name + ": no compaction found");
-            continue;
-        }
-        ctx.check(found->result.id == c.result, name + " -> " + found->result.id);
-        ctx.check(found->result.sameItem(data(c.result, 1)), name + ": result merges with normal " + std::string(c.result));
-        ctx.check(found->result.count == 1, name + ": result count " + std::to_string(found->result.count));
-        ctx.check(found->inputs == c.grid * c.grid, name + ": inputs");
-        ctx.check(found->reversible == c.reversible, name + ": reversible flag");
-    }
-    // 4 iron ingots in a 2x2 grid are an iron trapdoor: found, but not uncraftable.
-    auto trapdoor = findCompaction(data("minecraft:iron_ingot", 1), 2);
-    ctx.check(trapdoor && trapdoor->result.id == "minecraft:iron_trapdoor" && !trapdoor->reversible,
-              "2x2 iron ingots -> iron trapdoor (not reversible)");
-    ctx.check(!findCompaction(data("minecraft:dirt", 1), 3).has_value(), "no 3x3 recipe for dirt");
-    ctx.check(!findCompaction(data("minecraft:iron_block", 1), 3).has_value(), "iron blocks don't compact further");
-    // Named items are never compacted (their custom data would be lost).
-    auto named = game::ItemConv::make("minecraft:iron_ingot", 1);
-    game::ItemConv::setDisplay(named, "Special");
-    ctx.check(!findCompaction(game::ItemConv::toData(named), 3).has_value(), "named items are skipped");
-});
-
-ABP_REGISTER_SELFTEST("compacting.advanced_3x3", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto  bp   = ctx.createBackpack(core::Tier::Iron);
-    int   slot = ctx.installUpgrade(bp, "advanced_compacting");
-    auto& inv  = bp->inventory();
-    core::AccessContext player{core::Source::Player};
-
-    auto r = inv.insert(data("minecraft:iron_ingot", 64), player);
-    ctx.check(r.inserted == 64 && r.remainder.empty(), "insert reports all 64 taken");
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:iron_block") == 7 && countOf(*bp, "minecraft:iron_ingot") == 1,
-              "64 ingots -> 7 blocks + 1 ingot: " + counts(*bp, {"minecraft:iron_block", "minecraft:iron_ingot"}));
-    (void)inv.insert(data("minecraft:iron_ingot", 8), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:iron_block") == 8 && countOf(*bp, "minecraft:iron_ingot") == 0,
-              "8 more ingots complete another block: " + counts(*bp, {"minecraft:iron_block", "minecraft:iron_ingot"}));
-
-    // Chains: 81 nuggets -> 9 ingots -> 1 block (in one go).
-    (void)inv.insert(data("minecraft:gold_nugget", 64), player);
-    (void)inv.insert(data("minecraft:gold_nugget", 17), core::AccessContext{core::Source::Pickup});
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:gold_block") == 1 && countOf(*bp, "minecraft:gold_nugget") == 0
-                  && countOf(*bp, "minecraft:gold_ingot") == 0,
-              "nuggets chain into a block: " + counts(*bp, {"minecraft:gold_nugget", "minecraft:gold_ingot", "minecraft:gold_block"}));
-
-    // Placing into a specific slot (GUI) compacts too.
-    (void)inv.insertInto(40, data("minecraft:wheat", 18), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:hay_block") == 2 && countOf(*bp, "minecraft:wheat") == 0, "wheat -> hay bales");
-
-    // 2x2 recipes are used by the advanced upgrade as well (once "only uncraftable" is off), and a
-    // settings change compacts what is already stored.
-    (void)inv.insert(data("minecraft:quartz", 5), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:quartz") == 5, "quartz kept: its block can't be uncrafted");
-    setOnlyReversible(bp, slot, false);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:quartz_block") == 1 && countOf(*bp, "minecraft:quartz") == 1,
-              "stored quartz compacted once only-uncraftable is off: " + counts(*bp, {"minecraft:quartz", "minecraft:quartz_block"}));
-
-    // Items with a 3x3 shape only use it: 4 leftover ingots don't become an iron trapdoor (2x2).
-    (void)inv.insert(data("minecraft:iron_ingot", 13), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:iron_block") == 9 && countOf(*bp, "minecraft:iron_ingot") == 4
-                  && countOf(*bp, "minecraft:iron_trapdoor") == 0,
-              "3x3 shape wins: " + counts(*bp, {"minecraft:iron_ingot", "minecraft:iron_block", "minecraft:iron_trapdoor"}));
-
-    // Disabled upgrades do nothing.
-    upgrade::setEnabled(bp, slot, false);
-    (void)inv.insert(data("minecraft:iron_ingot", 9), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:iron_ingot") == 13, "disabled upgrade leaves ingots alone");
-});
-
-ABP_REGISTER_SELFTEST("compacting.basic_2x2_only", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto  bp   = ctx.createBackpack(core::Tier::Leather);
-    int   slot = ctx.installUpgrade(bp, "compacting");
-    auto& inv  = bp->inventory();
-    core::AccessContext player{core::Source::Player};
-    (void)inv.insert(data("minecraft:iron_ingot", 27), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:iron_ingot") == 27, "basic compacting ignores 3x3 recipes");
-    (void)inv.insert(data("minecraft:quartz", 8), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:quartz") == 8, "default: only uncraftable recipes");
-    // Only uncraftable off: quartz -> quartz blocks, and the stored ingots -> iron trapdoors (2x2).
-    setOnlyReversible(bp, slot, false);
-    (void)inv.insert(data("minecraft:quartz", 1), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:quartz_block") == 2 && countOf(*bp, "minecraft:quartz") == 1,
-              "2x2 compaction: " + counts(*bp, {"minecraft:quartz", "minecraft:quartz_block"}));
-    ctx.check(countOf(*bp, "minecraft:iron_trapdoor") == 6 && countOf(*bp, "minecraft:iron_ingot") == 3,
-              "2x2 iron: " + counts(*bp, {"minecraft:iron_ingot", "minecraft:iron_trapdoor"}));
-
-    auto iron = ctx.createBackpack(core::Tier::Iron); // 2 upgrade slots
-    ctx.installUpgrade(iron, "compacting", 0);
-    auto advancedItem = data("alleviatedbackpacks:advanced_compacting_upgrade", 1);
-    ctx.require(!advancedItem.empty(), "advanced compacting item is registered");
-    ctx.check(!upgrade::canInstall(iron, 1, advancedItem, nullptr), "only one compacting upgrade per backpack");
-});
-
-ABP_REGISTER_SELFTEST("compacting.filter", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto  bp   = ctx.createBackpack(core::Tier::Iron);
-    int   slot = ctx.installUpgrade(bp, "advanced_compacting");
-    auto& inv  = bp->inventory();
-    core::AccessContext player{core::Source::Player};
-    UpgradeContext      uctx(bp, slot);
-    core::Filter        f(kAdvancedFilterSlots);
-    f.setGhost(0, data("minecraft:wheat", 1));
-    uctx.settings()[std::string(kFilterKey)] = f.toJson();
-    uctx.saveSettings(true);
-    (void)inv.insert(data("minecraft:iron_ingot", 9), player);
-    (void)inv.insert(data("minecraft:wheat", 9), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:iron_ingot") == 9, "allow list: ingots not listed, not compacted");
-    ctx.check(countOf(*bp, "minecraft:hay_block") == 1, "allow list: wheat compacted");
-
-    f.mode = core::FilterMode::Deny;
-    uctx.settings()[std::string(kFilterKey)] = f.toJson();
-    uctx.saveSettings(true);
-    (void)inv.insert(data("minecraft:wheat", 9), player);
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:wheat") == 9, "deny list: wheat kept");
-    ctx.check(countOf(*bp, "minecraft:iron_block") == 1 && countOf(*bp, "minecraft:iron_ingot") == 0,
-              "deny list: stored ingots compacted: " + counts(*bp, {"minecraft:iron_ingot", "minecraft:iron_block"}));
-});
-
-ABP_REGISTER_SELFTEST("compacting.no_loss_when_full", [](Context& ctx) -> ll::coro::CoroTask<> {
-    core::AccessContext player{core::Source::Player};
-    long long           total = 0;
-    auto                all   = [](core::ItemStackData const& s) { return !s.empty(); };
-    {
-        // 25 slots of dirt, 13 ingots, 1 more slot of dirt: crafting a block would not free a slot.
-        auto  bp  = ctx.createBackpack(core::Tier::Leather); // 27 slots
-        auto& inv = bp->inventory();
-        for (int i = 0; i < 27; ++i) inv.set(i, data("minecraft:dirt", 64));
-        inv.set(25, data("minecraft:iron_ingot", 13));
-        ctx.installUpgrade(bp, "advanced_compacting");
-        co_await ctx.ticks(2);
-        ctx.check(countOf(*bp, "minecraft:iron_ingot") == 13 && countOf(*bp, "minecraft:iron_block") == 0,
-                  "no room for a block: ingots kept: " + counts(*bp, {"minecraft:iron_ingot", "minecraft:iron_block"}));
-        ctx.check(countOf(*bp, "minecraft:dirt") == 26 * 64, "dirt untouched");
-        // Space frees up (the player takes dirt out): the waiting ingots compact.
-        auto taken = inv.extract(3, 64, player);
-        ctx.check(taken.count == 64, "took dirt out");
-        co_await ctx.ticks(2);
-        ctx.check(countOf(*bp, "minecraft:iron_block") == 1 && countOf(*bp, "minecraft:iron_ingot") == 4,
-                  "freed space is used: " + counts(*bp, {"minecraft:iron_ingot", "minecraft:iron_block"}));
-        total = inv.count(all);
-        ctx.check(total == 25 * 64 + 1 + 4, "nothing lost or duplicated (" + std::to_string(total) + ")");
-    }
-    {
-        // 26 slots of dirt, 8 ingots in the last one: the 9th ingot completes a set whose inputs
-        // free the very slot the block then goes into.
-        auto  bp  = ctx.createBackpack(core::Tier::Leather);
-        auto& inv = bp->inventory();
-        for (int i = 0; i < 26; ++i) inv.set(i, data("minecraft:dirt", 64));
-        inv.set(26, data("minecraft:iron_ingot", 8));
-        ctx.installUpgrade(bp, "advanced_compacting");
-        auto r = inv.insert(data("minecraft:iron_ingot", 1), player);
-        ctx.check(r.inserted == 1, "the ingot fits");
-        co_await ctx.ticks(2);
-        ctx.check(countOf(*bp, "minecraft:iron_block") == 1 && countOf(*bp, "minecraft:iron_ingot") == 0,
-                  "inputs freed the slot for the block: " + counts(*bp, {"minecraft:iron_ingot", "minecraft:iron_block"}));
-        total = inv.count(all);
-        ctx.check(total == 26 * 64 + 1, "nothing lost or duplicated (" + std::to_string(total) + ")");
-    }
-});
-
-/// Voids iron blocks (stand-in for a Void upgrade): compacting must not turn ingots into voided blocks.
-class VoidBlocksUpgrade : public IUpgrade {
-public:
-    UpgradeInfo mInfo{
-        .id           = "selftest_compacting_void",
-        .itemId       = "minecraft:structure_void",
-        .nameKey      = "abp.selftest.upgrade",
-        .nameFallback = "Selftest Upgrade",
-    };
-    [[nodiscard]] UpgradeInfo const& info() const override { return mInfo; }
-    void attach(UpgradeContext const& ctx, core::BackpackInventory& inv) override {
-        inv.addInsertFilter(ctx.hookOwner(), 0, [](core::InsertQuery const& q) {
-            return q.stack.id == "minecraft:iron_block" ? core::InsertVerdict::Void : core::InsertVerdict::Allow;
-        });
-    }
-};
-
-ABP_REGISTER_SELFTEST("compacting.never_voids_inputs", [](Context& ctx) -> ll::coro::CoroTask<> {
-    ScopedUpgrade scoped(std::make_shared<VoidBlocksUpgrade>());
-    auto          bp = ctx.createBackpack(core::Tier::Iron);
-    ctx.installUpgrade(bp, "advanced_compacting");
-    ctx.installUpgrade(bp, "selftest_compacting_void");
-    (void)bp->inventory().insert(data("minecraft:iron_ingot", 18), core::AccessContext{core::Source::Player});
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:iron_ingot") == 18, "ingots kept when the result would be voided: "
-                                                              + counts(*bp, {"minecraft:iron_ingot", "minecraft:iron_block"}));
-});
-
-ABP_REGISTER_SELFTEST("compacting.settings_from_backpack", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto& mm     = ui::MenuManager::get();
-    auto& player = ctx.player();
-    auto  bp     = ctx.createBackpack(core::Tier::Iron);
-    int   slot   = ctx.installUpgrade(bp, "compacting");
-    ctx.require(ui::BackpackMenu::openBackpack(player, bp, {}, ui::BackpackMenu::View::Upgrades), "open backpack");
-    mm.forceShown(player);
-    co_await ctx.ticks(2);
-    // The settings button of upgrade slot 0 is menu slot 18.
-    (void)mm.simulate(player, {Action::Take, {Where::Menu, 18 + slot}, {Where::Cursor, 0}, 1});
-    co_await ctx.ticks(10);
-    auto menu = mm.current(player);
-    ctx.require(menu != nullptr, "a menu is open after the settings button");
-    ctx.check(menu->title() == displayName(*upgrade::byId("compacting"), &player), "settings menu open: " + menu->title());
-    ctx.check(menu->size() == 27, "basic filter fits a single chest");
-    mm.forceShown(player);
-    // Back returns to the backpack's upgrades page.
-    (void)mm.simulate(player, {Action::Take, {Where::Menu, 26}, {Where::Cursor, 0}, 1});
-    co_await ctx.ticks(10);
-    auto back = std::dynamic_pointer_cast<ui::BackpackMenu>(mm.current(player));
-    ctx.check(back && back->view() == ui::BackpackMenu::View::Upgrades, "back to the upgrades page");
-    mm.close(player);
-});
-
-ABP_REGISTER_SELFTEST("compacting.settings_menu", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto& mm     = ui::MenuManager::get();
-    auto& player = ctx.player();
-    auto  bp     = ctx.createBackpack(core::Tier::Iron);
-    int   slot   = ctx.installUpgrade(bp, "advanced_compacting");
-    auto* type   = upgrade::byId("advanced_compacting");
-    ctx.require(type != nullptr, "upgrade registered");
-    ctx.require(type->info().hasSettings, "has settings");
-    UpgradeContext uctx(bp, slot, &player);
-    auto           menu = type->createSettingsMenu(player, uctx);
-    ctx.require(menu != nullptr, "settings menu");
-    ctx.require(mm.open(player, menu), "open settings");
-    mm.forceShown(player);
-    co_await ctx.ticks(2);
-    auto settings = [&]() -> nlohmann::json const& { return bp->data().upgrades[static_cast<std::size_t>(slot)].settings; };
-    int  toggle   = menu->size() - 9 + CompactingMenu::kToggleOffset;
-    ctx.check(mm.shownItem(player, toggle).getTypeName() == "minecraft:crafting_table", "toggle shown (on)");
-    ctx.check(onlyReversible(settings()), "default on");
-    (void)mm.simulate(player, {Action::Take, {Where::Menu, toggle}, {Where::Cursor, 0}, 1});
-    ctx.check(!onlyReversible(settings()), "toggled off");
-    // A ghost item in the 16th filter slot.
-    ctx.require(ctx.give(player, game::ItemConv::make("minecraft:wheat", 3), 4) == 4, "give wheat");
-    (void)mm.simulate(player, {Action::Take, {Where::Inventory, 4}, {Where::Cursor, 0}, 3});
-    (void)mm.simulate(player, {Action::Place, {Where::Cursor, 0}, {Where::Menu, 15}, 3});
-    auto f = readFilter(settings(), true);
-    ctx.check(f.ghosts.size() == kAdvancedFilterSlots && f.ghosts[15].id == "minecraft:wheat", "16th filter slot set");
-    co_await ctx.ticks(2);
-    ctx.check(mm.shownItem(player, toggle).getTypeName() == "minecraft:piston", "toggle icon follows the setting");
-    mm.close(player);
-    auto lore = type->describe(player, uctx);
-    ctx.check(lore.size() == 3, "describe: grid, toggle, filter (" + std::to_string(lore.size()) + " lines)");
-    // The new settings apply right away: the filter only allows wheat.
-    (void)bp->inventory().insert(data("minecraft:quartz", 4), core::AccessContext{core::Source::Player});
-    (void)bp->inventory().insert(data("minecraft:wheat", 9), core::AccessContext{core::Source::Player});
-    co_await ctx.ticks(2);
-    ctx.check(countOf(*bp, "minecraft:quartz") == 4, "quartz not in the filter");
-    ctx.check(countOf(*bp, "minecraft:hay_block") == 1, "wheat compacted");
-});
-
-} // namespace
-} // namespace abp::upgrade::compacting

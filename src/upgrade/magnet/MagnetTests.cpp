@@ -16,6 +16,7 @@
 #include "mc/world/level/Spawner.h"
 #include "mc/world/phys/AABB.h"
 
+#include "api/BackpackCapabilities.h"
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "mod/Config.h"
@@ -32,6 +33,9 @@ using core::Tier;
 using Where  = ui::MenuManager::SlotAddress::Where;
 using Action = ui::MenuManager::ActionType;
 
+constexpr int kBasicSlots    = 9;
+constexpr int kAdvancedSlots = 16;
+
 core::ItemStackData data(std::string_view id, int count) { return game::ItemConv::toData(game::ItemConv::make(id, count)); }
 
 int countOf(game::Backpack& bp, std::string_view id) {
@@ -41,7 +45,7 @@ int countOf(game::Backpack& bp, std::string_view id) {
 /// Removes every item entity / XP orb near the player (leftovers of other tests).
 void clearAround(Player& player, int range = 12) {
     auto& region = player.getDimensionBlockSource();
-    for (auto* a : region.getEntities(rangeBox(player, range))) {
+    for (auto* a : region.getEntities(rangeBox(carrierPos(player), range))) {
         if (a && (a->isType(ActorType::ItemEntity) || a->isType(ActorType::Experience))) a->remove();
     }
 }
@@ -50,10 +54,9 @@ void clearAround(Player& player, int range = 12) {
 /// clears loose items there.
 ll::coro::CoroTask<> isolate(Context& ctx, Player& player) {
     auto pos = player.getFeetPos();
-    pos      = Vec3{pos.x + 24.0f, pos.y, pos.z + 24.0f};
+    pos      = Vec3{std::floor(pos.x) + 24.5f, pos.y, std::floor(pos.z) + 24.5f};
     player.teleport(pos, player.getDimensionId());
     co_await ctx.ticks(3);
-    // Stand on the ground (the test player spawns in the air above the world spawn).
     auto ground = player.getDimensionBlockSource().getAboveTopSolidBlock(
         static_cast<int>(std::floor(pos.x)),
         static_cast<int>(std::floor(pos.z)),
@@ -67,7 +70,7 @@ ll::coro::CoroTask<> isolate(Context& ctx, Player& player) {
 }
 
 /// Spawns an item entity `dx` blocks east (`dz` south) of the player's feet, with no pickup delay.
-ActorUniqueID spawnItem(Player& player, std::string_view id, int count, float dx, float dz = 0.0f, Actor* source = nullptr) {
+ActorUniqueID spawnItem(Player& player, std::string_view id, int count, float dx, float dz = 0.0f) {
     auto  stack = game::ItemConv::make(id, count);
     auto  feet  = player.getFeetPos();
     auto* item  = player.getLevel().getSpawner().spawnItem(
@@ -79,13 +82,8 @@ ActorUniqueID spawnItem(Player& player, std::string_view id, int count, float dx
     );
     if (!item) return ActorUniqueID{};
     item->pickupDelay() = 0;
-    // spawnItem throws the item in a random direction; keep it where it was put so it neither
-    // drifts into the player's vanilla pickup reach nor out of the magnet's range.
+    // spawnItem throws the item in a random direction; keep it where it was put.
     const_cast<Vec3&>(item->getPosDelta()) = Vec3{0.0f, 0.0f, 0.0f};
-    if (source) {
-        item->setSourceEntity(source);
-        item->age() = 0;
-    }
     return item->getOrCreateUniqueID();
 }
 
@@ -95,31 +93,28 @@ ItemActor* findItem(Player& player, ActorUniqueID id) {
     return static_cast<ItemActor*>(a);
 }
 
-/// Total count of `id` lying on the ground near the player.
-int groundCount(Player& player, std::string_view id, int range = 6) {
-    int n = 0;
-    for (auto* a : player.getDimensionBlockSource().getEntities(rangeBox(player, range), 2.0f, ActorType::ItemEntity)) {
-        if (!a || a->mRemoved || !a->isType(ActorType::ItemEntity)) continue;
-        auto const& s = static_cast<ItemActor*>(a)->item();
-        if (!s.isNull() && s.getTypeName() == id) n += s.mCount;
-    }
-    return n;
-}
-
 std::vector<ExperienceOrb*> orbsAround(Player& player, int range) {
     std::vector<ExperienceOrb*> out;
-    for (auto* a : player.getDimensionBlockSource().getEntities(rangeBox(player, range), 2.0f, ActorType::Experience)) {
+    for (auto* a : player.getDimensionBlockSource().getEntities(rangeBox(carrierPos(player), range), 2.0f, ActorType::Experience)) {
         if (a && !a->mRemoved && a->isType(ActorType::Experience)) out.push_back(static_cast<ExperienceOrb*>(a));
     }
     return out;
 }
 
-/// Runs the upgrade's tick directly (not carried, so the PlayerTicker doesn't race the test).
-void tickMagnet(std::shared_ptr<game::Backpack> const& bp, int slot, Player& player) {
-    auto* type = upgradeFor(bp->data().upgrades.at(static_cast<std::size_t>(slot)).item);
-    if (!type) return;
-    UpgradeContext ctx(bp, slot, &player);
-    type->onTick(TickContext{ctx, player, game::ItemLocation{}, 10});
+/// One magnet run as the carrier (not carried, so the shared clock doesn't race the test).
+int tickMagnet(std::shared_ptr<game::Backpack> const& bp, int slot, Player& player) {
+    return runMagnet(UpgradeContext(bp, slot, &player), &player, player.getDimensionBlockSource(), carrierPos(player));
+}
+
+int xpInTanks(std::shared_ptr<game::Backpack> const& bp) {
+    auto h = api::backpack::fluidHandler(bp);
+    if (!h) return 0;
+    int n = 0;
+    for (int i = 0; i < h->tanks(); ++i) {
+        auto f = h->fluidInTank(i);
+        if (f.id == api::fluids::Experience) n += f.amount;
+    }
+    return n;
 }
 
 ABP_REGISTER_SELFTEST("magnet.registration", [](Context& ctx) {
@@ -132,23 +127,42 @@ ABP_REGISTER_SELFTEST("magnet.registration", [](Context& ctx) {
     ctx.check(!game::ItemConv::make(adv->info().itemId).isNull(), "advanced item exists in the behavior pack");
     auto bp = ctx.createBackpack(Tier::Iron); // 2 upgrade slots
     ctx.installUpgrade(bp, std::string(kBasicId));
-    auto advItem = data(adv->info().itemId, 1);
-    ctx.check(!canInstall(bp, 1, advItem, nullptr), "only one magnet (basic or advanced) per backpack");
+    ctx.check(canInstall(bp, 1, data(adv->info().itemId, 1), nullptr), "SB has no magnet limit: basic + advanced together");
     auto& s = bp->data().upgrades[0].settings;
-    ctx.check(s.value("pickupItems", false) && s.value("pickupXp", false), "items and XP on by default");
+    ctx.check(Settings::read(s, 9, false).pickupItems && Settings::read(s, 9, false).pickupXp, "items and XP on by default");
+    auto const& cfg = config::get<MagnetConfig>();
+    ctx.check(cfg.magnetUpgrade.filterSlots == 9 && cfg.magnetUpgrade.slotsInRow == 3 && cfg.magnetUpgrade.magnetRange == 3, "basic config = SB");
+    ctx.check(
+        cfg.advancedMagnetUpgrade.filterSlots == 16 && cfg.advancedMagnetUpgrade.slotsInRow == 4
+            && cfg.advancedMagnetUpgrade.magnetRange == 5,
+        "advanced config = SB"
+    );
 });
 
 ABP_REGISTER_SELFTEST("magnet.settings_parse", [](Context& ctx) {
-    auto s = Settings::read(nlohmann::json::object(), kBasicSlots);
+    auto s = Settings::read(nlohmann::json::object(), kBasicSlots, false);
     ctx.check(s.pickupItems && s.pickupXp && s.filter.ghosts.size() == kBasicSlots, "defaults");
+    ctx.check(s.filter.mode == core::FilterMode::Deny && s.filter.passes(data("minecraft:dirt", 1)), "default: empty block list matches all");
     core::Filter f(kAdvancedSlots);
-    f.mode = core::FilterMode::Deny;
-    f.setGhost(3, data("minecraft:dirt", 1));
+    f.mode = core::FilterMode::Allow;
     auto j = nlohmann::json{{"pickupItems", false}, {"pickupXp", true}, {"filter", f.toJson()}};
-    s      = Settings::read(j, kAdvancedSlots);
+    s      = Settings::read(j, kAdvancedSlots, true);
     ctx.check(!s.pickupItems && s.pickupXp, "toggles read");
-    ctx.check(s.filter.mode == core::FilterMode::Deny && s.filter.ghosts.size() == kAdvancedSlots, "filter read");
-    ctx.check(!s.filter.passes(data("minecraft:dirt", 1)), "deny list rejects dirt");
+    ctx.check(!s.filter.passes(data("minecraft:dirt", 1)), "SC: an empty allow list matches nothing");
+    f.setGhost(3, data("minecraft:dirt", 1));
+    s = Settings::read(nlohmann::json{{"filter", f.toJson()}}, kAdvancedSlots, true);
+    ctx.check(s.filter.passes(data("minecraft:dirt", 1)) && !s.filter.passes(data("minecraft:stone", 1)), "allow list");
+});
+
+ABP_REGISTER_SELFTEST("magnet.shared_clock", [](Context& ctx) {
+    resetSharedClock();
+    std::vector<int> fired;
+    for (int t = 1000; t < 1040; ++t) {
+        if (advanceSharedClock(static_cast<std::uint64_t>(t))) fired.push_back(t);
+    }
+    resetSharedClock();
+    ctx.require(fired.size() >= 3, "clock fires");
+    ctx.check(fired[0] == 1010 && fired[1] == 1021 && fired[2] == 1032, "SC clock: first after 10 ticks, then every 11 ticks");
 });
 
 ABP_REGISTER_SELFTEST("magnet.pulls_items_in_range", [](Context& ctx) -> ll::coro::CoroTask<> {
@@ -157,11 +171,13 @@ ABP_REGISTER_SELFTEST("magnet.pulls_items_in_range", [](Context& ctx) -> ll::cor
     auto bp   = ctx.createBackpack(Tier::Leather);
     int  slot = ctx.installUpgrade(bp, std::string(kBasicId));
     auto near = spawnItem(player, "minecraft:cobblestone", 20, 2.3f);
+    auto edge = spawnItem(player, "minecraft:cobblestone", 3, 3.3f, 3.3f); // corner of the cube: inside
     auto far  = spawnItem(player, "minecraft:cobblestone", 7, 7.0f);
-    ctx.require(findItem(player, near) && findItem(player, far), "items spawned");
-    tickMagnet(bp, slot, player);
-    ctx.check(countOf(*bp, "minecraft:cobblestone") == 20, "near stack pulled into the backpack (got "
+    ctx.require(findItem(player, near) && findItem(player, far) && findItem(player, edge), "items spawned");
+    int cd = tickMagnet(bp, slot, player);
+    ctx.check(countOf(*bp, "minecraft:cobblestone") == 23, "items in the range cube pulled (got "
                   + std::to_string(countOf(*bp, "minecraft:cobblestone")) + ")");
+    ctx.check(cd == kCooldownTicks, "cooldown 10 after pulling");
     ctx.check(findItem(player, near) == nullptr, "near item entity removed");
     ctx.check(findItem(player, far) != nullptr, "item outside range 3 left alone");
     clearAround(player);
@@ -174,10 +190,10 @@ ABP_REGISTER_SELFTEST("magnet.advanced_range", [](Context& ctx) -> ll::coro::Cor
     auto adv   = ctx.createBackpack(Tier::Leather);
     int  bs    = ctx.installUpgrade(basic, std::string(kBasicId));
     int  as    = ctx.installUpgrade(adv, std::string(kAdvancedId));
-    auto item  = spawnItem(player, "minecraft:oak_log", 5, 4.5f);
+    auto item  = spawnItem(player, "minecraft:oak_log", 5, 4.6f);
     ctx.require(findItem(player, item) != nullptr, "item spawned");
     tickMagnet(basic, bs, player);
-    ctx.check(countOf(*basic, "minecraft:oak_log") == 0, "basic magnet (range 3) can't reach 4.5 blocks");
+    ctx.check(countOf(*basic, "minecraft:oak_log") == 0, "basic magnet (range 3) can't reach 4.6 blocks");
     tickMagnet(adv, as, player);
     ctx.check(countOf(*adv, "minecraft:oak_log") == 5, "advanced magnet (range 5) pulls it");
     clearAround(player);
@@ -190,42 +206,66 @@ ABP_REGISTER_SELFTEST("magnet.filter", [](Context& ctx) -> ll::coro::CoroTask<> 
     int  slot = ctx.installUpgrade(bp, std::string(kBasicId));
     UpgradeContext uc(bp, slot);
     core::Filter   f(kBasicSlots);
+    f.mode = core::FilterMode::Allow;
     f.setGhost(0, data("minecraft:diamond", 1));
     uc.settings()["filter"] = f.toJson();
     uc.saveSettings(true);
-    auto dirt    = spawnItem(player, "minecraft:dirt", 3, 2.0f);
-    auto diamond = spawnItem(player, "minecraft:diamond", 2, 2.5f);
+    auto dirt = spawnItem(player, "minecraft:dirt", 3, 2.0f);
+    spawnItem(player, "minecraft:diamond", 2, 2.5f);
     tickMagnet(bp, slot, player);
     ctx.check(countOf(*bp, "minecraft:diamond") == 2, "allow list: diamond pulled");
     ctx.check(countOf(*bp, "minecraft:dirt") == 0 && findItem(player, dirt), "allow list: dirt left on the ground");
     // Walking over items uses the same filter.
-    auto apples = data("minecraft:apple", 4);
+    auto           apples = data("minecraft:apple", 4);
     UpgradeContext withPlayer(bp, slot, &player);
     byId(kBasicId)->onPickup(withPlayer, apples);
     ctx.check(apples.count == 4, "onPickup respects the filter");
     auto diamonds = data("minecraft:diamond", 3);
     byId(kBasicId)->onPickup(withPlayer, diamonds);
     ctx.check(diamonds.count == 0 && countOf(*bp, "minecraft:diamond") == 5, "onPickup inserts matching items");
-    (void)diamond;
+
+    // "Match Backpack Contents": only items already stored.
+    uc.settings()["filter"]["byStorage"] = true;
+    uc.saveSettings(true);
+    clearAround(player);
+    spawnItem(player, "minecraft:diamond", 1, 2.0f);
+    auto stone = spawnItem(player, "minecraft:stone", 1, -2.0f);
+    tickMagnet(bp, slot, player);
+    ctx.check(countOf(*bp, "minecraft:diamond") == 6, "contents filter: stored item pulled");
+    ctx.check(findItem(player, stone) != nullptr, "contents filter: other items stay");
     clearAround(player);
 });
 
-ABP_REGISTER_SELFTEST("magnet.respects_delays", [](Context& ctx) -> ll::coro::CoroTask<> {
+ABP_REGISTER_SELFTEST("magnet.pulls_thrown_items_but_respects_tags", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
     co_await isolate(ctx, player);
-    auto bp      = ctx.createBackpack(Tier::Leather);
-    int  slot    = ctx.installUpgrade(bp, std::string(kBasicId));
-    auto delayed = spawnItem(player, "minecraft:gold_ingot", 1, 2.3f);
-    if (auto* d = findItem(player, delayed)) d->pickupDelay() = 1000;
-    auto own = spawnItem(player, "minecraft:iron_ingot", 1, -2.3f, 0.0f, &player);
-    spawnItem(player, "minecraft:emerald", 1, 0.0f, 2.3f);
+    auto bp   = ctx.createBackpack(Tier::Leather);
+    int  slot = ctx.installUpgrade(bp, std::string(kBasicId));
+    auto own  = spawnItem(player, "minecraft:iron_ingot", 1, -2.3f);
+    if (auto* o = findItem(player, own)) {
+        o->setSourceEntity(&player);
+        o->age()         = 0;
+        o->pickupDelay() = 40; // a freshly thrown item
+    }
+    auto never = spawnItem(player, "minecraft:gold_ingot", 1, 2.3f);
+    if (auto* n = findItem(player, never)) n->pickupDelay() = 32767;
+    auto tagged = spawnItem(player, "minecraft:emerald", 1, 0.0f, 2.3f);
+    if (auto* t = findItem(player, tagged)) t->addTag(kPreventRemoteMovement);
+    auto machine = spawnItem(player, "minecraft:coal", 1, 0.0f, -2.3f);
+    if (auto* m = findItem(player, machine)) {
+        m->addTag(kPreventRemoteMovement);
+        m->addTag(kAllowMachineMovement);
+    }
     tickMagnet(bp, slot, player);
-    ctx.check(countOf(*bp, "minecraft:gold_ingot") == 0, "items with a pickup delay are skipped");
-    ctx.check(countOf(*bp, "minecraft:iron_ingot") == 0, "items the carrier just threw are skipped");
-    ctx.check(countOf(*bp, "minecraft:emerald") == 1, "other items are pulled");
-    if (auto* o = findItem(player, own)) o->age() = config::get<MagnetConfig>().ownDropDelayTicks + 1;
-    tickMagnet(bp, slot, player);
-    ctx.check(countOf(*bp, "minecraft:iron_ingot") == 1, "own drops are pulled after the delay");
+    ctx.check(countOf(*bp, "minecraft:iron_ingot") == 1, "items the carrier just threw are pulled (SB)");
+    ctx.check(countOf(*bp, "minecraft:gold_ingot") == 0, "infinite pickup delay is skipped");
+    ctx.check(countOf(*bp, "minecraft:emerald") == 0, "PreventRemoteMovement is skipped");
+    ctx.check(countOf(*bp, "minecraft:coal") == 0, "a carried magnet ignores AllowMachineRemoteMovement");
+    // A placed backpack (no carrier) honours AllowMachineRemoteMovement.
+    auto pos = carrierPos(player);
+    (void)runMagnet(UpgradeContext(bp, slot), nullptr, player.getDimensionBlockSource(), pos);
+    ctx.check(countOf(*bp, "minecraft:coal") == 1, "placed magnet takes AllowMachineRemoteMovement items");
+    ctx.check(countOf(*bp, "minecraft:emerald") == 0, "placed magnet skips PreventRemoteMovement items");
     clearAround(player);
 });
 
@@ -237,141 +277,108 @@ ABP_REGISTER_SELFTEST("magnet.full_backpack", [](Context& ctx) -> ll::coro::Coro
     for (int i = 0; i < bp->inventory().size() - 1; ++i) bp->inventory().set(i, data("minecraft:dirt", 64));
     bp->inventory().set(bp->inventory().size() - 1, data("minecraft:stone", 60));
     auto stone = spawnItem(player, "minecraft:stone", 10, 2.3f);
-    auto sand  = spawnItem(player, "minecraft:sand", 5, -2.3f);
-    auto s     = Settings::read(UpgradeContext(bp, slot).settings(), kBasicSlots);
-    auto r     = pullItems(UpgradeContext(bp, slot, &player), player, s, 3, config::get<MagnetConfig>());
-    ctx.check(r == PullResult::Blocked, "full backpack reports Blocked (longer cooldown)");
+    int  cd    = tickMagnet(bp, slot, player);
+    ctx.check(cd == kCooldownTicks, "something went in: cooldown 10");
     ctx.check(countOf(*bp, "minecraft:stone") == 64, "the part that fits is taken");
-    ctx.check(findItem(player, stone) == nullptr, "the partly pulled entity is replaced");
-    ctx.check(groundCount(player, "minecraft:stone") == 6, "the rest (6) stays on the ground");
-    ctx.check(findItem(player, sand) != nullptr, "items that don't fit stay on the ground");
+    auto* rest = findItem(player, stone);
+    ctx.check(rest && rest->item().mCount == 6, "the rest (6) stays in the entity");
+    cd = tickMagnet(bp, slot, player);
+    ctx.check(cd == kFullCooldownTicks, "nothing fits: cooldown 40");
+    UpgradeContext uc(bp, slot);
+    uc.settings()["pickupItems"] = false;
+    uc.saveSettings();
+    clearAround(player);
+    ctx.check(tickMagnet(bp, slot, player) == kFullCooldownTicks, "pickupItems off: cooldown 40");
     clearAround(player);
 });
 
-ABP_REGISTER_SELFTEST("magnet.denied_items_dont_block", [](Context& ctx) -> ll::coro::CoroTask<> {
-    auto& player = ctx.player();
-    co_await isolate(ctx, player);
-    auto bp    = ctx.createBackpack(Tier::Leather);
-    auto other = ctx.createBackpack(Tier::Leather);
-    int  slot  = ctx.installUpgrade(bp, std::string(kBasicId));
-    auto stack = ctx.backpackItem(*other);
-    auto feet  = player.getFeetPos();
-    auto* item = player.getLevel().getSpawner().spawnItem(
-        player.getDimensionBlockSource(), stack, nullptr, Vec3{feet.x + 2.3f, feet.y + 0.1f, feet.z}, 0);
-    ctx.require(item != nullptr, "backpack item spawned");
-    item->pickupDelay() = 0;
-    auto id = item->getOrCreateUniqueID();
-    auto s  = Settings::read(UpgradeContext(bp, slot).settings(), kBasicSlots);
-    auto r  = pullItems(UpgradeContext(bp, slot, &player), player, s, 3, config::get<MagnetConfig>());
-    ctx.check(r != PullResult::Blocked, "an item the backpack refuses doesn't count as 'full'");
-    ctx.check(findItem(player, id) != nullptr, "refused backpack item stays on the ground");
-    clearAround(player);
-});
-
-ABP_REGISTER_SELFTEST("magnet.toggles_and_disable", [](Context& ctx) -> ll::coro::CoroTask<> {
+ABP_REGISTER_SELFTEST("magnet.carried_and_disable", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
     co_await isolate(ctx, player);
     auto bp   = ctx.createBackpack(Tier::Leather);
     int  slot = ctx.installUpgrade(bp, std::string(kBasicId));
-    UpgradeContext uc(bp, slot);
-    uc.settings()["pickupItems"] = false;
-    uc.saveSettings();
-    auto item = spawnItem(player, "minecraft:bone", 3, 2.6f);
-    tickMagnet(bp, slot, player);
-    ctx.check(countOf(*bp, "minecraft:bone") == 0, "pickupItems off: nothing pulled");
-    auto bones = data("minecraft:bone", 2);
-    byId(kBasicId)->onPickup(UpgradeContext(bp, slot, &player), bones);
-    ctx.check(bones.count == 2, "pickupItems off: no pickup either");
-    uc.settings()["pickupItems"] = true;
-    uc.saveSettings();
-    tickMagnet(bp, slot, player);
-    ctx.check(countOf(*bp, "minecraft:bone") == 3, "pickupItems on again: pulled");
-    (void)item;
-
-    // A disabled upgrade isn't ticked by the carried-backpack ticker.
     setEnabled(bp, slot, false);
     ctx.require(ctx.give(player, ctx.backpackItem(*bp), 5) == 5, "give backpack");
     auto more = spawnItem(player, "minecraft:bone", 4, 2.6f);
     co_await ctx.ticks(25);
-    ctx.check(countOf(*bp, "minecraft:bone") == 3, "disabled magnet doesn't pull");
+    ctx.check(countOf(*bp, "minecraft:bone") == 0, "disabled magnet doesn't pull");
     ctx.check(findItem(player, more) != nullptr, "bone still on the ground");
     setEnabled(bp, slot, true);
     co_await ctx.ticks(25);
-    ctx.check(countOf(*bp, "minecraft:bone") == 7, "enabled magnet in a carried backpack pulls (got "
+    ctx.check(countOf(*bp, "minecraft:bone") == 4, "enabled magnet in a carried backpack pulls (got "
                   + std::to_string(countOf(*bp, "minecraft:bone")) + ")");
     clearAround(player);
 });
 
-ABP_REGISTER_SELFTEST("magnet.xp_to_player", [](Context& ctx) -> ll::coro::CoroTask<> {
+ABP_REGISTER_SELFTEST("magnet.placed_cooldown", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
     co_await isolate(ctx, player);
-    auto bp     = ctx.createBackpack(Tier::Leather);
-    int  slot   = ctx.installUpgrade(bp, std::string(kBasicId));
-    auto feet   = player.getFeetPos();
-    int  before = player.getXpEarnedAtCurrentLevel();
-    ExperienceOrb::_spawnOrb(player.getDimensionBlockSource(), player.getLevel(), Vec3{feet.x + 2.5f, feet.y + 0.2f, feet.z}, 3);
-    auto orbs = orbsAround(player, 4);
-    ctx.require(orbs.size() == 1, "one orb spawned (" + std::to_string(orbs.size()) + ")");
-    ctx.check(orbValue(*orbs[0]) == 3, "orb value read (" + std::to_string(orbValue(*orbs[0])) + ")");
-    tickMagnet(bp, slot, player);
-    // The orb is now at the player; the vanilla pickup takes it within a few ticks.
-    for (int i = 0; i < 40 && !orbsAround(player, 4).empty(); ++i) co_await ctx.ticks(1);
-    ctx.check(orbsAround(player, 4).empty(), "orb collected");
-    ctx.check(player.getXpEarnedAtCurrentLevel() > before, "player got the XP");
+    auto  bp   = ctx.createBackpack(Tier::Leather);
+    int   slot = ctx.installUpgrade(bp, std::string(kBasicId));
+    auto* type = byId(kBasicId);
+    auto  pos  = carrierPos(player);
+    auto& reg  = player.getDimensionBlockSource();
+    PlacedTickContext tick{UpgradeContext(bp, slot), reg, static_cast<int>(player.getDimensionId()), pos.x, pos.y, pos.z, 2, 2};
+    spawnItem(player, "minecraft:stick", 2, 1.5f);
+    type->onPlacedTick(tick);
+    ctx.check(countOf(*bp, "minecraft:stick") == 2, "placed magnet pulls");
+    spawnItem(player, "minecraft:stick", 3, 1.5f);
+    type->onPlacedTick(tick);
+    ctx.check(countOf(*bp, "minecraft:stick") == 2, "placed magnet waits for its cooldown");
+    co_await ctx.ticks(11);
+    type->onPlacedTick(tick);
+    ctx.check(countOf(*bp, "minecraft:stick") == 5, "after 10 ticks it pulls again");
     clearAround(player);
 });
 
-ABP_REGISTER_SELFTEST("magnet.xp_consumer_hook", [](Context& ctx) -> ll::coro::CoroTask<> {
+ABP_REGISTER_SELFTEST("magnet.xp_needs_tank", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
     co_await isolate(ctx, player);
-    auto bp   = ctx.createBackpack(Tier::Leather);
+    auto bp   = ctx.createBackpack(Tier::Iron); // 2 upgrade slots
     int  slot = ctx.installUpgrade(bp, std::string(kBasicId));
-    auto took = std::make_shared<int>(0);
-    auto cap  = std::make_shared<int>(1000);
-    auto uuid = bp->uuid();
-    addXpConsumer("selftest", 0, [took, cap, uuid](UpgradeContext const& m, Player*, int amount) {
-        if (m.backpack().uuid() != uuid) return 0;
-        int n  = std::min(amount, *cap);
-        *took += n;
-        return n;
-    });
-    struct Cleanup {
-        ~Cleanup() { removeXpConsumers("selftest"); }
-    } cleanup;
-    int  before = player.getXpEarnedAtCurrentLevel();
-    auto feet   = player.getFeetPos();
-    ExperienceOrb::_spawnOrb(player.getDimensionBlockSource(), player.getLevel(), Vec3{feet.x - 2.5f, feet.y + 0.2f, feet.z}, 5);
-    ctx.require(orbsAround(player, 4).size() == 1, "orb spawned");
+    auto feet = player.getFeetPos();
+    ExperienceOrb::_spawnOrb(player.getDimensionBlockSource(), player.getLevel(), Vec3{feet.x + 2.5f, feet.y + 0.2f, feet.z}, 3);
+    auto orbs = orbsAround(player, 4);
+    ctx.require(orbs.size() == 1, "one orb spawned (" + std::to_string(orbs.size()) + ")");
+    ctx.check(orbValue(*orbs[0]) == 3, "orb value read");
+    ctx.check(!canFillStorageWithXp(bp), "no tank: no XP");
     tickMagnet(bp, slot, player);
-    ctx.check(*took == 5, "consumer got the orb's 5 XP (got " + std::to_string(*took) + ")");
-    co_await ctx.ticks(2);
-    ctx.check(orbsAround(player, 4).empty(), "orb removed");
-    ctx.check(player.getXpEarnedAtCurrentLevel() == before, "player didn't get XP the consumer took");
-
-    // Partial take: the rest becomes a new orb at the player (vanilla pickup, mending).
-    *took = 0;
-    *cap  = 2;
-    ExperienceOrb::_spawnOrb(player.getDimensionBlockSource(), player.getLevel(), Vec3{feet.x - 2.5f, feet.y + 0.2f, feet.z}, 5);
+    ctx.check(orbsAround(player, 4).size() == 1, "without a tank orbs are left alone");
+    ctx.installUpgrade(bp, "tank");
+    ctx.require(canFillStorageWithXp(bp), "a tank accepts liquid experience");
     tickMagnet(bp, slot, player);
-    ctx.check(*took == 2, "consumer took 2 (got " + std::to_string(*took) + ")");
-    auto rest = orbsAround(player, 4);
-    ctx.check(rest.size() == 1 && orbValue(*rest[0]) == 3, "a 3 XP orb is left for the player");
-    for (int i = 0; i < 80 && player.getXpEarnedAtCurrentLevel() < before + 3; ++i) co_await ctx.ticks(1);
-    ctx.check(
-        player.getXpEarnedAtCurrentLevel() == before + 3,
-        "player got the remaining 3 XP (xp " + std::to_string(before) + " -> "
-            + std::to_string(player.getXpEarnedAtCurrentLevel()) + ")"
-    );
-    *cap = 1000;
+    ctx.check(orbsAround(player, 4).empty(), "orb taken");
+    ctx.check(xpInTanks(bp) == 60, "3 points = 60 mB in the tank (got " + std::to_string(xpInTanks(bp)) + ")");
 
-    // XP off: orbs are left alone by the magnet.
+    // pickupXp off: orbs stay.
     UpgradeContext uc(bp, slot);
     uc.settings()["pickupXp"] = false;
     uc.saveSettings();
     ExperienceOrb::_spawnOrb(player.getDimensionBlockSource(), player.getLevel(), Vec3{feet.x - 2.5f, feet.y + 0.2f, feet.z}, 2);
-    *took = 0;
     tickMagnet(bp, slot, player);
-    ctx.check(*took == 0, "pickupXp off: consumer not called");
+    ctx.check(orbsAround(player, 4).size() == 1, "pickupXp off: orb left alone");
+    clearAround(player);
+});
+
+ABP_REGISTER_SELFTEST("magnet.xp_overflow_respawns", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& player = ctx.player();
+    co_await isolate(ctx, player);
+    auto bp   = ctx.createBackpack(Tier::Iron);
+    int  slot = ctx.installUpgrade(bp, std::string(kBasicId));
+    ctx.installUpgrade(bp, "tank");
+    auto h = api::backpack::fluidHandler(bp);
+    ctx.require(h != nullptr, "tank handler");
+    int cap = h->tankCapacity(0);
+    h->fill(api::FluidStack{std::string(api::fluids::Experience), cap - 40, {}}, false); // room for 2 points
+    auto feet = player.getFeetPos();
+    ExperienceOrb::_spawnOrb(player.getDimensionBlockSource(), player.getLevel(), Vec3{feet.x + 2.5f, feet.y + 0.2f, feet.z}, 7);
+    tickMagnet(bp, slot, player);
+    ctx.check(xpInTanks(bp) == cap, "tank filled up");
+    auto rest = orbsAround(player, 4);
+    int  sum  = 0;
+    for (auto* o : rest) sum += orbValue(*o);
+    ctx.check(sum == 5, "the 5 points that did not fit are spawned again (got " + std::to_string(sum) + ")");
+    ctx.check(!canFillStorageWithXp(bp), "full tank: no more XP pickup");
     clearAround(player);
 });
 
@@ -391,15 +398,12 @@ ABP_REGISTER_SELFTEST("magnet.settings_menu", [](Context& ctx) {
     ctx.check(uc.settings().value("pickupItems", true) == false, "items toggle");
     (void)mm.simulate(player, {Action::Take, {Where::Menu, control + MagnetMenu::kXpButton}, {Where::Cursor, 0}, 1});
     ctx.check(uc.settings().value("pickupXp", true) == false, "XP toggle");
-    // Ghost a filter item.
     ctx.require(ctx.give(player, game::ItemConv::make("minecraft:diamond", 1), 4) == 4, "give");
     (void)mm.simulate(player, {Action::Take, {Where::Inventory, 4}, {Where::Cursor, 0}, 1});
     (void)mm.simulate(player, {Action::Place, {Where::Cursor, 0}, {Where::Menu, 15}, 1});
-    auto s = Settings::read(uc.settings(), kAdvancedSlots);
+    auto s = Settings::read(uc.settings(), kAdvancedSlots, true);
     ctx.check(!s.filter.ghosts[15].empty() && s.filter.ghosts[15].id == "minecraft:diamond", "16th filter slot works");
     mm.close(player);
-    auto lore = byId(kAdvancedId)->describe(player, uc);
-    ctx.check(lore.size() == 4, "describe() lists range, toggles and filter");
 });
 
 } // namespace

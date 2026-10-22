@@ -1,6 +1,6 @@
-# U8 Compacting upgrade: recipe lookup, 2x2 / 3x3 compaction, chains, filter, no-loss, settings menu.
+# Compacting upgrade (SB): recipe lookup, 2x2 / 3x3 compaction after insert, chains, work in GUI, full-slot retry, filter.
 $r = Invoke-SelfTest 'compacting.*'
-if ($r.Pass -lt 6 -or $r.Fail -gt 0) { throw "compacting selftests: pass=$($r.Pass) fail=$($r.Fail)" }
+if ($r.Pass -lt 7 -or $r.Fail -gt 0) { throw "compacting selftests: pass=$($r.Pass) fail=$($r.Fail)" }
 # The upgrade items come from the behavior pack and must exist.
 $mark = Get-LogMark
 Send-Console 'give @a alleviatedbackpacks:compacting_upgrade'
