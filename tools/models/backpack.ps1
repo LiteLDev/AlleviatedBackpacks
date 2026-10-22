@@ -442,7 +442,7 @@ function Pose([int]$ctx, $pos, $rot, $scale) {
 $anim = [ordered]@{
     'animation.alleviatedbackpacks.backpack.worn'    = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 1 @(0, 12, 4.8) @(0, 180, 0) 1) } }
     'animation.alleviatedbackpacks.backpack.held_tp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 2 @(2, 12, -0.9) @(0, -90, 0) 0.75) } }
-    'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 3 @(4, 14, -8) @(0, 180, 0) 0.5) } }
+    'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 3 @(0, 12, -8) @(0, 0, 0) 0.5) } }
     'animation.alleviatedbackpacks.backpack.placed'  = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 4 @(0, 0, 0) @(0, 0, 0) 1) } }
 }
 [ordered]@{ format_version = '1.10.0'; animations = $anim } | ConvertTo-Json -Depth 20 -Compress |
@@ -512,7 +512,7 @@ $dgeo | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding ut
 [ordered]@{ format_version = '1.8.0'; render_controllers = [ordered]@{
     'controller.render.alleviatedbackpacks.backpack_display' = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Texture.default') }
 } } | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding utf8 (Join-Path $rp 'render_controllers/alleviatedbackpacks_backpack_display.render_controllers.json')
-$displayPose = Pose 5 @(0, 0, 0) @(0, 0, 0) 0.5
+$displayPose = Pose 5 @(-2, 0, 3) @(-90, 0, 0) 0.5
 $displayPose.rotation[2] = "($($displayPose.rotation[2])) + v.abp_rot"
 $displayPose.position[2] = "($($displayPose.position[2])) - v.abp_z * 0.5"
 # rightItem: rotation around the anchor normal (SC rotation) and depth (SC z offset: 1 = one item pixel).
