@@ -58,3 +58,5 @@ item.alleviatedbackpacks:xp_pump_upgrade.tooltip=Pumps experience between Tank u
 item.alleviatedbackpacks:battery_upgrade.tooltip=Replaces part of backpack's inventory with energy storage
 item.alleviatedbackpacks:alchemy_upgrade.tooltip=Automatically uses potions, food with effects, or milk buckets
 item.alleviatedbackpacks:advanced_alchemy_upgrade.tooltip=Automatically uses potions, food with effects, or milk buckets~LINEBREAK~Has additional effect filtering options
+item.alleviatedbackpacks:mob_catcher_upgrade.tooltip=Captures passive mobs into backpack storage slots with sneak right-click
+item.alleviatedbackpacks:advanced_mob_catcher_upgrade.tooltip=Captures passive and hostile mobs into backpack storage slots with sneak right-click

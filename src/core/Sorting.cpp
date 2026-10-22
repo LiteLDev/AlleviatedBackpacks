@@ -109,8 +109,9 @@ bool sortInventory(BackpackInventory& inv, ItemLess const& less, SortLayout cons
 namespace {
 bool sortOnce(BackpackInventory& inv, ItemLess const& less, SortLayout const& layout) {
     int const n        = inv.size();
-    auto      isLocked = [&](int i) {
-        return i < static_cast<int>(layout.locked.size()) && layout.locked[static_cast<std::size_t>(i)];
+    // Blocked slots (`BackpackInventory::isSlotBlocked`) are left exactly as they are, like locked ones.
+    auto isLocked = [&](int i) {
+        return (i < static_cast<int>(layout.locked.size()) && layout.locked[static_cast<std::size_t>(i)]) || inv.isSlotBlocked(i);
     };
     auto memoryOf = [&](int i) -> ItemStackData const* {
         if (i >= static_cast<int>(layout.memory.size())) return nullptr;

@@ -6,6 +6,7 @@ advanced_filter_upgrade.json
 advanced_jukebox_upgrade.json
 advanced_magnet_upgrade_from_magnet.json
 advanced_magnet_upgrade.json
+advanced_mob_catcher_upgrade.json
 advanced_pickup_upgrade.json
 advanced_pump_upgrade.json
 advanced_refill_upgrade.json
@@ -80,6 +81,7 @@ inception_upgrade.json
 jukebox_upgrade.json
 leather_backpack.json
 magnet_upgrade.json
+mob_catcher_upgrade.json
 pickup_upgrade.json
 pump_upgrade.json
 refill_upgrade.json
