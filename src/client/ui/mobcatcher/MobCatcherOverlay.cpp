@@ -167,6 +167,11 @@ public:
         auto const& d   = data(ctx);
         auto const* mob = hoveredMob(ctx, x, y);
         if (!mob || d.upgradeSlot < 0) return false;
+        // One release per mob (a click can be reported twice before the server's answer arrives).
+        double t = seconds();
+        if (mob->id == mLastRelease && t - mLastReleaseAt < 1.0) return true;
+        mLastRelease   = mob->id;
+        mLastReleaseAt = t;
         ctx.sendTabAction(d.upgradeSlot, nlohmann::json{{"release", mob->id}});
         log().info("mob catcher: release {} requested", mob->entityType);
         return true;
@@ -364,6 +369,8 @@ private:
         }
     }
 
+    std::string           mLastRelease;
+    double                mLastReleaseAt = -10;
     mutable std::uint64_t mRevision = ~std::uint64_t{0};
     mutable std::uint32_t mSession  = 0;
     mutable Data          mData;

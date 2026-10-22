@@ -3,10 +3,7 @@
 #include "client/render/EntityPreview.h"
 
 #include <cstddef>
-#include <format>
 #include <excpt.h>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <new>
 #include <optional>
@@ -39,10 +36,7 @@
 #include "mc/deps/minecraft_renderer/framebuilder/CustomSurfaceShaderMetadata.h"
 #include "mc/deps/renderer/Camera.h"
 #include "mc/deps/renderer/MatrixStack.h"
-#include "mc/entity/components/ActorEquipmentComponent.h"
 #include "mc/entity/components/ActorRotationComponent.h"
-#include "mc/world/actor/ActorInitializationMethod.h"
-#include "mc/util/VariantParameterList.h"
 #include "mc/util/MolangVariableMap.h"
 #include "mc/world/actor/Actor.h"
 #include "mc/world/actor/ActorDefinitionIdentifier.h"
@@ -57,12 +51,16 @@
 
 #include "client/Client.h"
 #include "client/ui/gfx/Painter.h"
-#include "mod/Config.h"
 #include "mod/Log.h"
 
 namespace abp::client::render {
 
 namespace {
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static_assert(offsetof(Actor, mLevel) == 0x1D8, "the humanoid renderer reads Actor::mLevel at +0x1D8");
+#pragma clang diagnostic pop
 
 /// Layout of `ActorRenderData` (no constructor is exported; its references are plain pointers in
 /// memory). Checked against the game's type below.
@@ -145,46 +143,6 @@ bool sehRenderWorld(ActorRenderDispatcher* dispatcher, BaseActorRenderContext* r
     }
 }
 
-/// Equipment containers (hand / armor) of an entity: humanoid renderers read them every frame.
-std::string equipmentState(Actor& actor) {
-    auto eq = actor.getEntityContext().tryGetComponent<ActorEquipmentComponent>();
-    if (!eq) return "no equipment component";
-    return std::string("hand ") + (eq->mHand ? "ok" : "null") + ", armor " + (eq->mArmor ? "ok" : "null");
-}
-bool equipmentReady(Actor& actor) {
-    auto eq = actor.getEntityContext().tryGetComponent<ActorEquipmentComponent>();
-    return eq && eq->mHand && eq->mArmor;
-}
-
-/// `ActorFactory::createSpawnedActor` (the full spawn initialization, not added to the level).
-/// `out` is raw storage: the result is constructed in place (no assignment).
-bool sehCreateSpawned(ActorFactory* factory, ActorDefinitionIdentifier const* id, Actor* anchor, void* out, Fault* fault) {
-    __try {
-        ::new (out) OwnerPtr<EntityContext>(factory->createSpawnedActor(*id, anchor, anchor->getPosition(), Vec2{0.f, 0.f}));
-        return true;
-    } __except (captureFault(GetExceptionInformation(), fault)) {
-        return false;
-    }
-}
-
-bool sehReloadClient(Actor* actor, Fault* fault) {
-    __try {
-        actor->reloadHardcodedClient(ActorInitializationMethod::Spawned);
-        return true;
-    } __except (captureFault(GetExceptionInformation(), fault)) {
-        return false;
-    }
-}
-
-bool sehInitializeComponents(Actor* actor, Fault* fault) {
-    __try {
-        actor->initializeComponents(ActorInitializationMethod::Spawned, *actor->mInitParams);
-        return true;
-    } __except (captureFault(GetExceptionInformation(), fault)) {
-        return false;
-    }
-}
-
 class DisplayEntityImpl final : public DisplayEntity {
 public:
     DisplayEntityImpl(OwnerPtr<EntityContext> owner, Actor* actor) : mOwner(std::move(owner)), mActor(actor) {}
@@ -238,36 +196,6 @@ std::unique_ptr<DataItem> toDataItem(nlohmann::json const& e) {
     }
 }
 
-/// Calibration knobs (dev only, `config/entity_preview_debug.json`, read every ~5 s).
-struct Tuning {
-    float z        = 0;
-    float zScale   = 1;
-    float yawShift = 0;
-    bool  lighting = false;
-    int   flip     = 0; ///< 0: rotate 180 deg about X (flip Y and Z), 1: about Z (flip Y and X)
-};
-
-Tuning const& tuning() {
-    static Tuning t;
-    static int    frames = 0;
-    if (frames-- > 0) return t;
-    frames = 300;
-    try {
-        auto path = abp::config::configDir() / "entity_preview_debug.json";
-        if (!std::filesystem::exists(path)) return t;
-        std::ifstream in(path);
-        auto          j = nlohmann::json::parse(in, nullptr, false);
-        if (!j.is_object()) return t;
-        t.z        = j.value("z", t.z);
-        t.zScale   = j.value("zScale", t.zScale);
-        t.yawShift = j.value("yawShift", t.yawShift);
-        t.lighting = j.value("lighting", t.lighting);
-        t.flip     = j.value("flip", t.flip);
-    } catch (...) {
-    }
-    return t;
-}
-
 /// The renderer the actor's id names (data-driven first, like the paper doll), or nullptr.
 ActorRenderer* rendererFor(ActorRenderDispatcher& dispatcher, Actor& actor, std::shared_ptr<ActorRenderer>& keep) {
     HashedString const& id = actor.getActorRendererId();
@@ -291,58 +219,16 @@ std::unique_ptr<DisplayEntity> createDisplayEntity(std::string const& type, nloh
     auto actor = owner.tryUnwrap();
     if (!actor) return nullptr;
     actor->setDimension(player->getDimension().weak_from_this());
+    // A display copy is never added to the level, so its level pointer stays null; humanoid
+    // renderers read the level's data (version-gated geometry/animation choices) through it and
+    // fault on a null level (Minecraft.Windows.exe+0x1C38A59: `mov rcx,[actor+0x1D8]; mov rax,[rcx]`).
+    actor->mLevel = static_cast<ILevel*>(level);
     auto entity = std::make_unique<DisplayEntityImpl>(std::move(owner), actor.as_ptr());
     // Actors added to the level get their renderer id from the client's entity definitions; a
     // display copy gets it from the same query.
     if (actor->getActorRendererId().getString().empty()) {
         auto const& query = actor->queryEntityRenderer();
         actor->setActorRendererId(query.getString().empty() ? HashedString(type) : query);
-    }
-    // Actors added to the level are fully initialized by the client; a display copy may lack
-    // client-initialized parts (e.g. equipment containers, read by humanoid renderers).
-    static std::unordered_set<std::string> diagnosed;
-    if (!equipmentReady(*actor) || diagnosed.insert(type).second) {
-        auto  before = equipmentState(*actor);
-        Fault fault;
-        bool  reloaded = equipmentReady(*actor) || sehReloadClient(actor.as_ptr(), &fault);
-        auto  afterReload = equipmentState(*actor);
-        bool  initialized = true;
-        if (!equipmentReady(*actor)) initialized = sehInitializeComponents(actor.as_ptr(), &fault);
-        log().info(
-            "entity preview: {} display copy: {} -> reloadHardcodedClient {} ({}) -> initializeComponents {} ({}){}",
-            type,
-            before,
-            reloaded ? "ok" : "faulted",
-            afterReload,
-            initialized ? "ok" : "faulted",
-            equipmentState(*actor),
-            fault.code ? std::format(" fault 0x{:08X} at +0x{:X}", fault.code, fault.address) : std::string{}
-        );
-    }
-    if (!equipmentReady(*actor)) {
-        // The spawn path initializes every component (equipment included).
-        ActorDefinitionIdentifier id(type);
-        alignas(OwnerPtr<EntityContext>) std::byte storage[sizeof(OwnerPtr<EntityContext>)];
-        Fault                     fault;
-        bool                      ok = sehCreateSpawned(&level->getActorFactory(), &id, player, storage, &fault);
-        if (!ok) ::new (storage) OwnerPtr<EntityContext>();
-        auto& spawned = *std::launder(reinterpret_cast<OwnerPtr<EntityContext>*>(storage));
-        auto                      other = ok ? spawned.tryUnwrap() : nullptr;
-        log().info(
-            "entity preview: {} via createSpawnedActor: {}{}",
-            type,
-            other ? equipmentState(*other) : std::string(ok ? "no actor" : "faulted"),
-            fault.code ? std::format(" (fault 0x{:08X} at +0x{:X})", fault.code, fault.address) : std::string{}
-        );
-        if (other && equipmentReady(*other)) {
-            other->setDimension(player->getDimension().weak_from_this());
-            if (other->getActorRendererId().getString().empty()) other->setActorRendererId(actor->getActorRendererId());
-            entity = std::make_unique<DisplayEntityImpl>(std::move(spawned), other.as_ptr());
-            actor  = other;
-        } else if (other) {
-            DisplayEntityImpl drop(std::move(spawned), other.as_ptr());
-        }
-        std::destroy_at(&spawned);
     }
     if (syncedData.is_array() && !syncedData.empty()) {
         std::vector<std::unique_ptr<DataItem>> items;
@@ -364,13 +250,13 @@ bool renderEntity(ui::Painter& painter, Actor& actor, float x, float bottomY, fl
     auto&       ui         = painter.raw();
     auto&       client     = static_cast<IClientInstance&>(ui.mClient);
     auto&       screen     = static_cast<ScreenContext&>(ui.mScreenContext);
-    auto const& t          = tuning();
     auto        dispatcher = client.getEntityRenderDispatcher();
     if (!dispatcher) return false;
 
     // Pose (SB prepareEntityForRender): body and head yaw, head pitch.
-    float bodyYaw  = pose.bodyYaw + t.yawShift;
-    float headYaw  = pose.headYaw + t.yawShift;
+    // With the transform below, yaw 180 faces the viewer (SB's preview faces the screen).
+    float bodyYaw  = pose.bodyYaw + 180.f;
+    float headYaw  = pose.headYaw + 180.f;
     auto& rot      = actor.mBuiltInComponents->mActorRotationComponent;
     *rot->mRot     = Vec2{pose.pitch, headYaw};
     *rot->mRotPrev = Vec2{pose.pitch, headYaw};
@@ -386,16 +272,20 @@ bool renderEntity(ui::Painter& painter, Actor& actor, float x, float bottomY, fl
             rc.mV2DataDrivenContinuousData     = data->mContinuousData.get();
         }
     }
+    // Data-driven renderers keep per-actor continuous data (previous transforms, animation state)
+    // keyed by the render id; display copies are not in the level, so give each its own.
+    rc.mRenderUniqueIdOverride = static_cast<int64>(0x7A00000000000000ll | (reinterpret_cast<std::uintptr_t>(&actor) >> 4));
     std::shared_ptr<ActorRenderer> keep;
     ActorRenderer*                 renderer = rendererFor(*dispatcher, actor, keep);
 
     mce::Camera& camera = screen.camera;
     auto         ref    = camera.worldMatrixStack->push(false);
     Matrix&      m      = *ref.mat;
-    glm::mat4    local  = glm::translate(glm::mat4(1.f), glm::vec3(x, bottomY, t.z));
-    float units         = scale / 16.f; // actor geometry is in model pixels (1/16 block)
-    local               = glm::scale(local, glm::vec3(units, units, units * t.zScale));
-    local               = glm::rotate(local, glm::pi<float>(), t.flip == 1 ? glm::vec3(0, 0, 1) : glm::vec3(1, 0, 0));
+    glm::mat4    local  = glm::translate(glm::mat4(1.f), glm::vec3(x, bottomY, 0.f));
+    local               = glm::scale(local, glm::vec3(scale, scale, scale)); // GUI units per block
+    // Model y is up, the UI y is down: turn the model 180 deg about the view axis (SB ENTITY_RENDER_ANGLE),
+    // which keeps its front (+Z) towards the viewer.
+    local               = glm::rotate(local, glm::pi<float>(), glm::vec3(0, 0, 1));
     *m._m               = *m._m * local;
     camera.worldMatrixStack->_isDirty = true;
     if (clip) {
@@ -415,9 +305,10 @@ bool renderEntity(ui::Painter& painter, Actor& actor, float x, float bottomY, fl
         RenderDataLayout data{};
         data.actor              = &actor;
         data.position           = Vec3{0.f, 0.f, 0.f};
-        data.rotation           = Vec2{pose.pitch, bodyYaw};
-        data.headRot            = Vec2{pose.pitch, headYaw};
-        data.ignoreLighting     = !t.lighting;
+        // ActorRenderData rotations are (yaw, pitch) (unlike ActorRotationComponent's (pitch, yaw)).
+        data.rotation           = Vec2{bodyYaw, pose.pitch};
+        data.headRot            = Vec2{headYaw, pose.pitch};
+        data.ignoreLighting     = true;
         data.isInUI             = true;
         data.deltaTime          = 0.05f;
         data.animationComponent = &actor.getAnimationComponent();
@@ -428,7 +319,7 @@ bool renderEntity(ui::Painter& painter, Actor& actor, float x, float bottomY, fl
     }
     if (stage == static_cast<int>(Stage::World)) {
         Vec2 rotation{pose.pitch, bodyYaw};
-        ok = sehRenderWorld(dispatcher.get(), &rc, &actor, &rotation, !t.lighting, &fault);
+        ok = sehRenderWorld(dispatcher.get(), &rc, &actor, &rotation, true, &fault);
     }
     if (clip) ui.restoreSavedClippingRectangle();
 

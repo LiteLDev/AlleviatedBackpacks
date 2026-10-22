@@ -10,6 +10,7 @@
 #include <random>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 
 #include "ll/api/command/CommandHandle.h"
 #include "ll/api/event/EventBus.h"
@@ -548,7 +549,9 @@ ABP_REGISTER_TAB_ACTION(net::TabActionHandler{
         auto id = data.value("release", std::string{});
         if (id.empty()) return false;
         auto result = release(player, ctx.backpackPtr(), id);
-        if (!result.success) log().info("mob catcher: {} could not release a mob: {}", player.getRealName(), result.message);
+        if (!result.success && !result.message.empty()) {
+            log().info("mob catcher: {} could not release a mob: {}", player.getRealName(), result.message);
+        }
         showMessage(player, result);
         return true;
     }
@@ -572,6 +575,11 @@ struct PendingCapture {
 std::vector<PendingCapture>                      gPending;
 std::set<std::pair<std::int64_t, std::int64_t>> gSeenThisTick;
 bool                                             gInstalled = false;
+/// Holding "use" repeats it: after a capture the next uses of the backpack are swallowed for a
+/// moment (else the repeat would place / open the backpack where the mob stood).
+constexpr int                                    kUseCooldownTicks = 10;
+std::int64_t                                     gTick = 0;
+std::unordered_map<std::int64_t, std::int64_t>   gLastUse; ///< player -> tick of the last capture use
 
 /// The held backpack and its best catcher, if the player can capture with it.
 std::shared_ptr<game::Backpack> heldCatcherBackpackImpl(Player& player, bool* advanced = nullptr) {
@@ -594,6 +602,7 @@ bool onInteract(Player& player, Actor& target) {
     if (!gInstalled || player.isClientSide() || !player.isSneaking()) return false;
     if (!Mob::tryGetFromEntity(target.getEntityContext(), false)) return false; // SB: LivingEntity only
     if (!heldCatcherBackpackImpl(player)) return false;
+    gLastUse[player.getOrCreateUniqueID().rawID] = gTick;
     auto key = std::make_pair(player.getOrCreateUniqueID().rawID, target.getOrCreateUniqueID().rawID);
     if (gSeenThisTick.insert(key).second) gPending.push_back({key.first, key.second});
     return true;
@@ -603,13 +612,19 @@ bool onInteract(Player& player, Actor& target) {
 /// doesn't); for the others a sneak-use goes to the block behind the mob (or to the item, in the
 /// air). Java fires the interaction for every living entity: a mob in the player's line of sight
 /// within reach takes the use here instead (and the backpack is not placed / opened).
+bool inUseCooldown(Player& player) {
+    auto it = gLastUse.find(player.getOrCreateUniqueID().rawID);
+    return it != gLastUse.end() && gTick - it->second < kUseCooldownTicks;
+}
+
 bool onUseTowardMob(Player& player) {
+    if (gInstalled && !player.isClientSide() && player.isSneaking() && inUseCooldown(player) && heldCatcherBackpackImpl(player)) return true;
     if (!gInstalled || player.isClientSide() || !player.isSneaking() || !heldCatcherBackpackImpl(player)) return false;
     constexpr float kReach = 5.0f; // Bedrock's entity pick range (creative); survival picks up to 3
     auto            hit    = player.traceRay(kReach, true, true);
     if (hit.mType != HitResultType::Entity) {
         auto v = player.getViewVector();
-        log().info("mob catcher: {} sneak-used a catcher backpack with no mob in sight (hit {}, view {:.2f},{:.2f},{:.2f})", player.getRealName(), static_cast<int>(hit.mType), v.x, v.y, v.z);
+        log().debug("mob catcher: {} sneak-used a catcher backpack with no mob in sight (hit {}, view {:.2f},{:.2f},{:.2f})", player.getRealName(), static_cast<int>(hit.mType), v.x, v.y, v.z);
         return false;
     }
     auto actor = hit.mEntity.tryUnwrap();
@@ -620,6 +635,7 @@ bool onUseTowardMob(Player& player) {
 }
 
 void serve(Level& level) {
+    ++gTick;
     gSeenThisTick.clear();
     if (gPending.empty()) return;
     auto pending = std::move(gPending);
@@ -692,6 +708,7 @@ public:
         gInstalled = false;
         gPending.clear();
         gSeenThisTick.clear();
+        gLastUse.clear();
         auto& bus = ll::event::EventBus::getInstance();
         for (auto* l : {&mTick, &mUseOn, &mUse}) {
             if (*l) bus.removeListener(*l);

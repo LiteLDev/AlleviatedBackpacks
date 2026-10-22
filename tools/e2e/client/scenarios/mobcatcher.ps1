@@ -55,6 +55,15 @@ try {
     Invoke-Chat '/difficulty easy'
     Invoke-Chat '/kill @e[type=!player]'
     Invoke-Chat '/time set noon'
+    # ---- refusal: the basic catcher can't take hostile mobs ---------------------------------------------
+    $mark = Get-LogMark
+    Invoke-Chat '/backpack mobcatcher basic'
+    Wait-LogLine 'mobcatcher setup: gave iron backpack' 15 -Since $mark | Out-Null
+    $mark = Get-LogMark
+    Invoke-Chat '/backpack mobcatcher capturezombie'
+    Wait-LogLine 'mob catcher: .* could not capture minecraft:zombie: Hostile mobs require Advanced Mob Catcher Upgrade' 15 -Since $mark | Out-Null
+    Start-Sleep -Milliseconds 200
+    Save-Screenshot 'refused-hostile' | Out-Null
     $mark = Get-LogMark
     Invoke-Chat '/backpack mobcatcher setup'
     Wait-LogLine 'mobcatcher setup: gave netherite backpack' 15 -Since $mark | Out-Null
@@ -138,16 +147,6 @@ try {
         Wait-LogLine 'mob catcher: playing muffled ambient sounds of captured mobs' 40 | Out-Null
     } catch { $problems += "no ambient sound: $_" }
 
-    # ---- refusal: the basic catcher can't take hostile mobs ---------------------------------------------
-    Invoke-Chat '/kill @e[type=!player]'
-    $mark = Get-LogMark
-    Invoke-Chat '/backpack mobcatcher basic'
-    Wait-LogLine 'mobcatcher setup: gave iron backpack' 15 -Since $mark | Out-Null
-    $mark = Get-LogMark
-    Invoke-Chat '/backpack mobcatcher capturezombie'
-    Wait-LogLine 'mob catcher: .* could not capture minecraft:zombie: Hostile mobs require Advanced Mob Catcher Upgrade' 15 -Since $mark | Out-Null
-    Start-Sleep -Milliseconds 200
-    Save-Screenshot 'refused-hostile' | Out-Null
 } finally {
     try {
         Invoke-Chat '/kill @e[type=!player]'
