@@ -362,6 +362,59 @@ LL_TYPE_INSTANCE_HOOK(
     origin(renderContext, owner, pass);
 }
 
+// Slot signs: every item icon of the open container screen reports its slot and position.
+LL_TYPE_INSTANCE_HOOK(
+    AbpStashItemRenderHook,
+    ll::memory::HookPriority::Normal,
+    InventoryItemRenderer,
+    &InventoryItemRenderer::$render,
+    void,
+    ::MinecraftUIRenderContext& ctx,
+    ::IClientInstance&          client,
+    ::UIControl&                owner,
+    int                         pass
+) {
+    auto const* controller = gFrameController; // only icons of the container screen's own view
+    gPendingIcon           = PendingIcon{controller != nullptr && !ui::nativeScreenActive()};
+    origin(ctx, client, owner, pass);
+    auto drawn   = gPendingIcon;
+    gPendingIcon = {};
+    try {
+        if (!drawn.active) return;
+        if (!drawn.got) {
+            // `_render` not reached (inlined path): the control's cached position.
+            if (owner.mCachedPositionDirty) owner._setCachedPosition();
+            drawn.x = owner.mCachedPosition.get().x;
+            drawn.y = owner.mCachedPosition.get().y;
+        }
+        // The slot this icon belongs to (the callback's index is not the slot index; the
+        // collection index is looked up by name).
+        std::optional<std::pair<std::string, int>> slot;
+        owner.findAllCollectionIndices([&](std::string const& name, int) {
+            int index = owner.findCollectionIndex(name);
+            if (!slot && locationOf(name, index)) slot = std::pair<std::string, int>{name, index};
+        });
+        if (!slot) return;
+        auto  loc  = locationOf(slot->first, slot->second);
+        auto  key  = keyOf(loc->first, loc->second);
+        auto const& size = owner.mSize.get();
+        float s    = size.x > 0 ? size.x / 16.f : 1.f;
+        struct {
+            float x, y;
+        } pos{drawn.x, drawn.y}; // where the icon really is (scroll panels included)
+        noteSlotRect(controller, key, pos.x, pos.y, s);
+        if (!active()) return;
+        auto item = copyOf(controller->_getVisualItemStack(slot->first, slot->second));
+        if (item.isNull()) return;
+        auto r = result(loc->first, loc->second, item);
+        if (r == Result::None) return;
+        if (auto hovered = hoveredVanillaSlot(); hovered && hovered->collection == slot->first && hovered->index == slot->second) return;
+        gMarks[key] = Mark{pos.x, pos.y, s, r, game::isBackpack(item), now()};
+    } catch (std::exception const& e) {
+        log().error("stash sign failed: {}", e.what());
+    }
+}
+
 namespace {
 /// Draws the signs and the hovered slot's tooltip over vanilla container screens.
 class StashOverlayLayer final : public ui::IUiLayer {
