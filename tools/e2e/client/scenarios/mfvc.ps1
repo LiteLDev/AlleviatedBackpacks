@@ -178,7 +178,8 @@ Tab-Click 7
 $mark = Get-LogMark
 Press-Key 'E'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
+Start-Sleep -Milliseconds 2000
+Save-Screenshot 'closed' | Out-Null
 
 # ---- what the server stored ------------------------------------------------------------------------------
 $mark = Get-LogMark
