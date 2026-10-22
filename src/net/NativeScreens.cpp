@@ -338,6 +338,9 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
         int amount = button == 1 ? 1 : static_cast<int>(cursor.mCount);
         return mm.simulateOn(p, act(ActionType::Place, cur, here, amount), slot);
     }
+    // SC: an item that is not an upgrade only acts on an installed upgrade with a right click
+    // (stack upgrade conversion items); a left click does nothing.
+    if (area == Area::Upgrade && button != 1 && !upgrade::upgradeFor(game::ItemConv::toData(cursor).withCount(1))) return false;
     return mm.simulateOn(p, act(ActionType::Swap, here, cur, 0), slot);
 }
 

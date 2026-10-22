@@ -26,7 +26,8 @@
       }
     ],
     "result": {
-      "item": "alleviatedbackpacks:diamond_backpack"
+      "item": "alleviatedbackpacks:diamond_backpack",
+      "count": 1
     }
   }
 }

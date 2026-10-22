@@ -4,18 +4,33 @@
     "description": {
       "identifier": "alleviatedbackpacks:filter_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       "RSR",
       "SBS",
       "RSR"
     ],
     "key": {
-      "B": { "item": "alleviatedbackpacks:upgrade_base" },
-      "R": { "item": "minecraft:redstone" },
-      "S": { "item": "minecraft:string" }
+      "R": {
+        "item": "minecraft:redstone"
+      },
+      "S": {
+        "item": "minecraft:string"
+      },
+      "B": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:upgrade_base" }],
-    "result": { "item": "alleviatedbackpacks:filter_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:filter_upgrade",
+      "count": 1
+    }
   }
 }

@@ -22,11 +22,11 @@
       "G": {
         "item": "minecraft:gold_ingot"
       },
-      "R": {
-        "item": "minecraft:redstone"
-      },
       "P": {
         "item": "alleviatedbackpacks:pump_upgrade"
+      },
+      "R": {
+        "item": "minecraft:redstone"
       }
     },
     "unlock": [

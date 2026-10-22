@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:advanced_magnet_upgrade_from_magnet"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " D ",
-      "GMG",
+      "G#G",
       "RRR"
     ],
     "key": {
-      "D": { "item": "minecraft:diamond" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "M": { "item": "alleviatedbackpacks:magnet_upgrade" },
-      "R": { "item": "minecraft:redstone" }
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      },
+      "#": {
+        "item": "alleviatedbackpacks:magnet_upgrade"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:magnet_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:advanced_magnet_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:magnet_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:advanced_magnet_upgrade",
+      "count": 1
+    }
   }
 }

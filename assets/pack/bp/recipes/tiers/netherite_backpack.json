@@ -1,30 +1,15 @@
 {
   "format_version": "1.20.10",
-  "minecraft:recipe_shapeless": {
+  "minecraft:recipe_smithing_transform": {
     "description": {
       "identifier": "alleviatedbackpacks:netherite_backpack"
     },
     "tags": [
-      "crafting_table"
+      "smithing_table"
     ],
-    "ingredients": [
-      {
-        "item": "minecraft:netherite_upgrade_smithing_template"
-      },
-      {
-        "item": "alleviatedbackpacks:diamond_backpack"
-      },
-      {
-        "item": "minecraft:netherite_ingot"
-      }
-    ],
-    "unlock": [
-      {
-        "item": "alleviatedbackpacks:diamond_backpack"
-      }
-    ],
-    "result": {
-      "item": "alleviatedbackpacks:netherite_backpack"
-    }
+    "template": "minecraft:netherite_upgrade_smithing_template",
+    "base": "alleviatedbackpacks:diamond_backpack",
+    "addition": "minecraft:netherite_ingot",
+    "result": "alleviatedbackpacks:netherite_backpack"
   }
 }

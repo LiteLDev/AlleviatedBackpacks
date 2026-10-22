@@ -32,4 +32,24 @@ inline constexpr int kMaxSlotLimit = INT_MAX;
     std::function<bool(ItemStackData const&)> const& affected
 );
 
+// ---- SophisticatedCore's exact rules (StackUpgradeItem / InventoryHandler) ----------------------
+
+/// SC `getInventorySlotLimit(multiplier)`: `INT_MAX / 64 < m ? INT_MAX : max(1, (int)(m * 64))`.
+[[nodiscard]] int slotLimitOf(double multiplier);
+
+/// SC `getInventorySlotLimit(wrapper)`: the stack upgrades' multipliers multiplied in order
+/// (starting at 1), short-circuiting to INT_MAX as soon as the product would exceed INT_MAX, then
+/// `slotLimitOf`. Non-positive / non-finite entries are ignored.
+[[nodiscard]] int slotLimitOf(std::span<double const> multipliers);
+
+/// SC `InventoryHandler.getBaseStackLimit`: how many of an item with `maxStack` fit in a slot whose
+/// limit (for 64-stack items) is `slotLimit`. Below 64: `max(1, (int)(maxStack * slotLimit / 64.0))`;
+/// otherwise `maxStack * (slotLimit / 64) + (slotLimit % 64) * maxStack / 64` (integer math,
+/// saturating at INT_MAX). Unstackable items (maxStack 1) are multiplied too.
+[[nodiscard]] int stackLimit(int maxStack, int slotLimit);
+
+/// SC `StackUpgradeItem.isMultiplierHighEnough` (storage part): the first slot holding more than one
+/// item whose `count / maxStack` exceeds `slotLimitOf(multiplier) / 64`, or -1 when all fit.
+[[nodiscard]] int firstSlotNeedingMore(BackpackInventory const& inventory, double multiplier);
+
 } // namespace abp::core::stack

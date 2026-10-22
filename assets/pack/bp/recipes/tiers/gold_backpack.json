@@ -26,7 +26,8 @@
       }
     ],
     "result": {
-      "item": "alleviatedbackpacks:gold_backpack"
+      "item": "alleviatedbackpacks:gold_backpack",
+      "count": 1
     }
   }
 }

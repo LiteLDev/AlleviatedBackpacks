@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -14,20 +15,40 @@ namespace abp::upgrade::stack {
 /// `config/stack.json`. Multipliers per tier (Stack upgrades in one backpack multiply each
 /// other), the per-backpack limit of the "stack" group and the items stack upgrades never affect.
 struct StackConfig {
-    int    version        = 1;
+    int    version        = 2;
     double starterTier    = 1.5;
     double tier1          = 2.0;
     double tier2          = 4.0;
     double tier3          = 8.0;
     double tier4          = 16.0;
-    double omegaTier      = 2147483647.0; ///< effectively unlimited (slot limit capped at INT_MAX)
+    double omegaTier      = 2147483647.0; ///< SB: Integer.MAX_VALUE (slot limit capped at INT_MAX)
     double downgradeTier1 = 0.125;
     double downgradeTier2 = 0.0625;
     double downgradeTier3 = 0.03125;
     /// How many Stack upgrades / downgrades one backpack can hold together.
     int    maxPerBackpack = 3;
-    /// Item ids (`*` / `?` wildcards) that keep their vanilla stack size in upgraded backpacks.
-    std::vector<std::string> nonStackableItems = {"minecraft:bundle", "minecraft:*_bundle", "minecraft:*shulker_box"};
+    /// Item ids (`*` / `?` wildcards) that keep their vanilla stack size in upgraded backpacks
+    /// (SC `stackUpgrade.nonStackableItems`: the bundle and the 17 shulker boxes).
+    std::vector<std::string> nonStackableItems = {
+        "minecraft:bundle",
+        "minecraft:undyed_shulker_box",
+        "minecraft:white_shulker_box",
+        "minecraft:orange_shulker_box",
+        "minecraft:magenta_shulker_box",
+        "minecraft:light_blue_shulker_box",
+        "minecraft:yellow_shulker_box",
+        "minecraft:lime_shulker_box",
+        "minecraft:pink_shulker_box",
+        "minecraft:gray_shulker_box",
+        "minecraft:light_gray_shulker_box",
+        "minecraft:cyan_shulker_box",
+        "minecraft:purple_shulker_box",
+        "minecraft:blue_shulker_box",
+        "minecraft:brown_shulker_box",
+        "minecraft:green_shulker_box",
+        "minecraft:red_shulker_box",
+        "minecraft:black_shulker_box",
+    };
 };
 
 /// One Stack upgrade / downgrade tier.
@@ -59,9 +80,26 @@ struct ConversionDef {
 /// none) and multiplied by `extra` (a stack upgrade about to be installed; 1 = none).
 [[nodiscard]] double totalMultiplier(game::Backpack const& backpack, int skipSlot = -1, double extra = 1.0);
 
-/// Checks that the backpack's contents fit under `multiplier`; fills `reason` (translated for
-/// `player`, may be null) when they don't.
-[[nodiscard]] bool fits(game::Backpack& backpack, double multiplier, Player* player, std::string& reason);
+/// The slot limit (for 64-stack items) of the enabled stack upgrades in `backpack`, skipping
+/// `skipSlot` and multiplied by `extra` (SC `StackUpgradeItem.getInventorySlotLimit`).
+[[nodiscard]] int slotLimit(game::Backpack const& backpack, int skipSlot = -1, double extra = 1.0);
+
+/// The stack multiplier the contents of the installed upgrade in `slot` need (SC
+/// `IStackableContentsUpgrade.getMinimumMultiplierRequired`: tanks and batteries, through their
+/// capability handlers). 0 when it needs none.
+[[nodiscard]] int minimumMultiplierRequired(std::shared_ptr<game::Backpack> const& backpack, int slot);
+
+/// SC `isMultiplierHighEnough`: checks that the backpack's storage slots and stackable-contents
+/// upgrades (except the one in `ignoreUpgradeSlot`) fit under `multiplier`; fills `reason`
+/// (translated for `player`, may be null) and `errorUpgradeSlots` when they don't.
+[[nodiscard]] bool fits(
+    std::shared_ptr<game::Backpack> const& backpack,
+    double                                 multiplier,
+    int                                    ignoreUpgradeSlot,
+    Player*                                player,
+    std::string&                           reason,
+    std::vector<int>*                      errorUpgradeSlots = nullptr
+);
 
 /// "×2", "×1.5", "÷8" (downgrades).
 [[nodiscard]] std::string formatMultiplier(double m);

@@ -4,17 +4,30 @@
     "description": {
       "identifier": "alleviatedbackpacks:stack_tier_1_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
-      "XXX",
-      "XSX",
-      "XXX"
+      "MMM",
+      "MCM",
+      "MMM"
     ],
     "key": {
-      "X": { "item": "minecraft:iron_block" },
-      "S": { "item": "alleviatedbackpacks:upgrade_base" }
+      "M": {
+        "item": "minecraft:iron_block"
+      },
+      "C": {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
     },
-    "unlock": [{ "item": "minecraft:iron_block" }],
-    "result": { "item": "alleviatedbackpacks:stack_tier_1_upgrade", "count": 1 }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:upgrade_base"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:stack_tier_1_upgrade",
+      "count": 1
+    }
   }
 }

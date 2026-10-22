@@ -4,19 +4,36 @@
     "description": {
       "identifier": "alleviatedbackpacks:advanced_deposit_upgrade"
     },
-    "tags": ["crafting_table"],
+    "tags": [
+      "crafting_table"
+    ],
     "pattern": [
       " D ",
-      "GUG",
+      "G#G",
       "RRR"
     ],
     "key": {
-      "D": { "item": "minecraft:diamond" },
-      "G": { "item": "minecraft:gold_ingot" },
-      "R": { "item": "minecraft:redstone" },
-      "U": { "item": "alleviatedbackpacks:deposit_upgrade" }
+      "D": {
+        "item": "minecraft:diamond"
+      },
+      "G": {
+        "item": "minecraft:gold_ingot"
+      },
+      "#": {
+        "item": "alleviatedbackpacks:deposit_upgrade"
+      },
+      "R": {
+        "item": "minecraft:redstone"
+      }
     },
-    "unlock": [{ "item": "alleviatedbackpacks:deposit_upgrade" }],
-    "result": { "item": "alleviatedbackpacks:advanced_deposit_upgrade" }
+    "unlock": [
+      {
+        "item": "alleviatedbackpacks:deposit_upgrade"
+      }
+    ],
+    "result": {
+      "item": "alleviatedbackpacks:advanced_deposit_upgrade",
+      "count": 1
+    }
   }
 }
