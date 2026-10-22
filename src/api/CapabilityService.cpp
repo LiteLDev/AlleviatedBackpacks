@@ -470,12 +470,14 @@ private:
         registerBlockFluid("minecraft:lava_cauldron", cauldron);
 
         // Placed backpacks expose their tanks and battery to pipes / cables (SB block capabilities).
-        registerBlockFluid(placed::kBlockId, [](BlockSource& region, BlockPos const& pos, Side) {
-            return backpack::fluidHandler(placed::PlacedBackpacks::get().backpackAt(region, pos));
-        });
-        registerBlockEnergy(placed::kBlockId, [](BlockSource& region, BlockPos const& pos, Side) {
-            return backpack::energyStorage(placed::PlacedBackpacks::get().backpackAt(region, pos));
-        });
+        for (auto const& id : placed::blockIds()) {
+            registerBlockFluid(id, [](BlockSource& region, BlockPos const& pos, Side) {
+                return backpack::fluidHandler(placed::PlacedBackpacks::get().backpackAt(region, pos));
+            });
+            registerBlockEnergy(id, [](BlockSource& region, BlockPos const& pos, Side) {
+                return backpack::energyStorage(placed::PlacedBackpacks::get().backpackAt(region, pos));
+            });
+        }
 
         // Backpack items expose them too (SB item capabilities).
         for (auto const& t : core::kTiers) {

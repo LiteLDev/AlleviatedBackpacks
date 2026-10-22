@@ -152,11 +152,19 @@ void requestClose(); // host: close the screen now (and tell the server)
 /// (`translUpgradeTooltip(id)`, e.g. "Magnet Settings"); the upgrade name when SC has none.
 /// An upgrade's tab data may name them (`tabLabel` / `tabTooltip`).
 std::string tabLabel(cs::UpgradeView const& u) {
-    if (u.tab.is_object() && u.tab.contains("tabLabel") && u.tab["tabLabel"].is_string()) return u.tab["tabLabel"].get<std::string>();
+    if (u.tab.is_object()) {
+        for (auto const* key : {"tabLabel", "title"}) { // "title": the filter-based tabs
+            if (u.tab.contains(key) && u.tab[key].is_string()) return u.tab[key].get<std::string>();
+        }
+    }
     return u.id.empty() ? u.name : ctr("abp.mainscreen.tab." + u.id, u.name);
 }
 std::string tabTooltip(cs::UpgradeView const& u) {
-    if (u.tab.is_object() && u.tab.contains("tabTooltip") && u.tab["tabTooltip"].is_string()) return u.tab["tabTooltip"].get<std::string>();
+    if (u.tab.is_object()) {
+        for (auto const* key : {"tabTooltip", "tooltip"}) { // "tooltip": the filter-based tabs
+            if (u.tab.contains(key) && u.tab[key].is_string()) return u.tab[key].get<std::string>();
+        }
+    }
     return u.id.empty() ? u.name : ctr("abp.mainscreen.tab." + u.id + ".tooltip", tabLabel(u));
 }
 

@@ -1,11 +1,12 @@
 {
   "abp.compacting.name": "Compacting Upgrade",
   "abp.compacting.advanced_name": "Advanced Compacting Upgrade",
-  "abp.compacting.only_uncraftable": "Only uncraftable: {}",
-  "abp.compacting.only_uncraftable.help1": "§7Only compact items that can be",
-  "abp.compacting.only_uncraftable.help2": "§7crafted back into the original items",
-  "abp.compacting.grid.basic": "Compacts 2x2 recipes",
-  "abp.compacting.grid.advanced": "Compacts 3x3 and 2x2 recipes",
-  "abp.compacting.filter.allow": "§7Allow list: {} items",
-  "abp.compacting.filter.deny": "§7Deny list: {} items"
+  "abp.compacting.tab": "Compa...",
+  "abp.compacting.tab.advanced": "Adv. Compacting",
+  "abp.compacting.tab.tooltip": "Compacting Settings",
+  "abp.compacting.tab.advanced.tooltip": "Advanced Compacting Settings",
+  "abp.compacting.button.compact_only_uncraftable": "Compact Only Uncraftable",
+  "abp.compacting.button.compact_anything": "Compact Anything",
+  "abp.compacting.button.works_in_gui": "Works in GUI as well",
+  "abp.compacting.button.only_automatic": "Only works with other upgrades/automation"
 }

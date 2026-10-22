@@ -43,6 +43,9 @@ struct CachedContents {
 [[nodiscard]] CachedContents const* contents(std::string const& uuid);
 /// Render info of a backpack (nullptr = unknown yet; requests it).
 [[nodiscard]] core::screen::RenderInfo const* renderInfo(std::string const& uuid);
+/// Asks the server again for the render info of a backpack that is being rendered (at most once a
+/// second per backpack), so model parts, colours, fluid levels and charge stay current.
+void refreshRenderInfo(std::string const& uuid);
 
 /// Listeners for screen model changes (e.g. the screen host).
 using ScreenListener = std::function<void()>;

@@ -59,6 +59,10 @@ float unpackY(std::uint64_t p) { return std::bit_cast<float>(static_cast<std::ui
 
 constexpr std::size_t                      BUTTONS = 3;
 std::array<std::atomic<bool>, BUTTONS>     gHeldButtons{};
+/// Raw button state as reported by the game, to drop a repeated down (or up) of the same button:
+/// the same press can reach the input layer twice (e.g. a virtual GameInput mouse plus the window
+/// message), which would toggle widgets twice.
+std::array<std::atomic<bool>, BUTTONS>     gRawPressed{};
 std::array<std::atomic<bool>, 256>         gHeldKeys{};
 std::array<std::atomic<bool>, 256>         gKeysDown{};
 std::array<std::atomic<std::int64_t>, 256> gKeyDownTime{};
@@ -164,6 +168,7 @@ void refreshHitSnapshot() {
 
 void releaseHeld(bool notifyLayers) {
     for (std::size_t i = 0; i < BUTTONS; ++i) {
+        gRawPressed[i] = false;
         if (!gHeldButtons[i].exchange(false) || !notifyLayers) continue;
         auto button = static_cast<ui::MouseButton>(i);
         post([button] {
@@ -241,6 +246,11 @@ void onMouse(ll::event::MouseInputEvent& ev) {
     }
     auto& held = gHeldButtons[static_cast<std::size_t>(button)];
     bool  down = ev.buttonData() == MouseAction::DataDown;
+    if (gRawPressed[static_cast<std::size_t>(button)].exchange(down) == down) {
+        // Repeated down / up of the same button: the first one was already dispatched.
+        if (held.load()) ev.cancel();
+        return;
+    }
     bool  live = snap.inLevel.load() && snap.cursorScreen.load();
 
     bool consume;
