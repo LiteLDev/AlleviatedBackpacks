@@ -76,13 +76,22 @@ Start-Sleep -Milliseconds 1500
 
 # The secondary (a copper backpack item) opens the shared leather storage: 27 slots. Only the
 # copper backpack stays in the inventory, so Open Backpack (B) picks it.
-Invoke-Chat '/replaceitem entity @s slot.hotbar 0 air'
-Invoke-Chat '/replaceitem entity @s slot.hotbar 1 air'
-Start-Sleep -Milliseconds 500
-$mark = Get-LogMark
-Press-Key 'B'
-Wait-LogLine "companion: native screen \d+ for 'Copper Backpack' \(27 slots" 10 -Since $mark | Out-Null
-Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $mark | Out-Null
+# (Remote: a chat opened right after a screen closed can get lost; retry until B picks the copper.)
+$opened = $false
+for ($try = 0; $try -lt 3 -and -not $opened; $try++) {
+    Start-Sleep -Milliseconds 1500
+    Invoke-Chat '/replaceitem entity @s slot.hotbar 0 air'
+    Invoke-Chat '/replaceitem entity @s slot.hotbar 1 air'
+    Start-Sleep -Milliseconds 800
+    $mark = Get-LogMark
+    Press-Key 'B'
+    $line = Wait-LogLine "companion: native screen \d+ for '" 10 -Since $mark
+    Wait-LogLine 'companion: drawing the native backpack screen' 10 -Since $mark | Out-Null
+    if ($line -match "for 'Copper Backpack' \(27 slots") { $opened = $true; break }
+    Write-Step "B opened another backpack ($line); retrying"
+    Press-Key 'E'
+}
+if (-not $opened) { throw 'the secondary endpoint did not open the shared 27-slot storage' }
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'secondary-open' | Out-Null
 Press-Key 'E'
