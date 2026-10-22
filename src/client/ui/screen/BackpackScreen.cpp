@@ -125,9 +125,13 @@ bool infiniteStorage(cs::BackpackScreenModel const& m) {
     });
 }
 
+/// "∞" in the count position (pixel art: the game font's U+221E is too small to read there).
 void drawInfinite(Painter& p, float x, float y) {
-    static std::string const kInfinity = "\xE2\x88\x9E"; // U+221E
-    p.text(kInfinity, x + 19 - 2 - p.textWidth(kInfinity), y + 6 + 3, Color::rgb(0xFFFFFF), true);
+    static PixelArt const shadow{{".##.##.", "#..#..#", "#..#..#", ".##.##."}, {"#=3F3F3F"}};
+    static PixelArt const glyph{{".##.##.", "#..#..#", "#..#..#", ".##.##."}, {"#=FFFFFF"}};
+    float gx = x + 17 - 8, gy = y + 11;
+    p.pixels(shadow, gx + 1, gy + 1, 1, Painter::Layer::Foreground);
+    p.pixels(glyph, gx, gy, 1, Painter::Layer::Foreground);
 }
 
 class BackpackScreenLayer final : public IUiLayer {
@@ -298,6 +302,7 @@ void BackpackScreenLayer::syncModel(cs::BackpackScreenModel const& m) {
         mFilter       = {};
         mOpenTab      = -1;
         mTabsSig.clear();
+        mTabs.clear(); // a backpack without upgrade tabs has the same (empty) signature
         mMatchesDirty = true;
         mView         = View::Storage;
         mSettingsTabs.clear();

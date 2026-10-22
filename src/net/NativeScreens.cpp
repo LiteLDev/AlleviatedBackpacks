@@ -227,6 +227,8 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
     if (area == Area::Storage) {
         content = bp->inventory().at(index);
         maxTake = std::clamp(content.maxStack, 1, 255);
+        // SC Infinity: an infinite slot reports Integer.MAX_VALUE, so a click takes a full stack.
+        if (!content.empty() && bp->inventory().isInfinite(index)) content.count = std::max(content.count, maxTake);
     } else {
         content = bp->data().upgrades[static_cast<std::size_t>(index)].item;
     }
