@@ -1,6 +1,6 @@
 item.alleviatedbackpacks:smelting_upgrade.name=Smelting Upgrade
 item.alleviatedbackpacks:smoking_upgrade.name=Smoking Upgrade
 item.alleviatedbackpacks:blasting_upgrade.name=Blasting Upgrade
-item.alleviatedbackpacks:auto_smelting_upgrade.name=Auto-Smelting Upgrade
-item.alleviatedbackpacks:auto_smoking_upgrade.name=Auto-Smoking Upgrade
-item.alleviatedbackpacks:auto_blasting_upgrade.name=Auto-Blasting Upgrade
+item.alleviatedbackpacks:auto_smelting_upgrade.name=Auto-smelting Upgrade
+item.alleviatedbackpacks:auto_smoking_upgrade.name=Auto-smoking Upgrade
+item.alleviatedbackpacks:auto_blasting_upgrade.name=Auto-blasting Upgrade

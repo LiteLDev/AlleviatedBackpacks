@@ -50,6 +50,11 @@ InsertVerdict BackpackInventory::checkInsert(int slot, ItemStackData const& stac
     return InsertVerdict::Allow;
 }
 
+bool BackpackInventory::isInfinite(int slot) const {
+    if (slot < 0 || slot >= size()) return false;
+    return std::any_of(mInfinite.begin(), mInfinite.end(), [slot](auto const& h) { return h.fn(slot); });
+}
+
 bool BackpackInventory::canExtract(int slot, int amount, AccessContext const& ctx) const {
     if (slot < 0 || slot >= size()) return false;
     ExtractQuery q{*this, slot, mSlots[static_cast<std::size_t>(slot)], amount, ctx};
@@ -149,10 +154,11 @@ ItemStackData BackpackInventory::extract(int slot, int amount, AccessContext con
     if (slot < 0 || slot >= size() || amount <= 0) return {};
     auto& cur = mSlots[static_cast<std::size_t>(slot)];
     if (cur.empty()) return {};
-    int n = std::min(amount, cur.count);
+    bool infinite = isInfinite(slot);
+    int  n        = infinite ? amount : std::min(amount, cur.count);
     if (!canExtract(slot, n, ctx)) return {};
     auto out = cur.withCount(n);
-    if (!simulate) {
+    if (!simulate && !infinite) {
         cur.count -= n;
         if (cur.count <= 0) cur.clear();
         notify(slot);
@@ -237,6 +243,10 @@ void BackpackInventory::addSlotPreference(std::string owner, int priority, SlotP
     insertSorted(mPreferences, std::move(owner), priority, std::move(fn));
 }
 
+void BackpackInventory::addInfiniteSlots(std::string owner, InfiniteSlotFn fn) {
+    insertSorted(mInfinite, std::move(owner), 0, std::move(fn));
+}
+
 void BackpackInventory::removeHooks(std::string const& owner) {
     auto drop = [&](auto& v) {
         std::erase_if(v, [&](auto const& h) { return h.owner == owner; });
@@ -246,6 +256,7 @@ void BackpackInventory::removeHooks(std::string const& owner) {
     drop(mLimitModifiers);
     drop(mListeners);
     drop(mPreferences);
+    drop(mInfinite);
 }
 
 void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
@@ -257,6 +268,7 @@ void BackpackInventory::clearHooksExcept(std::string_view keepOwner) {
     drop(mLimitModifiers);
     drop(mListeners);
     drop(mPreferences);
+    drop(mInfinite);
 }
 
 void BackpackInventory::clearFilters() {
@@ -264,6 +276,7 @@ void BackpackInventory::clearFilters() {
     mExtractFilters.clear();
     mLimitModifiers.clear();
     mPreferences.clear();
+    mInfinite.clear();
 }
 
 nlohmann::json BackpackInventory::toJson() const {

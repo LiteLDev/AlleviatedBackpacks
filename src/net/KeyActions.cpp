@@ -6,7 +6,7 @@
 //                                                     B over a backpack in an inventory screen
 //   {"action":"interact"}                             Inventory interaction (C): Deposit / Restock
 //                                                     of the first backpack on the container looked at
-//   {"action":"toolSwap"}                             Tool swap: best tool for the looked-at block/entity
+//   {"action":"toolSwap"}                             Tool swap (SB): the Tool Swapper unit's key handler
 //   {"action":"toggleUpgrade","slot":n}               Toggle upgrade N of the first carried backpack
 //   {"action":"stashQuery","q":n,"slots":[loc..]}     Right-click stashing overlay (answered with
 //                                                     `StashInfoPacket`), see feature/stash/Stash.h
@@ -27,6 +27,7 @@
 #include "mc/world/level/block/Block.h"
 #include "mc/world/phys/HitResult.h"
 
+#include "feature/admin/SbConfig.h"
 #include "feature/stash/Stash.h"
 #include "game/BackpackItem.h"
 #include "game/PlayerScan.h"
@@ -98,7 +99,9 @@ bool openAt(Player& player, nlohmann::json const& body) {
 bool interact(Player& player) {
     auto hit = player.traceRay(kReach, false, true);
     if (hit.mType != HitResultType::Tile) return false;
-    auto container = player.getDimensionBlockSource().tryGetContainer(hit.mBlock);
+    auto& region = player.getDimensionBlockSource();
+    if (admin::isBlockInteractionDisallowed(region.getBlock(hit.mBlock).getTypeName())) return false; // SB noInteractionBlocks
+    auto container = region.tryGetContainer(hit.mBlock);
     if (!container) return false;
     // SB InventoryInteractionPayload: runs on the first backpack only (runOnBackpacks -> true).
     auto list = ranked(player);
@@ -116,43 +119,12 @@ bool interact(Player& player) {
     return true;
 }
 
-/// SB: only upgrades that swap on key press (the Advanced Tool Swapper) can handle the key.
-bool hasKeyToolSwapper(Player& player) {
-    for (auto const& [carried, bp] : ranked(player)) {
-        if (bp && upgrade::hasActive(*bp, upgrade::toolswapper::kAdvancedId)) return true;
-    }
-    return false;
-}
-
-/// SB `player.displayClientMessage(Component.translatable("gui.sophisticatedbackpacks.status.<key>"), true)`.
-void status(Player& player, std::string_view key, std::string_view fallback) {
-    log().info("key action: {} status {}", player.getRealName(), key);
-    upgrade::transfer::sendTip(player, trFor(player, "abp.input.status." + std::string(key), fallback));
-}
-
+/// SB tool swap key: handled by the Tool Swapper unit (crosshair target, wrench-like tools,
+/// SB's status messages).
 bool toolSwap(Player& player) {
-    if (game::isBackpack(player.getSelectedItem())) {
-        status(player, "unable_to_swap_tool_for_backpack", "Unable to swap tool for backpack in hand. Switch to different item or empty hand.");
-        return false;
-    }
-    auto hit = player.traceRay(kReach, true, true);
-    if (hit.mType != HitResultType::Tile && hit.mType != HitResultType::Entity) return false; // SB sends nothing
-    if (!hasKeyToolSwapper(player)) {
-        status(player, "no_tool_swap_upgrade_present", "No upgrade present that can do tool swap on key press");
-        return false;
-    }
-    bool ok = false;
-    if (hit.mType == HitResultType::Tile) {
-        ok = upgrade::toolswapper::swapForBlock(player, player.getDimensionBlockSource().getBlock(hit.mBlock));
-        if (!ok) status(player, "no_tool_found_for_block", "No tool was found that works on block");
-        return ok;
-    }
-    auto* target = hit.getEntity();
-    if (!target) return false;
-    ok = upgrade::toolswapper::isShearable(*target) ? upgrade::toolswapper::swapForEntityUse(player, *target)
-                                                    : upgrade::toolswapper::swapForAttack(player);
-    if (!ok) status(player, "no_tool_found_for_entity", "No tool was found that works on entity");
-    return ok;
+    auto r = upgrade::toolswapper::onSwapKey(player);
+    log().info("key action: {} tool swap -> {}", player.getRealName(), static_cast<int>(r));
+    return r == upgrade::toolswapper::KeyResult::Swapped;
 }
 
 /// SB `UpgradeTogglePayload`: the first backpack (SB order), only upgrades that can be disabled.
@@ -230,6 +202,9 @@ bool handleKeyAction(Player& player, nlohmann::json const& body) {
     if (action == "toggleUpgrade") return toggleUpgrade(player, body.value("slot", -1));
     if (action == "stashQuery") return stashQuery(player, body);
     if (action == "stash") return stash(player, body);
+    for (auto const& h : KeyActionRegistry::entries()) {
+        if (h.action == action && h.handle) return h.handle(player, body);
+    }
     return false;
 }
 

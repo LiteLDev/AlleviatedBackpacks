@@ -1,32 +1,42 @@
 {
   "abp.admin.upgrade_disabled": "此升级已在本服务器上禁用。",
   "abp.admin.upgrade_disabled_lore": "§c已在本服务器上禁用",
-  "abp.admin.err.one_target": "请只选择一名玩家（副本与原背包共享存储）。",
   "abp.admin.test_upgrade": "管理测试升级",
 
   "abp.admin.err.permission": "你需要管理员权限。",
   "abp.admin.err.uuid_short": "请至少输入 UUID 的前 4 个字符。",
   "abp.admin.err.uuid_ambiguous": "有多个背包匹配 {}。",
   "abp.admin.err.uuid_unknown": "没有 UUID 为 {} 的背包。",
-  "abp.admin.err.no_target": "没有匹配的玩家。",
 
-  "abp.admin.list.header": "共 {} 个已存储的背包：",
-  "abp.admin.list.header_holder": "{1} 的背包共 {0} 个：",
+  "abp.admin.sbp.list.header": "背包名，颜色，上次打开者，上次打开时间",
+  "abp.admin.sbp.list.cloth_color": "面料",
+  "abp.admin.sbp.list.trim_color": "接缝",
+  "abp.admin.sbp.give.success": "已将背包给予{}",
+  "abp.admin.sbp.remove_non_player.success": "已删除{}个非玩家背包",
+
+  "abp.admin.only_x_upgrades_allowed": "仅可加装{}个{}于{}",
+  "abp.admin.upgrade_group.stack": "堆叠升级",
+  "abp.admin.upgrade_group.cooking": "熔炉升级",
+  "abp.admin.upgrade_group.jukebox": "唱片机升级",
+  "abp.admin.backpack_name.leather": "皮革背包",
+  "abp.admin.backpack_name.copper": "铜背包",
+  "abp.admin.backpack_name.iron": "铁背包",
+  "abp.admin.backpack_name.gold": "金背包",
+  "abp.admin.backpack_name.diamond": "钻石背包",
+  "abp.admin.backpack_name.netherite": "下界合金背包",
+
   "abp.admin.list.line": "{} §7{}§r {}/{} 格，{} 个物品，{} 个升级，持有者：{}，最后出现：{}",
   "abp.admin.list.first": "（首个持有者：{}）",
   "abp.admin.list.legacy": "（追踪开始前已存在）",
   "abp.admin.list.nobody": "（从未被玩家持有）",
-  "abp.admin.list.more": "……另有 {} 个",
 
   "abp.admin.info.upgrades": "升级：[{}]",
   "abp.admin.info.holders": "首个持有者：{}（{}），最后持有者：{}（{}）",
 
-  "abp.admin.stats.line": "背包：已存储 {} 个（已加载 {} 个），共 {} 个物品；空背包 {} 个，从未被持有 {} 个，无法读取 {} 个，死亡保留 {} 份",
+  "abp.admin.stats.line": "背包：已存储 {} 个（已加载 {} 个），共 {} 个物品；空背包 {} 个，从未被打开 {} 个，无法读取 {} 个，死亡保留 {} 份",
   "abp.admin.stats.tiers": "各等级数量：{}",
 
-  "abp.admin.give.ok": "已将背包 {} 给予 {}。",
   "abp.admin.remove.ok": "已删除背包 {}。",
-  "abp.admin.removenonplayer.ok": "已删除 {} 个从未被玩家持有的背包。",
   "abp.admin.cleanup.ok": "已删除 {} 个空的、未使用的背包。",
 
   "abp.admin.openfor.title": "背包 {}",

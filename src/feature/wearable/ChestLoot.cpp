@@ -1,11 +1,25 @@
-// Backpacks and upgrades in generated loot chests (dungeons, mineshafts, temples, end cities, ...).
+// Sophisticated Backpacks' chest loot (SBInjectLootSubProvider + SBLootModifierProvider): one roll
+// of a small inject table (a backpack or an upgrade, or nothing) is added to these vanilla chests,
+// gated by `chestLootEnabled` (sophisticatedbackpacks-common.json). Bedrock table names:
+//
+//   spawn_bonus_chest    leather 100                                                (empty 0)
+//   simple_dungeon       leather 5, copper 3, pickup upgrade 2                       (empty 90)
+//   abandoned_mineshaft  leather 7, copper 5, iron 3, gold 1, magnet upgrade 2       (empty 84)
+//   desert_pyramid       copper 5, iron 3, gold 1, magnet upgrade 2                  (empty 89)
+//   shipwrecktreasure    iron 4, gold 2, advanced magnet upgrade 2                   (empty 92)
+//   woodland_mansion     iron 4, gold 2, advanced magnet upgrade 2                   (empty 92)
+//   nether_bridge        iron 5, gold 3, feeding upgrade 2                           (empty 90)
+//   bastion_treasure     iron 3, gold 5, feeding upgrade 2                           (empty 90)
+//   end_city_treasure    diamond 3, gold 5, advanced magnet upgrade 2                (empty 90)
 //
 // Bedrock fills loot containers through `RandomizableBlockActorContainerBase::unPackLootTable`
 // (chests, barrels, ...) and `Util::LootTableUtils::fillContainer` (also chest minecarts). Both are
-// hooked; after vanilla filled the container, a configured item is put into a random empty slot
-// by chance (`config/wearable.json` -> chestLoot). Overriding vanilla loot table files from the
-// behavior pack would replace them entirely, so a hook is used instead.
+// hooked; after vanilla filled the container, the rolled item goes into a random empty slot (Java
+// shuffles the injected item into the loot the same way). Overriding vanilla loot table files from
+// the behavior pack would replace them entirely, so a hook is used instead.
 
+#include <algorithm>
+#include <map>
 #include <vector>
 
 #include "ll/api/memory/Hook.h"
@@ -19,7 +33,7 @@
 #include "mc/world/level/dimension/DimensionType.h"
 
 #include "feature/wearable/Wearable.h"
-#include "feature/wearable/WearableConfig.h"
+#include "feature/admin/SbConfig.h"
 #include "game/ItemConv.h"
 #include "mod/Config.h"
 #include "mod/Log.h"
@@ -46,25 +60,57 @@ std::string normalizeTableName(std::string_view name) {
     return s;
 }
 
+InjectTable const* injectTableFor(std::string_view table) {
+    static std::map<std::string, InjectTable, std::less<>> const kTables{
+        {"chests/spawn_bonus_chest", {{{"alleviatedbackpacks:leather_backpack", 100}}, 0}},
+        {"chests/simple_dungeon",
+         {{{"alleviatedbackpacks:leather_backpack", 5}, {"alleviatedbackpacks:copper_backpack", 3}, {"alleviatedbackpacks:pickup_upgrade", 2}}, 90}},
+        {"chests/abandoned_mineshaft",
+         {{{"alleviatedbackpacks:leather_backpack", 7},
+           {"alleviatedbackpacks:copper_backpack", 5},
+           {"alleviatedbackpacks:iron_backpack", 3},
+           {"alleviatedbackpacks:gold_backpack", 1},
+           {"alleviatedbackpacks:magnet_upgrade", 2}},
+          84}},
+        {"chests/desert_pyramid",
+         {{{"alleviatedbackpacks:copper_backpack", 5},
+           {"alleviatedbackpacks:iron_backpack", 3},
+           {"alleviatedbackpacks:gold_backpack", 1},
+           {"alleviatedbackpacks:magnet_upgrade", 2}},
+          89}},
+        {"chests/shipwrecktreasure",
+         {{{"alleviatedbackpacks:iron_backpack", 4}, {"alleviatedbackpacks:gold_backpack", 2}, {"alleviatedbackpacks:advanced_magnet_upgrade", 2}}, 92}},
+        {"chests/woodland_mansion",
+         {{{"alleviatedbackpacks:iron_backpack", 4}, {"alleviatedbackpacks:gold_backpack", 2}, {"alleviatedbackpacks:advanced_magnet_upgrade", 2}}, 92}},
+        {"chests/nether_bridge",
+         {{{"alleviatedbackpacks:iron_backpack", 5}, {"alleviatedbackpacks:gold_backpack", 3}, {"alleviatedbackpacks:feeding_upgrade", 2}}, 90}},
+        {"chests/bastion_treasure",
+         {{{"alleviatedbackpacks:iron_backpack", 3}, {"alleviatedbackpacks:gold_backpack", 5}, {"alleviatedbackpacks:feeding_upgrade", 2}}, 90}},
+        {"chests/end_city_treasure",
+         {{{"alleviatedbackpacks:diamond_backpack", 3}, {"alleviatedbackpacks:gold_backpack", 5}, {"alleviatedbackpacks:advanced_magnet_upgrade", 2}}, 90}},
+    };
+    auto it = kTables.find(table);
+    return it == kTables.end() ? nullptr : &it->second;
+}
+
 std::string injectChestLoot(std::string_view tableName, Container& container) {
-    auto const& c = config::get<WearableConfig>().chestLoot;
-    if (!c.enabled || injectionSuppressed()) return {};
-    auto entry = c.tables.find(normalizeTableName(tableName));
-    if (entry == c.tables.end() || entry->second.items.empty()) return {};
-    if (std::uniform_real_distribution<double>(0.0, 1.0)(rng()) >= entry->second.chance) return {};
-    int total = 0;
-    for (auto const& [_, w] : entry->second.items) total += std::max(0, w);
+    if (!admin::sbCommon().chestLootEnabled || injectionSuppressed()) return {};
+    auto const* table = injectTableFor(normalizeTableName(tableName));
+    if (!table) return {};
+    int total = std::max(0, table->emptyWeight);
+    for (auto const& e : table->entries) total += std::max(0, e.weight);
     if (total <= 0) return {};
     int         pick = std::uniform_int_distribution<int>(0, total - 1)(rng());
     std::string id;
-    for (auto const& [itemId, w] : entry->second.items) {
-        if (w <= 0) continue;
-        if (pick < w) {
-            id = itemId;
+    for (auto const& e : table->entries) {
+        if (e.weight <= 0) continue;
+        if (pick < e.weight) {
+            id = std::string(e.item);
             break;
         }
-        pick -= w;
+        pick -= e.weight;
     }
+    if (id.empty()) return {}; // the empty entry
     auto stack = game::ItemConv::make(id);
     if (stack.isNull()) return {};
     std::vector<int> empty;
