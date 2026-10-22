@@ -9,8 +9,8 @@
 // - Crafting hooks (TierCrafting.cpp) carry the backpack identity (uuid + item user data) from the
 //   consumed backpack into the crafted one, so tier upgrades and dyeing keep contents and upgrades.
 //   `Storage::forItem` grows the storage when the item's tier is higher than the stored one.
-// - TierLore.cpp keeps the item lore (tier, used/total slots, fill %, upgrades, colours) and the
-//   item tint (main colour, via the `minecraft:dyeable` item component) in sync with the storage.
+// - TierLore.cpp removes the phase-1 lore (SB backpacks have none; uildLore stays for that
+//   migration) and keeps the item tint (main colour, via the `minecraft:dyeable` item component) in sync with the storage.
 
 #include <cstdint>
 #include <memory>

@@ -64,6 +64,13 @@ std::array<std::atomic<bool>, BUTTONS>     gHeldButtons{};
 std::array<std::atomic<bool>, 256>         gHeldKeys{};
 std::array<std::atomic<bool>, 256>         gKeysDown{};
 std::array<std::atomic<bool>, 256>         gHotkeyKeys{}; ///< pressed keys a key binding took
+std::array<std::atomic<bool>, 256>         gPressed{};    ///< keys down as the game's key events say
+
+/// The key is held: the OS state or the game's key events (whichever knows).
+bool keyDown(int vk) {
+    if ((GetAsyncKeyState(vk) & 0x8000) != 0) return true;
+    return vk > 0 && vk < 256 && gPressed[static_cast<std::size_t>(vk)].load();
+}
 std::array<std::atomic<std::int64_t>, 256> gKeyDownTime{};
 constexpr std::int64_t                     REPEAT_WINDOW_MS = 1100;
 
@@ -180,6 +187,7 @@ void releaseHeld(bool notifyLayers) {
     }
     for (auto& key : gKeysDown) key = false;
     for (auto& key : gHotkeyKeys) key = false;
+    for (auto& key : gPressed) key = false;
 }
 
 void onClientUpdate(ClientInstance& client) {
@@ -291,6 +299,9 @@ void onMouse(ll::event::MouseInputEvent& ev) {
 void onKey(ll::event::KeyInputEvent& ev) {
     auto& snap            = snapshot();
     snap.vanillaTextFocus = static_cast<bool>(ev.controller().mTextboxIsFocused);
+    // Key state as the game sees it (also input that never reached the OS keyboard state, e.g.
+    // injected through the window procedure).
+    if (ev.keyCode() > 0 && ev.keyCode() < static_cast<int>(gPressed.size())) gPressed[static_cast<std::size_t>(ev.keyCode())] = ev.isDown();
     int  vk               = ev.keyCode();
     bool down             = ev.isDown();
     if (vk < 0 || vk >= static_cast<int>(gHeldKeys.size())) return;
@@ -302,7 +313,7 @@ void onKey(ll::event::KeyInputEvent& ev) {
     if (down) gKeyDownTime[idx] = now;
 
     // F3+H: Java's advanced tooltips toggle (Bedrock has none); the H press stays ours.
-    if (vk == 'H' && (GetAsyncKeyState(0x72) & 0x8000) != 0 && snap.inLevel.load() && !snap.textFocus.load() && !snap.vanillaTextFocus.load()) {
+    if (vk == 'H' && keyDown(0x72) && snap.inLevel.load() && !snap.textFocus.load() && !snap.vanillaTextFocus.load()) {
         if (down && !repeat) post([] { tooltip::setAdvancedTooltips(!tooltip::advancedTooltips()); });
         gHotkeyKeys[idx] = down;
         ev.cancel();
@@ -376,9 +387,9 @@ void post(std::function<void()> fn) {
     detail::gQueue.push_back(std::move(fn));
 }
 
-bool shiftDown() { return (GetAsyncKeyState(0x10) & 0x8000) != 0; }
-bool ctrlDown() { return (GetAsyncKeyState(0x11) & 0x8000) != 0; }
-bool altDown() { return (GetAsyncKeyState(0x12) & 0x8000) != 0; }
+bool shiftDown() { return detail::keyDown(0x10) || detail::keyDown(0xA0) || detail::keyDown(0xA1); }
+bool ctrlDown() { return detail::keyDown(0x11) || detail::keyDown(0xA2) || detail::keyDown(0xA3); }
+bool altDown() { return detail::keyDown(0x12) || detail::keyDown(0xA4) || detail::keyDown(0xA5); }
 
 /// Input module: hooks, listeners, key bindings (load: KeyRegistry, before the game builds its
 /// keyboard layout).

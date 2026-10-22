@@ -266,12 +266,15 @@ ABP_REGISTER_SELFTEST("tiers.lore_and_tint", [](Context& ctx) {
     bp->inventory().insert(data("minecraft:stone", 64), kInternal);
     bp->inventory().insert(data("minecraft:dirt", 10), kInternal);
     auto item = ctx.backpackItem(*bp);
+    // SB has no backpack lore: the phase-1 lore is removed, other lore is kept.
+    item.setCustomLore(buildLore(player, Tier::Leather, bp.get()));
+    ctx.check(loreText(item).find("2/27") != std::string::npos, "legacy lore set up");
     ctx.check(refreshItem(player, item, bp), "first refresh changes the item");
     ctx.check(!refreshItem(player, item, bp), "second refresh is a no-op");
-    auto text = loreText(item);
-    ctx.check(text.find("2/27") != std::string::npos, "used/total slots in lore: " + text);
-    ctx.check(text.find("4%") != std::string::npos, "fill % in lore (74/1728 -> 4%): " + text);
-    ctx.check(text.find("0/1") != std::string::npos, "upgrade slots in lore");
+    ctx.check(loreText(item).empty(), "legacy lore removed: " + loreText(item));
+    item.setCustomLore({"A custom line"});
+    ctx.check(!refreshItem(player, item, bp) && loreText(item) == "A custom line\n", "foreign lore kept");
+    item.setCustomLore({});
     ctx.check(!item.mItem->hasCustomColor(item), "default colour: no tint");
 
     // Colours: lore line + tint.
@@ -279,8 +282,8 @@ ABP_REGISTER_SELFTEST("tiers.lore_and_tint", [](Context& ctx) {
     bp->data().accentColor = core::dyeInfo(core::DyeColor::Yellow).argb;
     bp->markDirty();
     ctx.check(refreshItem(player, item, bp), "colour change refreshes");
-    text = loreText(item);
-    ctx.check(text.find(colorLabel(player, core::dyeInfo(core::DyeColor::Blue).argb)) != std::string::npos, "main colour in lore");
+    ctx.check(loreText(item).empty(), "no colour lore (SB)");
+
     ctx.check(item.mItem->hasCustomColor(item), "tinted");
     auto c = item.getColor();
     ctx.check(std::abs(c.b - (0xAA / 255.0f)) < 0.01f && std::abs(c.r - (0x3C / 255.0f)) < 0.01f, "tint = blue");

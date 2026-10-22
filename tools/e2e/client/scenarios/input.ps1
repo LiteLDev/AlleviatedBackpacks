@@ -1,23 +1,15 @@
 # P2-14: Sophisticated Backpacks' key bindings, right-click stashing and item tooltips, driven with
-# real input in the vanilla screens and the native backpack screen. Works in `-Mode local` and
-# `-Mode remote-mod`.
-# (Tool Swap, Toggle Upgrade 3-5 and mouse bindings of Open Backpack are unbound by default and the
-# game does not take remaps from options.txt for mod keys at launch: covered by selftests.)
+# (headless) input in the vanilla screens and the native backpack screen. Works in `-Mode local`
+# and `-Mode remote-mod`. input.prelaunch.ps1 rebinds keys in options.txt (Tool Swap = V, Toggle
+# Upgrade 3 = N, Open Backpack also on the mouse side button X1): the saved bindings must be used.
+# Our keys must not also reach the game: B (Bedrock's emote key) and E never open the emote list.
+# The headless input has no mouse side buttons, so the X1 binding is only checked as loaded;
+# pressing it needs real hardware.
 #
 # Positions: the native screen layout comes from the companion's layout log line (GUI units), the
 # vanilla screens' slot positions from "stash: vanilla slots ..." (logged once per screen).
 
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-namespace AbpInputE2E {
-public static class Mouse {
-    [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
-    public static void Middle() { mouse_event(0x20, 0, 0, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(60); mouse_event(0x40, 0, 0, 0, UIntPtr.Zero); }
-    public static void X1() { mouse_event(0x80, 0, 0, 1, UIntPtr.Zero); System.Threading.Thread.Sleep(60); mouse_event(0x100, 0, 0, 1, UIntPtr.Zero); }
-}
-}
-'@ -ErrorAction SilentlyContinue
+function Middle-Click { [AbpE2E.Native]::MouseButton(2, $false); Start-Sleep -Milliseconds 60; [AbpE2E.Native]::MouseButton(2, $true); Start-Sleep -Milliseconds 250 }
 
 Wait-LogLine 'companion: server ready' 90 | Out-Null
 Write-Step 'companion handshake done'
@@ -205,7 +197,7 @@ Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 900
 Save-Screenshot 'chest-b-closed-to-game' | Out-Null
 
-# ---- Vanilla inventory: tooltips, stashing, B (and the X1 mouse binding) ---------------------------------
+# ---- Vanilla inventory: tooltips, stashing, B ---------------------------------
 $mark = Get-LogMark
 Open-Inventory
 Read-VanillaSlots $mark
@@ -264,20 +256,6 @@ Press-Key 'B'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 1000
 Save-Screenshot 'inv-b-back-to-inventory' | Out-Null
-# Open Backpack on the mouse side button (second binding from options.txt).
-V-Move 'inventory:1'
-Start-Sleep -Milliseconds 300
-$mark = Get-LogMark
-[AbpInputE2E.Mouse]::X1()
-Wait-LogLine 'key action: .* opens the backpack at inventory 1' 10 -Since $mark | Out-Null
-Read-Layout $mark
-Start-Sleep -Milliseconds 800
-Save-Screenshot 'inv-x1-opened' | Out-Null
-$mark = Get-LogMark
-Gui-Move 30 5
-Press-Key 'B'
-Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
-Start-Sleep -Milliseconds 800
 Close-Screen
 
 # ---- Native screen: stashing, sort (middle mouse), transfer keys ------------------------------------
@@ -314,12 +292,12 @@ Gui-Click $h4[0] $h4[1]
 $p = Storage-Pos 5
 Gui-Move $p[0] $p[1]
 $mark = Get-LogMark
-[AbpInputE2E.Mouse]::Middle()
+Middle-Click
 Wait-LogLine 'native screen action: sort by' 10 -Since $mark | Out-Null
 $mark = Get-LogMark
 $h = Hotbar-Pos 2
 Gui-Move $h[0] $h[1]
-[AbpInputE2E.Mouse]::Middle()
+Middle-Click
 Start-Sleep -Milliseconds 700
 if ((Get-LeviLog -Since $mark) -match 'native screen action: sort by') { throw 'middle click over the player inventory sorted' }
 # [ / ] transfer (Shift: everything).
