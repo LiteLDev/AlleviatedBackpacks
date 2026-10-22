@@ -20,7 +20,9 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockSource.h"
+#include "mc/world/level/block/Block.h"
 
+#include "feature/admin/SbConfig.h"
 #include "game/BackpackItem.h"
 #include "game/Storage.h"
 #include "mod/Config.h"
@@ -99,7 +101,9 @@ public:
         if (!uuid || !game::Storage::get().available()) return false;
         auto bp = game::Storage::get().find(*uuid);
         if (!bp || !hasInteractionUpgrade(bp)) return false;
-        auto container = player.getDimensionBlockSource().tryGetContainer(ev.blockPos());
+        auto& region = player.getDimensionBlockSource();
+        if (admin::isBlockInteractionDisallowed(region.getBlock(ev.blockPos()).getTypeName())) return false; // SB noInteractionBlocks
+        auto container = region.tryGetContainer(ev.blockPos());
         if (!container) return false;
 
         ev.cancel(); // neither open the container nor use the item

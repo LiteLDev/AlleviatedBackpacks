@@ -45,7 +45,13 @@ dedicated servers (BDS) and in single-player / local worlds on the client.
   inception, everlasting, jukebox, tool swapper, tank, pump, xp pump, alchemy, anvil, ...).
   - The **Battery upgrade** has no Bedrock equivalent (there is no Forge Energy) and is not provided.
 - Backpacks can't be put into themselves, and by default not into other backpacks
-  (an Inception upgrade allows it). Shulker boxes are refused unless the config allows them.
+  (an Inception upgrade allows it). Like Sophisticated Backpacks, shulker boxes fit in backpacks
+  (`containerItemsDisallowed` refuses them) and backpacks don't fit in shulker boxes
+  (`canBePlacedInContainerItems`).
+- World systems as in Sophisticated Backpacks: the **Ender Linker** links backpacks into a linked
+  storage group with shared contents; duplicated backpacks (same storage) are sorted out; right-click
+  another player's back to open their worn backpack; mobs sometimes spawn wearing filled backpacks;
+  dungeon and other loot chests sometimes hold backpacks and upgrades.
 - English and Simplified Chinese; the GUI follows each player's language.
 
 Commands (alias `/abp`):
@@ -57,6 +63,10 @@ Commands (alias `/abp`):
 | `/backpack give <tier>` | operators | get a backpack |
 | `/backpack reload` | operators / console | reload config files and translations |
 | `/backpack selftest [pattern]` | operators / console | run the built-in self tests |
+| `/sbp list [playerName]` | operators / console | opened backpacks, newest first (alias `/sophisticatedbackpacks`) |
+| `/sbp give <targets> <backpackUuid>` | operators / console | give a backpack bound to a logged backpack |
+| `/sbp removeNonPlayer <onlyWithEmptyInventory>` | operators / console | delete backpacks no player ever opened |
+| `/backpack info <uuid>`, `stats`, `remove <uuid>`, `cleanup`, `openfor <uuid>` | operators / console | admin extras |
 
 ## Install
 
@@ -87,9 +97,15 @@ Commands (alias `/abp`):
 | `upgradeTickInterval` | `10` | ticks between upgrade updates (20 = 1 second) |
 | `requireResourcePack` | `true` | BDS: players must accept the resource pack |
 | `allowNesting` | `false` | allow backpacks in backpacks without an Inception upgrade |
-| `allowShulkerBoxes` | `false` | allow shulker boxes in backpacks |
+| `allowShulkerBoxes` | `true` | allow shulker boxes in backpacks |
 
-Upgrades add their own `config/<upgrade>.json` files.
+Sophisticated Backpacks' own settings, with SB's names, defaults and ranges:
+`config/sophisticatedbackpacks-server.json` (disallowed items, slot counts per tier, entity backpack
+additions, nerfs, max upgrades per storage, other-player opening, dedup, ...),
+`config/sophisticatedbackpacks-common.json` (`chestLootEnabled`) and
+`config/sophisticatedcore-common.json` (`enabledItems`). Upgrades add their own
+`config/<upgrade>.json` files; `config/admin.json` and `config/wearable.json` hold
+AlleviatedBackpacks extras that are off by default.
 
 ## Building
 

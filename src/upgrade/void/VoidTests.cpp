@@ -10,6 +10,8 @@
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/Storage.h"
+#include "mod/Config.h"
+#include "mod/GeneralConfig.h"
 #include "selftest/SelfTest.h"
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
@@ -112,7 +114,13 @@ ABP_REGISTER_SELFTEST("void.respects_other_denials", [](Context& ctx) -> ll::cor
     setup(ctx, bp, "void", {"minecraft:diamond"}, core::FilterMode::Deny);
     ctx.require(ctx.give(player, ctx.backpackItem(*bp), 3) == 3, "give backpack");
     co_await ctx.ticks(2);
-    // Shulker boxes are refused by the foundation rule (default config): that Deny wins.
+    // Shulker boxes refused by the foundation rule (`general.allowShulkerBoxes` off; SB's default lets
+    // them in): that Deny wins.
+    struct ShulkerRule {
+        bool saved = config::get<GeneralConfig>().allowShulkerBoxes;
+        ShulkerRule() { config::mut<GeneralConfig>().allowShulkerBoxes = false; }
+        ~ShulkerRule() { config::mut<GeneralConfig>().allowShulkerBoxes = saved; }
+    } shulkerRule;
     auto shulker = data("minecraft:undyed_shulker_box", 1);
     if (shulker.empty()) shulker = data("minecraft:shulker_box", 1);
     ctx.require(!shulker.empty(), "shulker item");

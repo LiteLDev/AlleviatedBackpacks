@@ -65,6 +65,13 @@ public:
     int  addCreateListener(CreateListener fn);
     void removeCreateListener(int id);
 
+    /// Decides whether `forItem` may grow a backpack's storage when the item's tier is higher than
+    /// the stored tier (tier upgrades swap the item id). Default (no gate): it may. Linked storage
+    /// uses it: secondary endpoints share the primary's storage, and only the primary can upgrade
+    /// it (Sophisticated Core). nullptr removes the gate.
+    using TierGrowthGate = std::function<bool(ItemStack const& stack, Backpack const& backpack)>;
+    void setTierGrowthGate(TierGrowthGate gate) { mTierGrowthGate = std::move(gate); }
+
     /// Uuids of every backpack stored in the world (loaded or not), in DB key order.
     [[nodiscard]] std::vector<std::string> storedUuids() const;
     /// Calls `fn` for every currently loaded (cached) backpack.
@@ -85,6 +92,7 @@ private:
     std::vector<ll::event::ListenerPtr>    mListeners;
     std::vector<std::pair<int, CreateListener>> mCreateListeners;
     int                                    mNextCreateListener = 0;
+    TierGrowthGate                         mTierGrowthGate;
     int                                    mTicks = 0;
     std::int64_t                           mNow   = 0; ///< server ticks since install
 };

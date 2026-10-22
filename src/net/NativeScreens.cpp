@@ -16,6 +16,7 @@
 #include "core/Appearance.h"
 #include "core/Sorting.h"
 #include "feature/gui/Gui.h"
+#include "feature/gui/SbSettings.h"
 #include "game/Backpack.h"
 #include "game/ItemConv.h"
 #include "mod/I18n.h"
@@ -498,141 +499,25 @@ bool clickGenericSlot(Player& p, ui::Menu& menu, int index, int button, bool shi
 
 std::string translatedUpgradeName(Player& p, upgrade::IUpgrade const& type) { return upgrade::displayName(type, &p); }
 
-// ---- native settings screen (SC SettingsScreen: main / no sort / memory tabs) ----------------------
+// ---- native settings screen: feature/gui/SbSettings.h (P2-2) -------------------------------------------
+// ---- open upgrade tab (SC setOpenTabId / getOpenTabId, reopened with "keep tab open") -------------------
 
-/// SC MainSettingsContainer context: edits go to the player's global settings or this backpack.
-std::unordered_map<std::int64_t, std::string> gSettingsContext;
-
-std::string contextOf(Player const& p) {
-    auto it = gSettingsContext.find(keyOf(p));
-    return it == gSettingsContext.end() ? std::string("backpack") : it->second;
-}
-
-/// Main settings keys as SB names them -> our option keys and defaults.
-struct MainOption {
-    char const* name;
-    char const* key;
-    bool        def;
-};
-constexpr MainOption kMainOptions[] = {
-    {"shiftClickIntoOpenTab", feature::gui::kOpenTabFirst, true},
-    {"keepTabOpen", "keepTabOpen", true},
-    {"keepSearchPhrase", "keepSearchPhrase", true}, // SC SettingsManager.KEEP_SEARCH_PHRASE default
-};
-
-/// Backpack-level settings of the native screens that the GUI unit doesn't know
-/// (`settings["companion"]` of the backpack data).
-nlohmann::json companionSection(game::Backpack const& bp) {
-    auto it = bp.data().settings.find("companion");
-    return it != bp.data().settings.end() && it->is_object() ? *it : nlohmann::json::object();
-}
-
-void setCompanionOption(game::Backpack& bp, std::string const& key, nlohmann::json value) {
-    auto& s = bp.data().settings["companion"];
-    if (!s.is_object()) s = nlohmann::json::object();
-    s[key] = std::move(value);
-    bp.markDirty();
-}
-
-bool optionValue(Player& p, game::Backpack const& bp, MainOption const& o, std::string const& context) {
-    bool       gui = std::string_view(o.key) == feature::gui::kOpenTabFirst;
-    auto const bpj = gui ? feature::gui::backpackOverrides(bp) : companionSection(bp);
-    auto const pj  = feature::gui::playerOverrides(p);
-    if (context == "backpack" && bpj.contains(o.key) && bpj[o.key].is_boolean()) return bpj[o.key].get<bool>();
-    if (pj.contains(o.key) && pj[o.key].is_boolean()) return pj[o.key].get<bool>();
-    if (std::string_view(o.key) == feature::gui::kOpenTabFirst) return feature::gui::effective(&p, bp).openTabFirst;
-    return o.def;
-}
-
-constexpr char const* kNoSortColorKey     = "noSortColor";
-constexpr char const* kMemoryMatchNbtKey  = "memoryMatchNbt";
-constexpr int         kDefaultNoSortColor = static_cast<int>(core::DyeColor::Lime);
-
-int noSortDye(game::Backpack const& bp) {
-    auto j = companionSection(bp);
-    if (j.contains(kNoSortColorKey) && j[kNoSortColorKey].is_number_integer()) {
-        int v = j[kNoSortColorKey].get<int>();
-        if (v >= 0 && v < static_cast<int>(core::kDyes.size())) return v;
-    }
-    return kDefaultNoSortColor;
-}
-
-// ---- search phrase / open tab (SC StorageContainerMenuBase.get/setSearchPhrase, setOpenTabId) ----------
-
-constexpr char const* kSearchPhraseKey = "searchPhrase";
-constexpr char const* kOpenTabKey      = "openTab";
-
-MainOption const& keepSearchOption() { return kMainOptions[2]; }
-MainOption const& keepTabOption() { return kMainOptions[1]; }
-
-/// The player's own "keep search phrase" setting (SC `getPlayerSetting(...).orElse(default)`).
-bool playerKeepsSearch(Player& p) {
-    auto pj = feature::gui::playerOverrides(p);
-    auto it = pj.find("keepSearchPhrase");
-    return it != pj.end() && it->is_boolean() ? it->get<bool>() : keepSearchOption().def;
-}
-
-std::string searchPhraseOf(Player& p, game::Backpack const& bp) {
-    std::string phrase;
-    if (playerKeepsSearch(p)) {
-        auto pj = feature::gui::playerOverrides(p);
-        if (auto it = pj.find(kSearchPhraseKey); it != pj.end() && it->is_string()) phrase = it->get<std::string>();
-    }
-    if (phrase.empty() && optionValue(p, bp, keepSearchOption(), "backpack")) {
-        phrase = companionSection(bp).value(kSearchPhraseKey, std::string{});
-    }
-    return phrase;
-}
-
-bool validUtf8(std::string const& s) {
-    for (std::size_t i = 0; i < s.size();) {
-        auto c = static_cast<unsigned char>(s[i]);
-        std::size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
-        if (n == 0 || i + n > s.size()) return false;
-        for (std::size_t k = 1; k < n; ++k) {
-            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;
-        }
-        i += n;
-    }
-    return true;
-}
-
-void setSearchPhrase(Player& p, game::Backpack& bp, std::string phrase) {
-    if (!validUtf8(phrase)) return;
-    // SearchBox.setMaxLength(50): 50 code points (never cut inside a UTF-8 sequence).
-    std::size_t points = 0, i = 0;
-    while (i < phrase.size() && points < 50) {
-        ++i;
-        while (i < phrase.size() && (static_cast<unsigned char>(phrase[i]) & 0xC0) == 0x80) ++i;
-        ++points;
-    }
-    phrase.resize(i);
-    if (playerKeepsSearch(p)) {
-        feature::gui::setPlayerOption(p, kSearchPhraseKey, nlohmann::json(phrase));
-        if (!companionSection(bp).value(kSearchPhraseKey, std::string{}).empty()) setCompanionOption(bp, kSearchPhraseKey, "");
-    } else {
-        setCompanionOption(bp, kSearchPhraseKey, nlohmann::json(phrase));
-    }
-}
+constexpr char const* kOpenTabKey = "openTab";
 
 int openTabOf(Player& p, game::Backpack const& bp) {
-    if (!optionValue(p, bp, keepTabOption(), "backpack")) return -1; // removeOpenTabIfKeepOff
-    auto j = companionSection(bp);
-    return j.contains(kOpenTabKey) && j[kOpenTabKey].is_number_integer() ? j[kOpenTabKey].get<int>() : -1;
+    if (!feature::gui::settingValue(p, bp, feature::gui::MainSetting::KeepTabOpen)) return -1; // removeOpenTabIfKeepOff
+    auto it = bp.data().settings.find("mainscreen");
+    if (it == bp.data().settings.end() || !it->is_object()) return -1;
+    auto v = it->find(kOpenTabKey);
+    return v != it->end() && v->is_number_integer() ? v->get<int>() : -1;
 }
 
-nlohmann::json settingsJson(Player& p, game::Backpack& bp) {
-    auto           context = contextOf(p);
-    nlohmann::json j{{"context", context}};
-    for (auto const& o : kMainOptions) j[o.name] = optionValue(p, bp, o, context);
-    j["noSortColor"]    = noSortDye(bp);
-    j["memoryMatchNbt"] = companionSection(bp).value(kMemoryMatchNbtKey, false);
-    // The storage screen itself (not the settings screen) always uses the effective values.
-    j["effectiveKeepSearchPhrase"] = optionValue(p, bp, keepSearchOption(), "backpack");
-    j["effectiveKeepTabOpen"]      = optionValue(p, bp, keepTabOption(), "backpack");
-    j[kSearchPhraseKey]            = searchPhraseOf(p, bp);
-    j[kOpenTabKey]                 = openTabOf(p, bp);
-    return j;
+void setOpenTab(game::Backpack& bp, int slot) {
+    auto& s = bp.data().settings["mainscreen"];
+    if (!s.is_object()) s = nlohmann::json::object();
+    if (s.value(kOpenTabKey, -2) == slot) return;
+    s[kOpenTabKey] = slot;
+    bp.markDirty();
 }
 
 // ---- upgrade tabs bridged from the upgrades' settings menus ------------------------------------------
@@ -713,7 +598,12 @@ bool clickSlotObject(Player& p, std::shared_ptr<ui::Slot> slot, int button, bool
 
 bool handleSettingsAction(Player& player, ui::BackpackMenu& menu, NativeSession& s, std::string const& action, nlohmann::json const& body) {
     auto bp = menu.backpack();
-    if (action == "settings") return true; // the settings screen is a client view of this session
+    if (action == "settings") {
+        // The settings screen is a client view of this session; SB opens a new settings container.
+        feature::gui::settingsScreenOpened(player, *bp);
+        s.dirty = true;
+        return true;
+    }
     int slot = body.value("slot", -1);
     if (action == "upgradeSettings" || action == "tab") {
         if (slot < 0 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
@@ -749,63 +639,9 @@ bool handleSettingsAction(Player& player, ui::BackpackMenu& menu, NativeSession&
         }
         return false;
     }
-    // "setting": the native settings screen.
-    auto what = body.value("what", std::string{});
-    auto op   = body.value("op", std::string{});
-    int  idx  = body.value("index", -1);
-    auto& inv = bp->inventory();
-    s.dirty   = true;
-    if (what == "context") {
-        gSettingsContext[keyOf(player)] = contextOf(player) == "backpack" ? "player" : "backpack";
-        return true;
-    }
-    if (what == "option") {
-        auto name = body.value("name", std::string{});
-        for (auto const& o : kMainOptions) {
-            if (name != o.name) continue;
-            auto context = contextOf(player);
-            bool next    = !optionValue(player, *bp, o, context);
-            if (context == "player") feature::gui::setPlayerOption(player, o.key, nlohmann::json(next));
-            else if (std::string_view(o.key) == feature::gui::kOpenTabFirst) feature::gui::setBackpackOption(*bp, o.key, nlohmann::json(next));
-            else setCompanionOption(*bp, o.key, nlohmann::json(next));
-            return true;
-        }
-        return false;
-    }
-    if (what == "memory") {
-        if (op == "selectAll") feature::gui::memorizeAll(*bp);
-        else if (op == "unselectAll") feature::gui::clearMemory(*bp);
-        else if (idx < 0 || idx >= inv.size()) return false;
-        else if (op == "select") {
-            if (inv.at(idx).empty()) return false; // SC: only slots with an item can be memorized
-            feature::gui::setMemory(*bp, idx, inv.at(idx));
-        } else if (op == "unselect") {
-            feature::gui::setMemory(*bp, idx, {});
-        } else {
-            return false;
-        }
-        return true;
-    }
-    if (what == "noSort") {
-        if (op == "selectAll") feature::gui::setNoSortAll(*bp, true);
-        else if (op == "unselectAll") feature::gui::setNoSortAll(*bp, false);
-        else if (idx < 0 || idx >= inv.size()) return false;
-        else if (op == "select") feature::gui::setNoSort(*bp, idx, true);
-        else if (op == "unselect") feature::gui::setNoSort(*bp, idx, false);
-        else return false;
-        return true;
-    }
-    if (what == "noSortColor") {
-        int n    = static_cast<int>(core::kDyes.size());
-        int next = (noSortDye(*bp) + (body.value("dir", 1) >= 0 ? 1 : n - 1)) % n;
-        setCompanionOption(*bp, kNoSortColorKey, nlohmann::json(next));
-        return true;
-    }
-    if (what == "memoryMatchNbt") {
-        setCompanionOption(*bp, kMemoryMatchNbtKey, nlohmann::json(!companionSection(*bp).value(kMemoryMatchNbtKey, false)));
-        return true;
-    }
-    return false;
+    // "setting": the native settings screen (feature/gui/SettingsScreen.cpp).
+    s.dirty = true;
+    return feature::gui::handleSettingsScreenAction(player, *bp, body);
 }
 } // namespace
 
@@ -862,8 +698,9 @@ BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu) {
     m.stackMultiplier = upgrade::stack::totalMultiplier(bp);
     m.mainColor       = bp.data().mainColor;
     m.accentColor     = bp.data().accentColor;
-    m.noSortColor     = core::kDyes[static_cast<std::size_t>(noSortDye(bp))].argb & 0xFFFFFF;
-    m.extra["settings"] = settingsJson(player, bp);
+    m.noSortColor     = core::kDyes[static_cast<std::size_t>(feature::gui::noSortColor(bp))].argb & 0xFFFFFF;
+    m.extra["settings"] = feature::gui::settingsScreenJson(player, bp);
+    m.extra["mainscreen"] = nlohmann::json{{"openTab", openTabOf(player, bp)}}; // kept open upgrade tab
     return m;
 }
 
@@ -890,8 +727,7 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
     auto& mm     = MenuManager::get();
     bool  ok     = false;
     bool  items  = false; // the player's inventory/cursor may have changed
-    bool  silent = action == "click" || action == "distribute" || action == "menuClick" || action == "double" || action == "drop" || action == "hotbar"
-               || action == "searchPhrase";
+    bool  silent = action == "click" || action == "distribute" || action == "menuClick" || action == "double" || action == "drop" || action == "hotbar";
 
     if (action == "close") {
         mm.close(player);
@@ -911,7 +747,20 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
 
     auto area = areaOf(body);
     int  idx  = body.value("index", -1);
-    if (action == "dropCursor") {
+    bool intercepted = false;
+    if (action == "click" && body.value("button", 0) == 1 && !body.value("shift", false) && !cursorOf(player).isNull()
+        && (area == Area::Inventory || (area == Area::Storage && menu))) {
+        for (auto const& h : ScreenClickInterceptRegistry::entries()) {
+            if (h.handle && h.handle(player, menu, area == Area::Storage ? "storage" : "inventory", idx)) {
+                intercepted = true;
+                break;
+            }
+        }
+    }
+    if (intercepted) {
+        items = true;
+        ok    = true;
+    } else if (action == "dropCursor") {
         items       = true;
         auto cursor = cursorOf(player);
         if (cursor.isNull()) return false;
@@ -1011,16 +860,11 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
                               ? feature::gui::transferToPlayerSB(player, *bp, matching, menu->lockedInventorySlot)
                               : feature::gui::transferToBackpackSB(player, *bp, matching, menu->lockedInventorySlot);
             ok = moved > 0;
-        } else if (action == "searchPhrase") {
-            // SC StorageContainerMenuBase.setSearchPhrase (kept for "keep search phrase").
-            auto phrase = body.value("phrase", std::string{});
-            setSearchPhrase(player, *bp, std::move(phrase)); // the open screen keeps its own text
-            return true;
         } else if (action == "openTab") {
             // SC setOpenTabId / removeOpenTabId: the open upgrade tab (reopened with "keep tab open").
             int slot = body.value("slot", -1);
             if (slot < -1 || slot >= static_cast<int>(bp->data().upgrades.size())) return false;
-            setCompanionOption(*bp, kOpenTabKey, nlohmann::json(slot));
+            setOpenTab(*bp, slot);
             s->dirty = true;
             ok       = true;
         } else if (action == "toggleUpgrade") {
@@ -1100,7 +944,6 @@ ui::MenuManager::Presentation presentationFor(Player& player, ui::Menu&) {
 
 void forgetPlayer(Player const& p) {
     forgetTabMenus(p);
-    gSettingsContext.erase(keyOf(p));
     gSessions.erase(keyOf(p));
     detail::forgetContentsRates(p);
 }
@@ -1124,7 +967,6 @@ public:
         ll::event::EventBus::getInstance().removeListener(mDisconnect);
         gSessions.clear();
         gTabMenus.clear();
-        gSettingsContext.clear();
     }
 
 private:

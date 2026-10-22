@@ -219,19 +219,19 @@ ABP_REGISTER_SELFTEST("mainscreen.kept_search_and_tab", [](Context& ctx) {
     int   slot = ctx.installUpgrade(bp, "pickup");
     Companion c(p);
     auto      s = open(ctx, p, bp);
-    ctx.check(act(p, s, "searchPhrase", {{"phrase", "dia @mine"}}), "search phrase");
+    ctx.check(act(p, s, "setting", {{"what", "searchPhrase"}, {"value", "dia @mine"}}), "search phrase");
     ctx.check(act(p, s, "openTab", {{"slot", slot}}), "open tab");
     ui::MenuManager::get().close(p);
     s = open(ctx, p, bp);
     auto const* m = net::sentModel(p);
     ctx.require(m != nullptr, "model");
     auto settings = m->extra.value("settings", json::object());
-    ctx.check(settings.value("effectiveKeepSearchPhrase", false), "SC default: keep search phrase on");
+    ctx.check(settings.value("keepSearchPhrase", false), "SC default: keep search phrase on");
     ctx.check(settings.value("searchPhrase", std::string{}) == "dia @mine", "phrase kept: " + settings.value("searchPhrase", std::string{}));
-    ctx.check(settings.value("openTab", -1) == slot, "open tab kept");
+    ctx.check(m->extra.value("mainscreen", json::object()).value("openTab", -1) == slot, "open tab kept");
     ctx.check(act(p, s, "openTab", {{"slot", -1}}), "close tab");
-    ctx.check(act(p, s, "searchPhrase", {{"phrase", ""}}), "clear phrase");
-    setPlayerOption(p, "searchPhrase", std::nullopt);
+    ctx.check(act(p, s, "setting", {{"what", "searchPhrase"}, {"value", ""}}), "clear phrase");
+
 });
 
 ABP_REGISTER_SELFTEST("mainscreen.error_overlay", [](Context& ctx) -> ll::coro::CoroTask<> {

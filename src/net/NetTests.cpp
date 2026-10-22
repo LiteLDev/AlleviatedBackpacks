@@ -17,6 +17,7 @@
 #include "mc/world/item/ItemStack.h"
 
 #include "feature/gui/Gui.h"
+#include "feature/gui/SbSettings.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -342,7 +343,9 @@ ABP_REGISTER_SELFTEST("companion.settings_screen", [](Context& ctx) {
     auto const* m = sentModel(p);
     ctx.require(m != nullptr, "model");
     auto settings = m->extra.value("settings", nlohmann::json::object());
-    ctx.check(!settings.value("keepSearchPhrase", true), "keepSearchPhrase (SC default on) off for the backpack");
+    // SB: the context starts at Player and keepSearchPhrase defaults to on, so the toggle turns it off.
+    ctx.check(!settings.value("keepSearchPhrase", true), "keepSearchPhrase toggled off (player context)");
+    feature::gui::setPlayerSetting(p, feature::gui::MainSetting::KeepSearchPhrase, true);
     ctx.check(settings.value("noSortColor", -1) == static_cast<int>(core::DyeColor::Pink), "lime -> pink (dye order)");
     ctx.check(handleScreenAction(p, action(s, "setting", {{"what", "memory"}, {"op", "unselectAll"}})), "forget all");
     ctx.check(feature::gui::memoryCount(*bp) == 0, "memory cleared");
