@@ -118,7 +118,6 @@ Statuses:
 | Closed tabs drawn unless fully covered; tooltip only when the open tab doesn't cover its top | Exact (GX-4) | `BackpackScreen.cpp` | The two checks were swapped |
 | Storage settings tab opens on any mouse button | Exact (GX-4) | `BackpackScreen.cpp` | |
 | XP Pump action buttons work with any mouse button | Exact (GX-4) | `tabs/xppump/XpPumpTab.cpp` | |
-| Toggle Upgrade 1-5 keys only with no screen open | Exact (GX-4) | `client/input/Hotkeys.cpp` | |
 | Empty upgrade slot icon | Gap | `SbStyle.cpp` | |
 | Switching an upgrade on/off closes the open tab (SC RELOAD_NEEDED) | Gap | `BackpackScreen::rebuildTabs` | |
 | Enter in text boxes keeps focus | Gap | `widgets/TextBox.cpp` | |

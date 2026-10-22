@@ -238,8 +238,7 @@ void run(KeyAction action) {
     case KeyAction::ToggleUpgrade3:
     case KeyAction::ToggleUpgrade4:
     case KeyAction::ToggleUpgrade5: {
-        // Vanilla KeyMapping.click only runs with no screen open, so SB's toggles never fire in GUIs.
-        if (!inGame) return;
+        if (!snap.inLevel.load()) return;
         int slot = static_cast<int>(action) - static_cast<int>(KeyAction::ToggleUpgrade1);
         net::sendKeyAction(nlohmann::json{{"action", "toggleUpgrade"}, {"slot", slot}});
         return;
@@ -457,7 +456,7 @@ bool onHotkeyKeyDown(int vk) {
         case KeyAction::ToggleUpgrade3:
         case KeyAction::ToggleUpgrade4:
         case KeyAction::ToggleUpgrade5:
-            consume |= inGame;
+            consume |= inLevel;
             break;
         default:
             break;
