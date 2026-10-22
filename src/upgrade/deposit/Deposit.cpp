@@ -2,6 +2,7 @@
 // upgrade's filter lets through from the backpack into that container.
 
 #include <algorithm>
+#include <limits>
 
 #include "mc/world/Container.h"
 #include "mc/world/actor/player/Player.h"
@@ -68,6 +69,7 @@ public:
             .nameFallback = advanced ? "Advanced Deposit Upgrade" : "Deposit Upgrade",
             .tier         = advanced ? UpgradeTier::Advanced : UpgradeTier::Basic,
             .group        = "deposit",
+            .maxPerBackpack = std::numeric_limits<int>::max(), // SB: no limit
             .hasSettings  = true,
         };
     }
