@@ -290,10 +290,12 @@ Wait-LogLine 'key action: .* opens the carried backpack' 10 -Since $mark | Out-N
 Read-Layout $mark
 Start-Sleep -Milliseconds 800
 $h = Hotbar-Pos 1
+$mark = Get-LogMark
 Gui-Click $h[0] $h[1]                       # backpack B onto the cursor
 $p = Storage-Pos 10
 Gui-Move $p[0] $p[1]
-Start-Sleep -Milliseconds 1000
+Wait-LogLine 'stash: [1-9]\d* of \d+ slots stashable for the cursor alleviatedbackpacks:copper' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 600
 Save-Screenshot 'native-minus-signs' | Out-Null
 $p = Storage-Pos 3
 Gui-Move $p[0] $p[1]

@@ -362,81 +362,6 @@ LL_TYPE_INSTANCE_HOOK(
     origin(renderContext, owner, pass);
 }
 
-// TEMP diagnostics: which vanilla handler a click with an item on the cursor runs.
-namespace {
-int gHandlerLogs = 0;
-void logHandler(char const* what, std::string const& c, int i) {
-    if (gHandlerLogs < 40 && cursorItem()) {
-        ++gHandlerLogs;
-        log().info("stash diag: {} {} #{}", what, c, i);
-    }
-}
-} // namespace
-LL_TYPE_INSTANCE_HOOK(AbpDiagPlaceAll, ll::memory::HookPriority::Normal, ContainerScreenController, &ContainerScreenController::$_handlePlaceAll, void, std::string const& c, int i) {
-    logHandler("placeAll", c, i);
-    origin(c, i);
-}
-LL_TYPE_INSTANCE_HOOK(AbpDiagAutoPlace, ll::memory::HookPriority::Normal, ContainerScreenController, &ContainerScreenController::_handleAutoPlace, void, int amount, std::string const& c, int i) {
-    logHandler("autoPlace", c, i);
-    origin(amount, c, i);
-}
-LL_TYPE_INSTANCE_HOOK(AbpDiagSelect, ll::memory::HookPriority::Normal, ContainerScreenController, &ContainerScreenController::$_handleSelectSlot, void, std::string const& c, int i) {
-    logHandler("selectSlot", c, i);
-    origin(c, i);
-}
-// Slot signs: every item icon of the open container screen reports its slot and position.
-LL_TYPE_INSTANCE_HOOK(
-    AbpStashItemRenderHook,
-    ll::memory::HookPriority::Normal,
-    InventoryItemRenderer,
-    &InventoryItemRenderer::$render,
-    void,
-    ::MinecraftUIRenderContext& ctx,
-    ::IClientInstance&          client,
-    ::UIControl&                owner,
-    int                         pass
-) {
-    auto const* controller = gFrameController; // only icons of the container screen's own view
-    gPendingIcon           = PendingIcon{controller != nullptr && !ui::nativeScreenActive()};
-    origin(ctx, client, owner, pass);
-    auto drawn   = gPendingIcon;
-    gPendingIcon = {};
-    try {
-        if (!drawn.active) return;
-        if (!drawn.got) {
-            // `_render` not reached (inlined path): the control's cached position.
-            if (owner.mCachedPositionDirty) owner._setCachedPosition();
-            drawn.x = owner.mCachedPosition.get().x;
-            drawn.y = owner.mCachedPosition.get().y;
-        }
-        // The slot this icon belongs to (the callback's index is not the slot index; the
-        // collection index is looked up by name).
-        std::optional<std::pair<std::string, int>> slot;
-        owner.findAllCollectionIndices([&](std::string const& name, int) {
-            int index = owner.findCollectionIndex(name);
-            if (!slot && locationOf(name, index)) slot = std::pair<std::string, int>{name, index};
-        });
-        if (!slot) return;
-        auto  loc  = locationOf(slot->first, slot->second);
-        auto  key  = keyOf(loc->first, loc->second);
-        auto const& size = owner.mSize.get();
-        float s    = size.x > 0 ? size.x / 16.f : 1.f;
-        struct {
-            float x, y;
-        } pos{drawn.x, drawn.y}; // where the icon really is (scroll panels included)
-        noteSlotRect(controller, key, pos.x, pos.y, s);
-        if (!active()) return;
-        auto item = copyOf(controller->_getVisualItemStack(slot->first, slot->second));
-        if (item.isNull()) return;
-        auto r = result(loc->first, loc->second, item);
-        if (r == Result::None) return;
-        if (auto hovered = hoveredVanillaSlot(); hovered && hovered->collection == slot->first && hovered->index == slot->second) return;
-        gMarks[key] = Mark{pos.x, pos.y, s, r, game::isBackpack(item), now()};
-    } catch (std::exception const& e) {
-        log().error("stash sign failed: {}", e.what());
-    }
-}
-
 namespace {
 /// Draws the signs and the hovered slot's tooltip over vanilla container screens.
 class StashOverlayLayer final : public ui::IUiLayer {
@@ -550,9 +475,6 @@ void installStash() {
     AbpStashFurnacePlaceOneHook::hook();
     AbpStashTakePlaceHook::hook();
     AbpStashItemRenderHook::hook();
-    AbpDiagPlaceAll::hook();
-    AbpDiagAutoPlace::hook();
-    AbpDiagSelect::hook();
     AbpStashItemRenderInnerHook::hook();
     auto& bus = ll::event::EventBus::getInstance();
     gListeners.push_back(bus.emplaceListener<ll::event::ClientLevelTickEvent>([](auto&) { pump(); }));
@@ -573,9 +495,6 @@ void uninstallStash() {
     for (auto& l : gListeners) bus.removeListener(l);
     gListeners.clear();
     AbpStashItemRenderInnerHook::unhook();
-    AbpDiagSelect::unhook();
-    AbpDiagAutoPlace::unhook();
-    AbpDiagPlaceAll::unhook();
     AbpStashItemRenderHook::unhook();
     AbpStashTakePlaceHook::unhook();
     AbpStashFurnacePlaceOneHook::unhook();
