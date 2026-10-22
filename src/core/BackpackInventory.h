@@ -64,6 +64,9 @@ using ExtractListenerFn = std::function<void(int slot, ItemStackData const& orig
 /// Slots that `insert()` should try first for `stack` (e.g. memory slots), in order. Filters still
 /// apply; slots out of range are ignored.
 using SlotPreferenceFn = std::function<std::vector<int>(ItemStackData const& stack)>;
+/// True if `slot` is blocked: inaccessible for every insert (any source) and for sorting, like
+/// Sophisticated Core's `IInventorySlotBlocker` (e.g. slots covered by a captured mob).
+using SlotBlockerFn = std::function<bool(int slot)>;
 /// Whether `slot` is infinite (Infinity upgrade): extracting from it hands out items without
 /// ever depleting the slot.
 using InfiniteSlotFn = std::function<bool(int slot)>;
@@ -125,6 +128,10 @@ public:
     /// Merges equal stacks (respecting limits) and orders them with `less`; empty slots go last.
     void sort(std::function<bool(ItemStackData const&, ItemStackData const&)> const& less);
 
+    /// True if a slot blocker (`addSlotBlocker`) blocks `slot`. Blocked slots refuse every insert
+    /// (`checkInsert` returns Deny) and are skipped by `sort` / `sortInventory`.
+    [[nodiscard]] bool isSlotBlocked(int slot) const;
+
     /// Checks whether an insert of `stack` into `slot` (-1 = whole-stack check) is allowed.
     [[nodiscard]] InsertVerdict checkInsert(int slot, ItemStackData const& stack, AccessContext const& ctx) const;
     /// `checkInsert` as `insertInto` asks it (`InsertQuery::direct`).
@@ -146,11 +153,14 @@ public:
     void addExtractListener(std::string owner, ExtractListenerFn fn);
     /// Preferred slots for automatic placement: `insert()` fills them before any other slot.
     void addSlotPreference(std::string owner, int priority, SlotPreferenceFn fn);
+    /// Blocks slots (see `SlotBlockerFn`). Removed like the other hooks.
+    void addSlotBlocker(std::string owner, SlotBlockerFn fn);
     /// Marks slots as infinite (see `InfiniteSlotFn`).
     void addInfiniteSlots(std::string owner, InfiniteSlotFn fn);
     /// Removes every hook registered with `owner`.
     void removeHooks(std::string const& owner);
-    /// Removes all filters, limit modifiers, slot preferences and infinite-slot hooks (listeners stay).
+    /// Removes all filters, limit modifiers, slot preferences, slot blockers and infinite-slot
+    /// hooks (listeners stay).
     void clearFilters();
     /// Removes every hook (filters, modifiers, listeners) not owned by `keepOwner`.
     void clearHooksExcept(std::string_view keepOwner);
@@ -180,6 +190,7 @@ private:
     std::vector<Hook<LimitModifierFn>>  mLimitModifiers;
     std::vector<Hook<ChangeListenerFn>> mListeners;
     std::vector<Hook<SlotPreferenceFn>> mPreferences;
+    std::vector<Hook<SlotBlockerFn>>     mBlockers;
     std::vector<Hook<InsertListenerFn>>  mInsertListeners;
     std::vector<Hook<ExtractListenerFn>> mExtractListeners;
     std::vector<Hook<InfiniteSlotFn>>    mInfinite;
