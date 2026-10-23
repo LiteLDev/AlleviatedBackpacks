@@ -149,6 +149,16 @@ void fire(Site& site, BlockPos const& at) {
     type.dispenseFrom(site.region(), at);
 }
 
+/// Dropped items near `pos` that are the backpack `uuid`. The test area is shared by every
+/// selftest (`toGround`), so other tests' leftovers may lie around: only count this backpack.
+int backpackDropsNear(Site const& site, BlockPos const& pos, std::string const& uuid) {
+    int n = 0;
+    for (auto* a : site.dropsNear(pos)) {
+        if (game::isBackpack(a->item()) && game::backpackUuid(a->item()) == uuid) n += a->item().mCount;
+    }
+    return n;
+}
+
 ABP_REGISTER_SELFTEST("placed.dispenser_places", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& sp = ctx.spawnPlayer();
     co_await toGround(ctx, sp);
@@ -159,6 +169,7 @@ ABP_REGISTER_SELFTEST("placed.dispenser_places", [](Context& ctx) -> ll::coro::C
     site.touch(target);
     site.set(site.at(1, -1), "minecraft:stone");
     site.set(target, "minecraft:air");
+    for (auto* a : site.dropsNear(target)) ctx.info("leftover drop near the dispenser: " + a->item().getTypeName());
     auto  bp = ctx.createBackpack(Tier::Iron);
     auto* c  = dispenserAt(ctx, site, dp, 5, ctx.backpackItem(*bp));
     fire(site, dp);
@@ -168,7 +179,7 @@ ABP_REGISTER_SELFTEST("placed.dispenser_places", [](Context& ctx) -> ll::coro::C
     ctx.check(entry->uuid == bp->uuid(), "the same backpack (no copy)");
     ctx.check(entry->facing == 1, "faces the dispenser (west), got " + std::to_string(entry->facing));
     ctx.check(countIn(*c, game::backpackItemId(Tier::Iron)) == 0, "taken out of the dispenser");
-    ctx.check(site.dropsNear(target).empty(), "nothing shot out as an item");
+    ctx.check(backpackDropsNear(site, target, bp->uuid()) == 0, "nothing shot out as an item");
     co_await ctx.ticks(1);
     ctx.check(PlacedBackpacks::isBackpackBlock(site.region().getBlock(target)), "the block is there");
 
@@ -177,7 +188,7 @@ ABP_REGISTER_SELFTEST("placed.dispenser_places", [](Context& ctx) -> ll::coro::C
     c->setItem(0, ctx.backpackItem(*other));
     fire(site, dp);
     ctx.check(countIn(*c, game::backpackItemId(Tier::Leather)) == 1, "placing failed: the backpack stays in the dispenser");
-    ctx.check(site.dropsNear(target).empty(), "and is not dropped");
+    ctx.check(backpackDropsNear(site, target, other->uuid()) == 0, "and is not dropped");
     ctx.check(placed.at(locationOf(site.region(), target))->uuid == bp->uuid(), "the placed one is untouched");
     c->removeAllItems();
 });
