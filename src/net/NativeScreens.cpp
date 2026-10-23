@@ -15,6 +15,7 @@
 
 #include "core/Appearance.h"
 #include "core/Sorting.h"
+#include "feature/admin/Admin.h"
 #include "feature/gui/Gui.h"
 #include "feature/gui/SbSettings.h"
 #include "feature/linked/Linked.h"
@@ -260,6 +261,13 @@ SlotError installError(Player& p, ui::BackpackMenu& menu, int slot, core::ItemSt
             trFor(p, "abp.mainscreen.error.add.only_x_upgrades_allowed", "Only {0}x {1} can be used in {2}", info.maxPerBackpack, name, storage),
             same
         };
+    }
+    // SB `maxUpgradesPerStorage` (SC checkUpgradePerStorageTypeLimit): highlight the upgrades of
+    // the limited item / group already in the backpack.
+    if (auto hit = admin::maxUpgradesHit(*menu.backpack(), info.itemId, info.groupOrId(), slot)) {
+        // Only when that limit is what refused it (another check may have answered first).
+        auto msg = admin::maxUpgradesMessage(*hit, *menu.backpack(), info.itemId, info.groupOrId(), &p);
+        if (msg == reason) return {std::move(msg), hit->slots};
     }
     // The upgrade's own check refused (e.g. a Stack downgrade: SC marks the tank / battery
     // upgrades and their bars, and the storage slots over the new limit).

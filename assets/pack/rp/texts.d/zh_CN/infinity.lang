@@ -1,4 +1,4 @@
 item.alleviatedbackpacks:infinity_upgrade.name=无限升级（管理员）
-item.alleviatedbackpacks:survival_infinity_upgrade.name=生存无限升级
+item.alleviatedbackpacks:survival_infinity_upgrade.name=生存模式无限升级
 item.alleviatedbackpacks:infinity_upgrade.tooltip=使背包内的所有物品数量无限~LINEBREAK~仅管理员可设置物品数量无限，破坏和拾取背包
 item.alleviatedbackpacks:survival_infinity_upgrade.tooltip=使背包内的所有物品数量无限~LINEBREAK~所有玩家均可设置物品数量无限，破坏和拾取背包

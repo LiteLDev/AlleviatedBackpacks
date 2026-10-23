@@ -12,6 +12,7 @@
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "game/Storage.h"
+#include "mod/I18n.h"
 #include "selftest/SelfTest.h"
 
 namespace abp::feature::templates {
@@ -184,6 +185,19 @@ ABP_REGISTER_SELFTEST("templates.dynamic", [](Context& ctx) {
     ctx.check(bp->inventory().count([](core::ItemStackData const& d) { return d.id == "minecraft:dirt"; }) == 4, "delayed items inserted");
     ctx.check(!bp->data().upgrades[0].empty(), "upgrade installed");
     ctx.check(!dynamicInUse("st_dyn"), "ended templates leave the cache");
+
+    // Leftovers carry SB's two message arguments (`Remaining %d x %s`).
+    ctx.check(dynamicBegin("st_left", Tier::Leather).ok, "begin leftovers");
+    (void)dynamicAdd("st_left", -1, pickup, true);
+    (void)dynamicAdd("st_left", -1, game::ItemConv::toData(game::ItemConv::make("alleviatedbackpacks:magnet_upgrade", 1)), true);
+    auto left = dynamicEnd("st_left");
+    if (left.item) {
+        if (auto u = game::backpackUuid(*left.item)) guard.uuids.push_back(*u);
+    }
+    ctx.require(left.leftovers.size() == 1, "one upgrade left over (one upgrade slot)");
+    ctx.check(left.leftovers[0].count == 1 && left.leftovers[0].name.starts_with("[") && left.leftovers[0].name.ends_with("]"), "count and [name]");
+    auto msg = tr("abp.templates.dynamic.end.addRemainingItemsFailed", "Not all items could be added: Remaining {0} x {1}", left.leftovers[0].count, left.leftovers[0].name);
+    ctx.check(msg == "Not all items could be added: Remaining 1 x " + left.leftovers[0].name, "SB message: " + msg);
 
     // Empty templates are refused (and stay in the cache, as in SB).
     ctx.check(dynamicBegin("st_empty", Tier::Leather).ok, "begin empty");

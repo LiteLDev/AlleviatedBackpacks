@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -24,6 +25,10 @@ class Menu;
 namespace abp::upgrade {
 
 enum class UpgradeTier { Basic, Advanced };
+
+/// `UpgradeInfo::maxPerBackpack` for upgrades SB doesn't limit itself (SB's only limits are the
+/// configurable `maxUpgradesPerStorage` entries, checked by the admin unit, and conflict rules).
+inline constexpr int kUnlimitedPerBackpack = std::numeric_limits<int>::max();
 
 /// Static description of an upgrade type.
 struct UpgradeInfo {

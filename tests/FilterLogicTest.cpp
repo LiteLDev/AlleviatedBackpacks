@@ -121,6 +121,33 @@ TEST(FilterLogic, TagListSortedUnique) {
     EXPECT_TRUE(f.tagsToAdd(t.tagsOf(item("minecraft:oak_log"))).empty()); // "All Item's tags are already added"
 }
 
+// "logs" and "minecraft:logs" are one tag (SC ResourceLocation.parse defaults to minecraft).
+TEST(FilterLogic, TagsWithoutNamespaceAreMinecraft) {
+    EXPECT_EQ(abp::core::normalizeTag("logs"), "minecraft:logs");
+    EXPECT_EQ(abp::core::normalizeTag("minecraft:logs"), "minecraft:logs");
+    EXPECT_EQ(abp::core::normalizeTag("c:wood"), "c:wood");
+    EXPECT_EQ(abp::core::normalizeTag(""), "");
+    EXPECT_TRUE(abp::core::sameTag("minecraft:logs", "logs"));
+    EXPECT_TRUE(abp::core::sameTag("minecraft:logs", "minecraft:logs"));
+    EXPECT_FALSE(abp::core::sameTag("c:logs", "logs"));
+    EXPECT_FALSE(abp::core::sameTag("minecraft:logs2", "logs"));
+    Filter f(1);
+    EXPECT_TRUE(f.addTag("logs"));
+    EXPECT_FALSE(f.addTag("minecraft:logs"));
+    EXPECT_EQ(f.tags, (std::vector<std::string>{"minecraft:logs"}));
+    EXPECT_TRUE(f.hasTag("logs") && f.hasTag("minecraft:logs"));
+    EXPECT_TRUE(f.tagsToAdd({"logs", "minecraft:logs", "wood"}) == (std::vector<std::string>{"minecraft:wood"}));
+    EXPECT_TRUE(f.removeTag("logs"));
+    EXPECT_TRUE(f.tags.empty());
+    std::vector<std::string> v{"logs", "minecraft:logs", "c:logs"};
+    abp::core::sortTags(v);
+    EXPECT_EQ(v, (std::vector<std::string>{"c:logs", "minecraft:logs"}));
+    // Stored filters with a bare tag load normalized.
+    auto j    = f.toJson();
+    j["tags"] = {"planks", "minecraft:planks"};
+    EXPECT_EQ(Filter::fromJson(j, 1).tags, (std::vector<std::string>{"minecraft:planks"}));
+}
+
 // SC TreeSet<ResourceLocation>: path first, then namespace ("x" = "minecraft:x").
 TEST(FilterLogic, TagOrderIsResourceLocationOrder) {
     EXPECT_TRUE(abp::core::tagLess("zzz:apple", "aaa:banana"));

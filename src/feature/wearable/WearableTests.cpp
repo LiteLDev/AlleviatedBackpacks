@@ -28,6 +28,7 @@
 #include "mc/world/level/BlockPos.h"
 #include "mc/world/level/BlockSource.h"
 #include "mc/world/level/Level.h"
+#include "mc/world/level/GameType.h"
 #include "mc/world/level/Spawner.h"
 #include "mc/world/level/block/Block.h"
 #include "mc/world/level/block/BlockChangeContext.h"
@@ -712,6 +713,75 @@ ABP_REGISTER_SELFTEST("wearable.chest_loot", [](Context& ctx) -> ll::coro::CoroT
     region.setBlock(pos, *air, 3, nullptr, BlockChangeContext{});
     ctx.check(items > 1, "chest got vanilla loot");
     ctx.check(injected == 1, "a real dungeon chest got SB's loot after " + std::to_string(tries) + " chests");
+});
+
+// SB BackpackItem.makesPiglinsNeutral: a worn Gold Backpack counts as gold armour for piglins.
+ABP_REGISTER_SELFTEST("wearable.piglin_neutral", [](Context& ctx) -> ll::coro::CoroTask<> {
+    co_await groundPlayer(ctx);
+    DifficultyGuard difficulty(ctx.player().getLevel());
+    SbGuard         guard;
+    guard.add().chance = 0.0; // the piglin itself gets no backpack
+    auto& player       = ctx.player();
+    auto  savedMode    = player.getPlayerGameType();
+    player.setPlayerGameType(GameType::Survival);
+    auto gold = ctx.createBackpack(Tier::Gold);
+    auto iron = ctx.createBackpack(Tier::Iron);
+    player.setArmor(ArmorSlot::Torso, ctx.backpackItem(*iron));
+    ctx.check(!makesPiglinsNeutral(player), "an iron backpack is not gold");
+    player.setArmor(ArmorSlot::Torso, ctx.backpackItem(*gold));
+    ctx.check(makesPiglinsNeutral(player), "a worn gold backpack makes piglins neutral");
+
+    Mob* piglin = nullptr;
+    for (int attempt = 0; attempt < 8 && !piglin; ++attempt) {
+        auto* m = spawnMob(ctx, "minecraft:piglin", 5);
+        co_await ctx.ticks(1);
+        if (m && m->isBaby()) {
+            m->despawn();
+            continue;
+        }
+        piglin = m;
+    }
+    ctx.require(piglin != nullptr, "an adult piglin");
+    auto pid = piglin->getOrCreateUniqueID();
+    auto me  = player.getOrCreateUniqueID();
+    auto targetsMe = [&] {
+        auto* m = player.getLevel().fetchEntity(pid, false);
+        return m && m->mTargetId->rawID == me.rawID;
+    };
+    int skippedBefore = piglinTargetsSkipped();
+    bool targeted     = false;
+    // At least 3 s, and until the piglin has looked at the wearer (target scans are not every tick).
+    for (int t = 0; t < 140 && !targeted && (t < 60 || piglinTargetsSkipped() == skippedBefore); t += 5) {
+        co_await ctx.ticks(5);
+        targeted = targetsMe();
+    }
+    ctx.check(!targeted, "the piglin leaves a Gold Backpack wearer alone");
+    ctx.check(piglinTargetsSkipped() > skippedBefore, "the gold-armour target entry was skipped for the wearer");
+    // Iron backpack: a fresh piglin attacks (the setup can target the player at all). Fresh: an
+    // overworld piglin zombifies after 15 s.
+    if (auto* m = player.getLevel().fetchEntity(pid, false)) m->despawn();
+    player.setArmor(ArmorSlot::Torso, ctx.backpackItem(*iron));
+    Mob* control = nullptr;
+    for (int attempt = 0; attempt < 8 && !control; ++attempt) {
+        auto* m = spawnMob(ctx, "minecraft:piglin", 4);
+        co_await ctx.ticks(1);
+        if (m && m->isBaby()) {
+            m->despawn();
+            continue;
+        }
+        control = m;
+    }
+    ctx.require(control != nullptr, "an adult control piglin");
+    pid = control->getOrCreateUniqueID();
+    for (int t = 0; t < 200 && !targeted; t += 5) {
+        co_await ctx.ticks(5);
+        targeted = targetsMe();
+    }
+    ctx.check(targeted, "without gold the piglin targets the player");
+    if (auto* m = player.getLevel().fetchEntity(pid, false)) m->despawn();
+    player.setArmor(ArmorSlot::Torso, ItemStack::EMPTY_ITEM());
+    player.heal(20);
+    player.setPlayerGameType(savedMode);
 });
 
 } // namespace

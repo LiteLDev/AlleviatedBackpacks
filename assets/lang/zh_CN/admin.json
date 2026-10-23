@@ -19,9 +19,9 @@
   "abp.admin.upgrade_group.cooking": "熔炉升级",
   "abp.admin.upgrade_group.jukebox": "唱片机升级",
   "abp.admin.backpack_name.leather": "背包",
-  "abp.admin.backpack_name.copper": "铜背包",
-  "abp.admin.backpack_name.iron": "铁背包",
-  "abp.admin.backpack_name.gold": "金背包",
+  "abp.admin.backpack_name.copper": "铜制背包",
+  "abp.admin.backpack_name.iron": "铁制背包",
+  "abp.admin.backpack_name.gold": "金制背包",
   "abp.admin.backpack_name.diamond": "钻石背包",
   "abp.admin.backpack_name.netherite": "下界合金背包",
 

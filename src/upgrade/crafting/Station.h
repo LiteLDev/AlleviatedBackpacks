@@ -36,8 +36,6 @@ inline constexpr std::string_view kStonecutterId = "stonecutter";
 
 /// The item on the player's cursor.
 [[nodiscard]] ItemStack cursorOf(Player& player);
-/// Index of the installed upgrade with this id in `backpack`, or -1.
-[[nodiscard]] int findUpgradeSlot(game::Backpack const& backpack, std::string_view upgradeId);
 
 /// Free room for `stack` in the player's main inventory (36 slots).
 [[nodiscard]] int playerRoomFor(Player& player, ItemStack const& stack);

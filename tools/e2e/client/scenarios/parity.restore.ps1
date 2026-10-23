@@ -1,5 +1,5 @@
-# Puts back the camera perspective that placed.prelaunch.ps1 changed in this slot's instance.
-$state = Join-Path $env:TEMP "abp-e2e-placed-camera-$script:VersionName.txt"
+# Puts back the camera perspective that parity.prelaunch.ps1 changed in this slot's instance.
+$state = Join-Path $env:TEMP "abp-e2e-parity-camera-$script:VersionName.txt"
 if (-not (Test-Path $state)) { return }
 foreach ($entry in Get-Content $state) {
     $file, $old = $entry -split '\|', 2

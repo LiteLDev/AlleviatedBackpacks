@@ -357,6 +357,7 @@ public:
             .itemId       = "alleviatedbackpacks:crafting_upgrade",
             .nameKey      = "abp.crafting.name",
             .nameFallback = "Crafting Upgrade",
+            .maxPerBackpack = kUnlimitedPerBackpack, // SB: no limit
             .hasSettings  = true,
             .toggleable   = false, // SC canBeDisabled() == false
         };

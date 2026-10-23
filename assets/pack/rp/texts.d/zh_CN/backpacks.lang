@@ -1,6 +1,6 @@
 item.alleviatedbackpacks:leather_backpack.name=背包
-item.alleviatedbackpacks:copper_backpack.name=铜背包
-item.alleviatedbackpacks:iron_backpack.name=铁背包
-item.alleviatedbackpacks:gold_backpack.name=金背包
+item.alleviatedbackpacks:copper_backpack.name=铜制背包
+item.alleviatedbackpacks:iron_backpack.name=铁制背包
+item.alleviatedbackpacks:gold_backpack.name=金制背包
 item.alleviatedbackpacks:diamond_backpack.name=钻石背包
 item.alleviatedbackpacks:netherite_backpack.name=下界合金背包

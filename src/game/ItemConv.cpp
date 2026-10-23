@@ -78,7 +78,8 @@ std::vector<std::string> const& cachedTags(core::ItemStackData const& item) {
     std::vector<std::string> tags;
     auto                     stack = make(item.id, 1, item.aux);
     if (auto* it2 = stack.mItem.get()) {
-        for (auto const& t : *it2->mTags) tags.push_back(t.getString());
+        // As ResourceLocations: Bedrock tags without a namespace are "minecraft:" ones.
+        for (auto const& t : *it2->mTags) tags.push_back(core::normalizeTag(t.getString()));
     }
     return gTagCache.emplace(item.id, std::move(tags)).first->second;
 }
@@ -86,7 +87,7 @@ std::vector<std::string> const& cachedTags(core::ItemStackData const& item) {
 
 bool TagProvider::hasTag(core::ItemStackData const& item, std::string_view tag) const {
     auto const& tags = cachedTags(item);
-    return std::find(tags.begin(), tags.end(), tag) != tags.end();
+    return std::any_of(tags.begin(), tags.end(), [&](std::string const& t) { return core::sameTag(t, tag); });
 }
 
 std::vector<std::string> TagProvider::tagsOf(core::ItemStackData const& item) const { return cachedTags(item); }

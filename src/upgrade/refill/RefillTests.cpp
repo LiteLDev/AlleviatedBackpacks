@@ -72,7 +72,8 @@ ABP_REGISTER_SELFTEST("refill.registration", [](Context& ctx) {
     auto bp = ctx.createBackpack(Tier::Gold);
     ctx.installUpgrade(bp, std::string(kBasicId), 0);
     auto adv = data("alleviatedbackpacks:advanced_refill_upgrade", 1);
-    ctx.check(!upgrade::canInstall(bp, 1, adv, nullptr), "basic and advanced refill don't stack (same group)");
+    ctx.check(upgrade::canInstall(bp, 1, adv, nullptr), "SB: no limit and no conflicts, basic and advanced refill go together");
+    ctx.check(ctx.installUpgrade(bp, std::string(kBasicId), 1) == 1, "and so do two basic ones");
 });
 
 ABP_REGISTER_SELFTEST("refill.settings_roundtrip", [](Context& ctx) {

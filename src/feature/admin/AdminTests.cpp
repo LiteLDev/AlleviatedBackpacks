@@ -2,6 +2,7 @@
 // Commands are executed for real through the command registry (console origin, and a player origin
 // for the permission check), so parsing, overload selection and permissions are covered too.
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -34,6 +35,7 @@
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/stack/StackUpgrade.h"
 
 namespace abp::admin {
 namespace {
@@ -257,6 +259,108 @@ ABP_REGISTER_SELFTEST("admin.max_upgrades", [](Context& ctx) {
     ctx.check(!upgrade::canInstall(bp, 2, data("minecraft:structure_void", 1), nullptr), "registry name limit");
     cfg.maxUpgradesPerStorage = {"structure_void|3"};
     ctx.check(upgrade::canInstall(bp, 2, data("minecraft:structure_void", 1), nullptr), "within the limit");
+});
+
+// SB's only per-backpack limits are `maxUpgradesPerStorage` (stack 3, furnace 1, jukebox 1) and the
+// conflict rules: crafting, stonecutter, anvil, smithing and refill have none, and the three
+// group limits follow the config.
+ABP_REGISTER_SELFTEST("admin.sb_upgrade_limits", [](Context& ctx) {
+    auto&   cfg = config::mut<SbServerConfig>();
+    Restore keep(cfg.maxUpgradesPerStorage);
+    for (auto const* id : {"crafting", "stonecutter", "anvil", "smithing", "refill"}) {
+        auto bp = ctx.createBackpack(Tier::Netherite);
+        ctx.check(ctx.installUpgrade(bp, id, 0) == 0 && ctx.installUpgrade(bp, id, 1) == 1, std::string(id) + ": two allowed");
+        ctx.check(ctx.installUpgrade(bp, id, 2) == 2, std::string(id) + ": three allowed");
+    }
+    auto bp = ctx.createBackpack(Tier::Netherite);
+    for (int i = 0; i < 3; ++i) ctx.check(ctx.installUpgrade(bp, "stack_starter", i) == i, "stack upgrade " + std::to_string(i));
+    auto starter = data("alleviatedbackpacks:stack_starter_upgrade", 1);
+    std::string reason;
+    ctx.check(!upgrade::canInstall(bp, 3, starter, nullptr, &reason), "a 4th stack upgrade is refused");
+    ctx.check(contains(reason, "Only 3x Stack Upgrades"), "SC group message: " + reason);
+    auto hit = maxUpgradesHit(*bp, "alleviatedbackpacks:stack_starter_upgrade", "stack");
+    ctx.check(hit && !hit->byItem && hit->slots == std::vector<int>{0, 1, 2}, "the three stack upgrades are the limiting slots");
+    cfg.maxUpgradesPerStorage = {"stack_upgrades|4", "furnace_upgrades|2", "jukebox_upgrades|2"};
+    ctx.check(upgrade::canInstall(bp, 3, starter, nullptr), "stack limit raised by config");
+    ctx.check(ctx.installUpgrade(bp, "smelting", 3) == 3 && ctx.installUpgrade(bp, "auto_blasting", 4) == 4, "two furnace upgrades with furnace_upgrades|2");
+    ctx.check(ctx.installUpgrade(bp, "jukebox", 5) == 5 && ctx.installUpgrade(bp, "advanced_jukebox", 6) == 6, "two jukeboxes with jukebox_upgrades|2");
+    cfg.maxUpgradesPerStorage = {"furnace_upgrades|1"};
+    auto furnace              = ctx.createBackpack(Tier::Iron);
+    ctx.check(ctx.installUpgrade(furnace, "smelting", 0) == 0, "one furnace upgrade");
+    ctx.check(!upgrade::canInstall(furnace, 1, data("alleviatedbackpacks:blasting_upgrade", 1), nullptr, &reason), "a second one is refused");
+    ctx.check(contains(reason, "Only 1x Furnace Upgrades"), "SC group name (upgrade_group.cooking_upgrades): " + reason);
+    cfg.maxUpgradesPerStorage = {"crafting_upgrade|0"};
+    auto other = ctx.createBackpack(Tier::Iron);
+    ctx.check(!upgrade::canInstall(other, 0, data("alleviatedbackpacks:crafting_upgrade", 1), nullptr, &reason), "|0 = not allowed");
+    ctx.check(contains(reason, "can't be used in"), "SC upgrade_not_allowed: " + reason);
+    cfg.maxUpgradesPerStorage = {};
+    for (int i = 0; i < 2; ++i) ctx.check(ctx.installUpgrade(other, "smoking", i) == i, "no entries = no limit");
+});
+
+// SB BackpackStorage.load: storages without an access log record that hold nothing are dropped
+// (once per world load); anything stored, an access record or pending mob loot keeps them.
+ABP_REGISTER_SELFTEST("admin.drop_empty_on_load", [](Context& ctx) {
+    auto uuidOf = [&](auto&& setup) {
+        auto bp = ctx.createBackpack(Tier::Iron);
+        setup(*bp);
+        bp->markDirty();
+        game::Storage::get().save(*bp);
+        return bp->uuid();
+    };
+    auto empty    = uuidOf([](game::Backpack&) {});
+    auto accessed = uuidOf([](game::Backpack& bp) {
+        AccessLogRecord r;
+        r.backpackItemRegistryName = "alleviatedbackpacks:iron_backpack";
+        r.backpackUuid             = bp.uuid();
+        r.playerName               = "selftest";
+        AccessLog::get().put(r);
+    });
+    auto items    = uuidOf([](game::Backpack& bp) { bp.inventory().set(0, data("minecraft:dirt", 1)); });
+    auto upgraded = ctx.createBackpack(Tier::Iron);
+    ctx.require(ctx.installUpgrade(upgraded, "crafting") >= 0, "upgrade installed");
+    auto upgradedUuid = upgraded->uuid();
+    upgraded.reset();
+    auto coloured = uuidOf([](game::Backpack& bp) { bp.data().mainColor = 0xFF112233u; });
+    auto loot     = uuidOf([](game::Backpack& bp) { bp.data().settings[std::string(kPendingLootSetting)] = true; });
+    auto removed  = dropEmptyStorages();
+    auto gone     = [&](std::string const& u) { return std::find(removed.begin(), removed.end(), u) != removed.end(); };
+    ctx.check(gone(empty) && !game::Storage::get().find(empty), "an empty, never accessed storage is dropped");
+    ctx.check(!gone(accessed) && game::Storage::get().find(accessed), "an access log record keeps it");
+    ctx.check(!gone(items), "items keep it");
+    ctx.check(!gone(upgradedUuid), "upgrades keep it");
+    ctx.check(!gone(coloured), "non-default data keeps it");
+    ctx.check(!gone(loot), "an unopened mob backpack waiting for its loot keeps it");
+    AccessLog::get().erase(accessed);
+});
+
+// config/stack.json v2 `maxPerBackpack` moves into SB's maxUpgradesPerStorage (stack_upgrades|N).
+ABP_REGISTER_SELFTEST("admin.stack_limit_migrates", [](Context& ctx) {
+    auto& sb         = config::mut<SbServerConfig>();
+    auto  savedSb    = sb.maxUpgradesPerStorage;
+    auto  savedStack = config::get<upgrade::stack::StackConfig>();
+    auto  path       = std::filesystem::temp_directory_path() / "abp_stack_migrate.json";
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << R"({"version":2,"maxPerBackpack":5,"tier1":2.0})";
+    }
+    for (auto const& e : config::ConfigRegistry::entries()) {
+        if (e.section == "stack") (void)e.load(path);
+    }
+    ctx.check(upgrade::stack::StackConfig::legacyStackLimit() == 5, "the old limit is read");
+    adoptLegacyStackLimit();
+    ctx.check(!upgrade::stack::StackConfig::legacyStackLimit().has_value(), "handed over once");
+    auto const& entries = sb.maxUpgradesPerStorage;
+    ctx.check(std::count(entries.begin(), entries.end(), std::string("stack_upgrades|5")) == 1, "stack_upgrades|5");
+    ctx.check(std::none_of(entries.begin(), entries.end(), [](std::string const& e) { return e == "stack_upgrades|3"; }), "SB default entry replaced");
+    std::ifstream in(path);
+    auto          written = nlohmann::json::parse(in, nullptr, false);
+    in.close();
+    ctx.check(written.value("version", 0) == 3 && !written.contains("maxPerBackpack"), "stack.json rewritten without the key");
+    sb.maxUpgradesPerStorage                     = savedSb;
+    config::mut<upgrade::stack::StackConfig>()   = savedStack;
+    config::saveAll(); // the adoption saved the test values
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 });
 
 ABP_REGISTER_SELFTEST("admin.enabled_items", [](Context& ctx) {

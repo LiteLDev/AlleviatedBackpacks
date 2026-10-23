@@ -1,6 +1,8 @@
 // Jukebox selftests: `backpack selftest "jukebox.*"`.
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 #include "ll/api/service/Bedrock.h"
 
@@ -126,10 +128,10 @@ ABP_REGISTER_SELFTEST("jukebox.items", [](Context& ctx) {
     ctx.check(slotsInRow(UpgradeContext(adv, 0)) == 4, "advanced: 4 per row");
     ctx.check(repeatMode(UpgradeContext(adv, 0)) == core::RepeatMode::None, "advanced: Repeat Disabled by default");
     struct SlotsGuard {
-        int saved = config::get<JukeboxConfig>().advancedSlots;
-        ~SlotsGuard() { config::mut<JukeboxConfig>().advancedSlots = saved; }
+        int saved = config::get<JukeboxConfig>().advancedJukeboxUpgrade.numberOfSlots;
+        ~SlotsGuard() { config::mut<JukeboxConfig>().advancedJukeboxUpgrade.numberOfSlots = saved; }
     } guard;
-    config::mut<JukeboxConfig>().advancedSlots = 99;
+    config::mut<JukeboxConfig>().advancedJukeboxUpgrade.numberOfSlots = 99;
     ctx.check(discSlots(UpgradeContext(adv, 0)) == 16, "configurable up to 16");
 });
 
@@ -462,6 +464,34 @@ ABP_REGISTER_SELFTEST("jukebox.placed", [](Context& ctx) -> ll::coro::CoroTask<>
     ctx.check(svc.playing(bp->uuid(), slot), "keeps playing while placed");
     (void)placed::PlacedBackpacks::get().take(site.region(), pos);
     ctx.check(!svc.playing(bp->uuid(), slot), "picking it up stops the disc");
+});
+
+// Config keys follow SB (`jukebox.json`); the old flat keys of the previous version migrate.
+ABP_REGISTER_SELFTEST("jukebox.config_keys_migrate", [](Context& ctx) {
+    auto saved = config::get<JukeboxConfig>();
+    auto path  = std::filesystem::temp_directory_path() / "abp_jukebox_migrate.json";
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << R"({"version":2,"advancedSlots":7,"advancedSlotsInRow":5,"particles":false})";
+    }
+    bool loaded = false;
+    for (auto const& e : config::ConfigRegistry::entries()) {
+        if (e.section == "jukebox") loaded = e.load(path);
+    }
+    ctx.require(loaded, "jukebox config section registered");
+    auto const& c = config::get<JukeboxConfig>();
+    ctx.check(c.advancedJukeboxUpgrade.numberOfSlots == 7 && c.advancedJukeboxUpgrade.slotsInRow == 5, "old values moved");
+    ctx.check(!c.particles, "other keys kept");
+    std::ifstream in(path);
+    auto          written = nlohmann::json::parse(in, nullptr, false);
+    ctx.check(written.value("version", 0) == 3, "rewritten as version 3");
+    ctx.check(written.contains("advancedJukeboxUpgrade") && !written.contains("advancedSlots") && !written.contains("advancedSlotsInRow"),
+              "SB section names: " + written.dump());
+    ctx.check(written["advancedJukeboxUpgrade"].value("numberOfSlots", 0) == 7, "numberOfSlots written");
+    in.close();
+    config::mut<JukeboxConfig>() = saved;
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 });
 
 } // namespace

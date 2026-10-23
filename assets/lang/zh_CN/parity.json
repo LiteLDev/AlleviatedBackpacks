@@ -1,0 +1,12 @@
+{
+  "abp.parity.players_only": "只有玩家可以使用此命令。",
+  "abp.parity.operators_only": "你需要管理员权限。",
+  "abp.parity.no_storage": "背包存储不可用。",
+  "abp.parity.setup_failed": "无法准备背包。",
+  "abp.parity.drop_failed": "无法丢出背包。",
+  "abp.parity.no_everlasting": "附近没有掉落的永恒背包。",
+  "abp.parity.limits": "parity limits: 已给予钻石背包 {}",
+  "abp.parity.status": "parity status: {}",
+  "abp.parity.everlasting": "parity everlasting: 已丢出 {}",
+  "abp.parity.explode": "parity explode: 已爆炸"
+}

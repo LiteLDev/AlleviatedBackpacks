@@ -41,16 +41,6 @@ ui::MenuManager::SimAction act(ActionType type, ui::MenuManager::SlotAddress src
 
 ItemStack cursorOf(Player& player) { return player.mPlayerUIContainer->getItem(0); }
 
-int findUpgradeSlot(game::Backpack const& backpack, std::string_view upgradeId) {
-    auto const& slots = backpack.data().upgrades;
-    for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
-        auto const& s = slots[static_cast<std::size_t>(i)];
-        if (s.empty()) continue;
-        if (auto* u = upgradeFor(s.item); u && u->info().id == upgradeId) return i;
-    }
-    return -1;
-}
-
 int playerRoomFor(Player& player, ItemStack const& stack) {
     if (stack.isNull()) return 0;
     int   max  = std::max<int>(stack.getMaxStackSize(), 1);

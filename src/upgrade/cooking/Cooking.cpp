@@ -186,9 +186,10 @@ CookingUpgrade::CookingUpgrade(Kind kind, bool automatic) : mKind(kind), mAuto(a
     mInfo.nameKey      = "abp.cooking." + id + ".name";
     mInfo.nameFallback = std::string(nameFallback(kind, automatic));
     mInfo.tier         = automatic ? UpgradeTier::Advanced : UpgradeTier::Basic;
-    // SB: maxUpgradesPerStorage cooking_upgrades = 1.
+    // SB group "furnace_upgrades": its limit (1) is SB's configurable maxUpgradesPerStorage entry,
+    // checked by the admin unit.
     mInfo.group          = std::string(kGroup);
-    mInfo.maxPerBackpack = 1;
+    mInfo.maxPerBackpack = kUnlimitedPerBackpack;
     mInfo.hasSettings    = true;
     mInfo.toggleable     = true;
 }

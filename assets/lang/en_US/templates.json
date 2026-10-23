@@ -22,7 +22,7 @@
   "abp.templates.dynamic.begin.noBaseTemplate": "The template '{}' to base this dynamic template of does not exist",
   "abp.templates.dynamic.add.delayed": "The item '{1}' is marked to be added to '{0}' at the end",
   "abp.templates.dynamic.add.success": "Successfully added item '{1}' to '{0}'",
-  "abp.templates.dynamic.end.addRemainingItemsFailed": "Not all items could be added: Remaining {}",
+  "abp.templates.dynamic.end.addRemainingItemsFailed": "Not all items could be added: Remaining {0} x {1}",
   "abp.templates.dynamic.end.success": "Successfully ended the dynamic template '{}'",
   "abp.templates.err.permission": "You need operator permission.",
   "abp.templates.err.item": "Unknown item",

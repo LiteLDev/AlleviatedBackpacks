@@ -1,12 +1,12 @@
 {
-  "abp.compacting.name": "压缩升级",
-  "abp.compacting.advanced_name": "高级压缩升级",
+  "abp.compacting.name": "压制升级",
+  "abp.compacting.advanced_name": "高级压制升级",
   "abp.compacting.tab": "压缩",
   "abp.compacting.tab.advanced": "高级压缩",
   "abp.compacting.tab.tooltip": "压缩设置",
   "abp.compacting.tab.advanced.tooltip": "高级压缩设置",
-  "abp.compacting.button.compact_only_uncraftable": "仅压缩可还原的配方",
+  "abp.compacting.button.compact_only_uncraftable": "仅压缩可逆配方",
   "abp.compacting.button.compact_anything": "压缩任意配方",
-  "abp.compacting.button.works_in_gui": "在界面中同样生效",
-  "abp.compacting.button.only_automatic": "仅对其他升级/自动化生效"
+  "abp.compacting.button.works_in_gui": "在GUI中工作",
+  "abp.compacting.button.only_automatic": "仅与其他升级/自动化方式（如漏斗）配合工作"
 }
