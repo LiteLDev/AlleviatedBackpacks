@@ -44,6 +44,7 @@
 #include "mc/deps/nbt/CompoundTag.h"
 #include "mc/deps/shared_types/legacy/actor/ArmorSlot.h"
 #include "mc/world/actor/Actor.h"
+#include "mc/world/actor/Mob.h"
 #include "mc/world/actor/item/ItemActor.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/level/BlockPos.h"
@@ -145,6 +146,7 @@ Actor* entityFor(void const* owner, ItemStack const& stack, Vec3 const& at) {
 void place(Actor& actor, Vec3 const& at, float yaw, EntityXf const& xf) {
     actor.moveTo(at, Vec2{0.f, yaw});
     actor.setYHeadRotations(yaw, yaw);
+    if (auto* mob = Mob::tryGetFromEntity(actor.getEntityContext(), false)) mob->setYBodyRotations(yaw, yaw);
     setEntityXf(&actor, xf);
 }
 
@@ -223,7 +225,7 @@ void framed(FramedBackpack const& f) {
         static constexpr float kYaw[6] = {0, 0, 180, 0, 90, -90};
         yaw   = kYaw[f.facing];
         xf.rz = -f.rotation;
-        xf.px = std::sin(t) * cy * 16.f; // geometry x is mirrored
+        xf.px = -std::sin(t) * cy * 16.f; // calibrated in the client (frames-close.png)
         xf.py = std::cos(t) * cy * 16.f;
         xf.pz = cz * 16.f;
     } else {

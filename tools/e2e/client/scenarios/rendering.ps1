@@ -62,6 +62,9 @@ try {
     Invoke-Chat '/clear @s'
     Invoke-Chat '/time set noon'
     Invoke-Chat '/kill @e[type=!player]'
+    # A clear grass floor at y -61 (the fixture world is flat, but a run can come up with terrain).
+    Invoke-Chat '/fill -10 -60 -6 10 -45 14 air'
+    Invoke-Chat '/fill -10 -61 -6 10 -61 14 grass'
     Invoke-Chat '/tp @s 0.5 -60 0.5 0 25'
     Start-Sleep -Seconds 1
 
@@ -226,7 +229,7 @@ try {
     foreach ($w in 'a dropped backpack draws its 3D model', 'a framed backpack draws its 3D model') {
         try { Wait-LogLine "item entity models: $w" 5 | Out-Null } catch { $problems += "item entity models: no '$w'" }
     }
-    Invoke-Chat '/fill -4 -60 3 4 -58 5 air'
+    Invoke-Chat '/fill -4 -60 2 4 -58 5 air'
     Invoke-Chat '/kill @e[type=item]'
 
     }

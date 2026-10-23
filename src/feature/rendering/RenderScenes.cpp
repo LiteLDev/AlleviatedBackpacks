@@ -116,8 +116,9 @@ bool frame(BlockSource& region, BlockPos const& pos, int facing, ItemStack const
     auto* be = region.getBlockEntity(pos);
     if (!be || be->getType() != BlockActorType::ItemFrame) return false;
     auto& f     = static_cast<ItemFrameBlockActor&>(*be);
-    f.mRotation = rotation;
     f.setItem(region, ItemInstance(item), nullptr);
+    f.mRotation = rotation;
+    f.refresh(region); // sends the block actor data (item + rotation) to the clients
     return true;
 }
 
@@ -201,7 +202,7 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
             auto plain = rendering::makeBackpack(core::Tier::Leather);
             auto tanks = rendering::tankBackpack(&player);
             auto gold  = rendering::makeBackpack(core::Tier::Gold, 0xFF3C44AA, 0xFFF9FFFE);
-            if (rendering::frame(region, BlockPos{base.x - 2, base.y + 1, z - 1}, 2, rendering::itemOf(plain), 0.f)) ++n;
+            if (rendering::frame(region, BlockPos{base.x - 2, base.y + 1, z - 1}, 2, rendering::itemOf(plain), 90.f)) ++n;
             if (rendering::frame(region, BlockPos{base.x, base.y + 1, z - 1}, 2, rendering::itemOf(tanks), 0.f)) ++n;
             if (rendering::frame(region, BlockPos{base.x + 2, base.y + 1, z - 1}, 2, rendering::itemOf(gold), 45.f)) ++n;
             // On the floor (facing up), turned 90 degrees.
@@ -247,8 +248,8 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
                 if (!bp) continue;
                 rendering::fillTanks(bp, 0, sets[i], &player);
                 float x = static_cast<float>(base.x) + 0.5f + (static_cast<float>(i) - 1.f) * 1.5f;
-                // Facing the player (north) and turned 30 degrees, so the side tanks show.
-                if (auto* s = rendering::stand(region, Vec3{x, static_cast<float>(base.y), static_cast<float>(base.z) + 3.5f}, 150.0f)) {
+                // Facing west: the backpack's side tank faces the player (who looks south).
+                if (auto* s = rendering::stand(region, Vec3{x, static_cast<float>(base.y), static_cast<float>(base.z) + 3.5f}, 90.0f)) {
                     s->setArmor(SharedTypes::Legacy::ArmorSlot::Torso, rendering::itemOf(bp));
                     s->sendArmor(std::bitset<5>{0b11111});
                     ++n;

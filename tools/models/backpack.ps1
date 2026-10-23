@@ -211,7 +211,7 @@ foreach ($k in $fluidLooks.Keys) { Remove-Item -ErrorAction SilentlyContinue (Jo
 # textures/blocks/lava_still (20 frames) - flipbook frames chosen with uv_anim, tinted through the
 # controller's colour - and for fluids without a vanilla still texture our own 16x16 sprites.
 $fluidSprites = [ordered]@{
-    water       = @{ path = 'textures/blocks/water_still_grey'; frames = 32; ticks = 2 }
+    water       = @{ path = 'textures/blocks/water_still'; frames = 32; ticks = 2 }
     lava        = @{ path = 'textures/blocks/lava_still'; frames = 20; ticks = 16 }
     milk        = @{ path = 'textures/blocks/water_still_grey'; frames = 32; ticks = 2 }
     powder_snow = @{ path = 'textures/entity/alleviatedbackpacks/backpack/fluid_powder_snow'; frames = 1; ticks = 1 }
@@ -469,12 +469,12 @@ function Visibility([scriptblock]$select) {
 }
 $prefix = 'controller.render.alleviatedbackpacks.backpack'
 $looks = @($fluidLooks.Keys)
-# A tank side's fluid controller: the look's texture (q.abp_model(lookField)), its flipbook frame
+# A tank side's fluid controller: the look's texture (q.abp_model(lookField)) and its flipbook frame
 # (uv_anim: frame = floor(ticks / ticksPerFrame) mod frames over a strip of square frames; the
-# client's animation ticks are q.abp_model(15)) and the fluid's tint (q.abp_model(tintField + 0..2);
-# alpha 0.996 marks it for the client's colour hook) on entity_alphatest_change_color. The U offset (2 left,
-# 3 right: whole turns, the sprite repeats) tells the client's colour hook which tank is drawn.
-function FluidController([int]$lookField, [int]$tintField, [string]$bonePattern, [int]$sideTag) {
+# client's animation ticks are q.abp_model(15)). Attachables get their shader constants (change
+# colours) once per attachable, not per render controller, so the sprites are drawn as they are:
+# water with the game's blue water_still, lava, milk / potions on the grey water_still_grey.
+function FluidController([int]$lookField, [string]$bonePattern) {
     $L      = "q.abp_model($lookField)"
     $frames = ''; $ticks = ''
     for ($i = 0; $i -lt $looks.Count; $i++) {
@@ -490,19 +490,17 @@ function FluidController([int]$lookField, [int]$tintField, [string]$bonePattern,
         textures                   = @("Array.fluid[$L]")
         rebuild_animation_matrices = $true
         uv_anim                    = [ordered]@{
-            offset = @($sideTag, "math.mod(math.floor(q.abp_model(15) / $tf), $nf) / $nf")
+            offset = @(0, "math.mod(math.floor(q.abp_model(15) / $tf), $nf) / $nf")
             scale  = @(1, "1 / $nf")
         }
-        color                      = [ordered]@{ r = "q.abp_model($tintField)"; g = "q.abp_model($($tintField + 1))"; b = "q.abp_model($($tintField + 2))"; a = 0.996 }
-        overlay_color              = [ordered]@{ r = (0.25 * $sideTag); g = 0.75; b = 0.125; a = 0.0 }
         part_visibility            = (Visibility { param($b) $b -match $bonePattern })
     }
 }
 $rcs = [ordered]@{
     "$prefix.tint"    = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.tint' }); textures = @('Texture.tint'); part_visibility = (Visibility { param($b) $b -match '_(cloth|border)$' }) }
     "$prefix.fixed"   = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Texture.fixed'); part_visibility = (Visibility { param($b) $b -match '(_fixed$|^charge_)' }) }
-    "$prefix.fluid_l" = (FluidController 10 16 '^fluid_l_' 2)
-    "$prefix.fluid_r" = (FluidController 11 19 '^fluid_r_' 3)
+    "$prefix.fluid_l" = (FluidController 10 '^fluid_l_')
+    "$prefix.fluid_r" = (FluidController 11 '^fluid_r_')
     "$prefix.glass"   = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.glass' }); textures = @('Texture.glass'); part_visibility = (Visibility { param($b) $b -match '_glass$' }) }
 }
 [ordered]@{ format_version = '1.8.0'; render_controllers = $rcs } | ConvertTo-Json -Depth 20 -Compress |
@@ -556,7 +554,7 @@ foreach ($t in $tiers) {
         'minecraft:attachable' = [ordered]@{
             description = [ordered]@{
                 identifier         = "alleviatedbackpacks:$($t)_backpack"
-                materials          = [ordered]@{ default = 'entity_alphatest'; tint = 'entity_alphatest_multicolor_tint'; glass = 'entity_alphablend'; fluid = 'entity_alphatest_change_color' }
+                materials          = [ordered]@{ default = 'entity_alphatest'; tint = 'entity_alphatest_multicolor_tint'; glass = 'entity_alphablend'; fluid = 'entity_alphatest' }
                 textures           = $textures
                 geometry           = [ordered]@{ default = 'geometry.alleviatedbackpacks.backpack'; fluid = 'geometry.alleviatedbackpacks.backpack_fluid' }
                 animations         = [ordered]@{

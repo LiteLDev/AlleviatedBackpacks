@@ -52,14 +52,8 @@ enum class ModelField : int {
     HasDisplay  = 12, ///< an item display is set
     DisplayRot  = 13, ///< item display rotation (degrees)
     DisplayZ    = 14, ///< item display z offset (item pixels, SC -16..16)
-    // GX-1: tank fluids drawn with the fluid's own still sprite (flipbook frame + tint).
+    // GX-1: tank fluids drawn with the fluid's own still sprite (a flipbook frame).
     AnimTicks   = 15, ///< client animation ticks (20 per second) for flipbook frames
-    LeftR       = 16, ///< left tank fluid tint, red 0..1 (white for untinted sprites)
-    LeftG       = 17,
-    LeftB       = 18,
-    RightR      = 19,
-    RightG      = 20,
-    RightB      = 21,
 };
 
 /// GX-1: the attachable's xf bone transform of a client-only display entity (dropped backpacks,
@@ -75,10 +69,6 @@ struct EntityXf {
 /// Sets (or with nullopt clears) the transform of `displayEntity`. Thread safe.
 void setEntityXf(Actor const* displayEntity, std::optional<EntityXf> xf);
 
-/// Tint of a tank fluid's still sprite (NeoForge fluid types): water's colour, milk / potion
-/// colours on the grey water sprite; lava and our own sprites (honey, powder snow, experience)
-/// untinted. ARGB.
-[[nodiscard]] std::uint32_t fluidSpriteTint(core::render::TankModel const& tank);
 
 /// Entity id of the placed-backpack display entity.
 inline constexpr std::string_view kDisplayEntityId = "alleviatedbackpacks:backpack_display";

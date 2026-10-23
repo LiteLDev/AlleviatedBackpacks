@@ -167,18 +167,6 @@ float field(ModelSnapshot const* s, ModelField f, RenderParams const& params) {
     case ModelField::HasDisplay: return m.display ? 1.0f : 0.0f;
     case ModelField::DisplayRot: return m.display ? static_cast<float>(m.display->rotation) : 0.0f;
     case ModelField::DisplayZ: return m.display ? static_cast<float>(m.display->zOffset) : 0.0f;
-    case ModelField::LeftR:
-    case ModelField::LeftG:
-    case ModelField::LeftB:
-    case ModelField::RightR:
-    case ModelField::RightG:
-    case ModelField::RightB: {
-        bool        left = f == ModelField::LeftR || f == ModelField::LeftG || f == ModelField::LeftB;
-        auto const& tank = left ? m.left : m.right;
-        if (!tank) return 1.0f;
-        int shift = 16 - 8 * (static_cast<int>(f) - static_cast<int>(left ? ModelField::LeftR : ModelField::RightR));
-        return static_cast<float>((fluidSpriteTint(*tank) >> shift) & 0xFF) / 255.0f;
-    }
     default: return 0;
     }
 }
@@ -209,7 +197,6 @@ MolangScriptArg const& modelQuery(RenderParams& params, std::vector<ExpressionNo
 // ---- tint ------------------------------------------------------------------------------------------
 struct Tint {
     mce::Color main, accent;
-    mce::Color leftFluid{1, 1, 1, 1}, rightFluid{1, 1, 1, 1}; ///< tank fluid sprite tints (GX-1)
 };
 thread_local std::vector<Tint> tTint; ///< colours of the backpack attachable(s) being set up / drawn
 
@@ -223,8 +210,6 @@ std::optional<Tint> tintFor(ItemStack const& item) {
     std::uint32_t main   = snap ? snap->mainColor : core::render::kDefaultMainColor;
     std::uint32_t accent = snap ? snap->accentColor : core::render::kDefaultAccentColor;
     Tint t{toColor(main), toColor(accent)};
-    if (snap && snap->model.left) t.leftFluid = toColor(fluidSpriteTint(*snap->model.left));
-    if (snap && snap->model.right) t.rightFluid = toColor(fluidSpriteTint(*snap->model.right));
     return t;
 }
 
@@ -247,18 +232,6 @@ void setEntityXf(Actor const* displayEntity, std::optional<EntityXf> xf) {
     std::unique_lock lock(gXfMutex);
     if (xf) gXf[displayEntity] = *xf;
     else gXf.erase(displayEntity);
-}
-
-std::uint32_t fluidSpriteTint(core::render::TankModel const& tank) {
-    using core::render::FluidLook;
-    switch (core::render::fluidLook(tank.fluid)) {
-    case FluidLook::Water:
-    case FluidLook::Milk:
-    case FluidLook::Potion:
-        return tank.color;
-    default:
-        return 0xFFFFFFFF;
-    }
 }
 
 std::optional<ModelSnapshot> modelFor(std::string const& uuid) {
@@ -336,31 +309,6 @@ LL_STATIC_HOOK(
     float                  uvRot1,
     float                  uvRot2
 ) {
-    {
-        static std::unordered_set<std::uint64_t> seen;
-        std::uint64_t key = (tTint.empty() ? 1ull : 2ull) + 10 * static_cast<std::uint64_t>(std::lround(uvAnim.x * 4.f)) + 1000 * static_cast<std::uint64_t>(std::lround(uvAnim.w * 64.f))
-                          + 1000000 * static_cast<std::uint64_t>(std::lround(overlay.r * 20.f)) + 100000000ull * static_cast<std::uint64_t>(std::lround(overlay.g * 20.f));
-        if (seen.size() < 40 && seen.insert(key).second) {
-            log().info("tint debug: scope {} change {:.3f},{:.3f},{:.3f},{:.3f} uvAnim {:.3f},{:.3f},{:.3f},{:.3f} overlay {:.3f},{:.3f},{:.3f},{:.3f}", tTint.size(), changeColor.r, changeColor.g,
-                       changeColor.b, changeColor.a, uvAnim.x, uvAnim.y, uvAnim.z, uvAnim.w, overlay.r, overlay.g, overlay.b, overlay.a);
-        }
-    }
-    if (!tTint.empty()) {
-        // Tank fluid controllers: their uv_anim U offset is 2 (left tank) or 3 (right tank); their
-        // entity_alphatest_change_color material multiplies the sprite by the fluid's tint.
-        auto const& t = tTint.back();
-        if (uvAnim.x > 1.5f && uvAnim.x < 3.5f) {
-            auto const& fluid = uvAnim.x < 2.5f ? t.leftFluid : t.rightFluid;
-            return origin(entityConstants, renderContext, tileLightColor, tileLightColorUV, blockLightColor, overlay, fluid, changeColor2, glintColor, glintUVScale, uvAnim, uvOffset1, uvOffset2, uvRot1, uvRot2);
-        }
-        // Their overlay colour (alpha 0: no visible overlay) carries the tank side too:
-        // g 0.75, b 0.125, r 0.5 (left) / 0.75 (right).
-        if (overlay.a < 0.01f && std::abs(overlay.g - 0.75f) < 0.02f && std::abs(overlay.b - 0.125f) < 0.02f) {
-            auto const&      fluid = overlay.r < 0.625f ? t.leftFluid : t.rightFluid;
-            mce::Color const none{0.f, 0.f, 0.f, 0.f};
-            return origin(entityConstants, renderContext, tileLightColor, tileLightColorUV, blockLightColor, none, fluid, changeColor2, glintColor, glintUVScale, uvAnim, uvOffset1, uvOffset2, uvRot1, uvRot2);
-        }
-    }
     if (!tTint.empty()) {
         // entity_alphatest_multicolor_tint: texture red = cloth (main colour), green = border
         // (accent colour), like SB's tint indexes 0 and 1.
