@@ -508,7 +508,9 @@ $rcs = [ordered]@{
 
 # Per-context placement of the model (bone xf). Model frame = placed backpack (front = -z).
 #   worn:  SB BackpackLayerRenderer: 180 degree turn, (0, -0.25, -0.3) blocks from the body.
-#   held:  SB "thirdperson_righthand" / "firstperson_righthand" display transforms.
+#   held:  SB "thirdperson_righthand" / "firstperson_righthand" display transforms; first person calibrated in the
+#          client against a held vanilla block (e2e `rendering` fp-held / fp-held-chest): back to the camera at the
+#          lower right, scale 0.5.
 # Each value can be overridden at runtime for calibration (`/backpack modeltest pose`, DebugPose.h).
 function Pose([int]$ctx, $pos, $rot, $scale) {
     $b = 30 + $ctx * 8
@@ -538,7 +540,7 @@ $anim = [ordered]@{
     # SB draws the worn backpack as a back layer of the player model: never in first person.
     'animation.alleviatedbackpacks.backpack.worn'    = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (HiddenInFirstPerson (Pose 1 @(0, 12, 4.8) @(0, 180, 0) 1)) } }
     'animation.alleviatedbackpacks.backpack.held_tp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 2 @(2, 12, -0.9) @(0, -90, 0) 0.75) } }
-    'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 3 @(0, 12, -8) @(0, 0, 0) 0.5) } }
+    'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 3 @(0, 20, 0) @(0, 45, 0) 0.5) } }
     'animation.alleviatedbackpacks.backpack.placed'  = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (EntityPose (Pose 4 @(0, 0, 0) @(0, 0, 0) 1)) } }
 }
 [ordered]@{ format_version = '1.10.0'; animations = $anim } | ConvertTo-Json -Depth 20 -Compress |
