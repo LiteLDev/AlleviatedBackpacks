@@ -1,10 +1,10 @@
 # Bundles and SB `canBePlacedInContainerItems` with a real client (`-Mode local` and `-Mode remote-mod`):
-#   1. default (false): a backpack on the cursor right-clicked onto a bundle stays out of it, and the
-#      client predicts the refusal (its bundle validation asks the rule the server announced);
+#   1. default (false): a backpack on the cursor clicked onto a bundle stays out of it, and the
+#      client refuses it itself with the rule the server announced (no request reaches the server);
 #   2. `canBePlacedInContainerItems = true` written to the config file + `/backpack reload`: the
 #      client is told the new rule and the same click puts the backpack into the bundle (it fills
 #      the bundle: weight 64 of 64).
-# The backpack is full, so SB right-click stashing has nothing to offer and the click reaches the
+# The backpack is full, so SB stashing has nothing to offer and the click reaches the
 # bundle. Positions come from the mod's "stash: vanilla slots ..." line.
 
 Wait-LogLine 'companion: server ready' 90 | Out-Null
@@ -49,7 +49,7 @@ function Get-BundleStatus {
     if ($line -notmatch 'weight=(\d+) backpacks=(\d+)') { throw "unexpected status: $line" }
     [pscustomobject]@{ Weight = [int]$Matches[1]; Backpacks = [int]$Matches[2]; Line = $line }
 }
-# Backpack (inventory:1) onto the cursor, right-click on the bundle (inventory:0), then the
+# Backpack (inventory:1) onto the cursor, click on the bundle (inventory:0: Bedrock puts the cursor item in), then the
 # screen is closed (the cursor item goes back into the inventory).
 function Try-Insert([string]$shot) {
     Invoke-Checked '/backpack bundle setup' 'bundle setup: backpack=' | Out-Null
@@ -59,7 +59,7 @@ function Try-Insert([string]$shot) {
     Read-VanillaSlots $mark
     $mark = Get-LogMark
     V-Click 'inventory:1'
-    V-Click 'inventory:0' -Right
+    V-Click 'inventory:0'
     Start-Sleep -Milliseconds 800
     Save-Screenshot $shot | Out-Null
     $script:ClickLog = @(Get-LeviLog -Since $mark)
@@ -75,7 +75,8 @@ Wait-LogLine 'bundle: server rule canBePlacedInContainerItems=false' 30 | Out-Nu
 $s = Try-Insert 'refused'
 Write-Step "default: $($s.Line)"
 if ($s.Weight -ne 0 -or $s.Backpacks -ne 1) { throw "the backpack went into the bundle with canBePlacedInContainerItems=false: $($s.Line)" }
-if (-not ($ClickLog -match 'bundle: client refuses alleviatedbackpacks:leather_backpack')) { throw 'the client did not predict the refusal' }
+if (-not ($ClickLog -match 'bundle: client refuses alleviatedbackpacks:leather_backpack')) { throw 'the client did not refuse the move itself' }
+if ($ClickLog -match 'bundle: server (refuses|allows)') { throw 'the client sent the refused move to the server (misprediction)' }
 
 # ---- 2. config true + /backpack reload: allowed -------------------------------------------------------
 $mark = Get-LogMark
@@ -85,7 +86,8 @@ Wait-LogLine 'bundle: server rule canBePlacedInContainerItems=true' 15 -Since $m
 $s = Try-Insert 'allowed'
 Write-Step "allowed: $($s.Line)"
 if ($s.Weight -ne 64 -or $s.Backpacks -ne 0) { throw "the backpack did not go into the bundle with canBePlacedInContainerItems=true: $($s.Line)" }
-if (-not ($ClickLog -match 'bundle: client allows alleviatedbackpacks:leather_backpack')) { throw 'the client did not predict the insert' }
+if (-not ($ClickLog -match 'bundle: server allows alleviatedbackpacks:leather_backpack')) { throw 'the move did not reach the server' }
+if ($ClickLog -match 'bundle: client refuses') { throw 'the client refused an allowed move' }
 Open-Inventory
 Start-Sleep -Milliseconds 500
 Save-Screenshot 'allowed-inventory' | Out-Null

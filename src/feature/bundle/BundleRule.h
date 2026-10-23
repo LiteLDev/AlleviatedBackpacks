@@ -8,10 +8,11 @@
 // then weighs what vanilla gives any unstackable item: 1/1 of a bundle (Java's BundleContents
 // weight is 1/maxStackSize), which on Bedrock is the default weight 64 of a 64-weight bundle.
 //
-// Bedrock checks what may go into a storage item in `DynamicContainerValidation::isItemAllowedInSlot`,
-// on the server (authoritative) and on the client (prediction). Both are hooked: the server reads
-// the config live (so `/backpack reload` applies at once), the client uses the rule the server
-// announced with `BundleRulePacket` (companion clients only; sent on join and on every change).
+// The server checks what may go into a storage item in `DynamicContainerValidation::isItemAllowedInSlot`
+// (hooked, reads the config live, so `/backpack reload` applies at once). The client decides
+// before it sends the request, in `ContainerManagerController::handleMoveItemFromSlotIntoStorageItem`
+// (hooked in the client build), with the rule the server announced in `BundleRulePacket`
+// (companion clients; sent after the handshake and after every change).
 
 #include <optional>
 
@@ -38,5 +39,8 @@ void setClientRule(std::optional<bool> allowed);
 /// Whether `item` may go into a bundle: everything but backpacks, which only when allowed (the
 /// client's view of the rule when `clientSide`).
 [[nodiscard]] bool fitsBundles(ItemStackBase const& item, bool clientSide);
+/// Logs a decision about a backpack ("bundle: client|server allows|refuses <id>"), at most once a
+/// second per side.
+void noteDecision(bool clientSide, bool allowed, ItemStackBase const& item);
 
 } // namespace abp::bundle

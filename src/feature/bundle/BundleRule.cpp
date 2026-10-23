@@ -30,9 +30,9 @@ namespace abp::bundle {
 namespace {
 /// -1 unknown (not announced yet), 0 refused, 1 allowed.
 std::atomic<int> gClientRule{-1};
+} // namespace
 
-/// Logs a decision at most once a second per side (the UI asks on every hover).
-void note(bool clientSide, bool allowed, ItemStackBase const& item) {
+void noteDecision(bool clientSide, bool allowed, ItemStackBase const& item) {
     using Clock = std::chrono::steady_clock;
     static std::atomic<std::int64_t> last[2]{};
     auto now = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
@@ -41,7 +41,6 @@ void note(bool clientSide, bool allowed, ItemStackBase const& item) {
     l = now;
     log().info("bundle: {} {} {}", clientSide ? "client" : "server", allowed ? "allows" : "refuses", item.getTypeName());
 }
-} // namespace
 
 bool serverAllowsBackpacks() { return admin::sbServer().canBePlacedInContainerItems; }
 
@@ -65,8 +64,8 @@ bool fitsBundles(ItemStackBase const& item, bool clientSide) {
 
 } // namespace abp::bundle
 
-// Bundles (any `minecraft:storage_item`) ask this for every item put in, on the server for the
-// item stack request and on the client to predict it.
+// Bundles (any `minecraft:storage_item`) ask this for every item put in through an item stack
+// request (the client predicts with ContainerManagerController, see BundleRuleClient.cpp).
 LL_TYPE_INSTANCE_HOOK(
     BundleBackpackHook,
     ll::memory::HookPriority::Normal,
@@ -83,7 +82,7 @@ LL_TYPE_INSTANCE_HOOK(
         Player* player     = screenContext.mPlayer;
         bool    clientSide = player && player->isClientSide();
         bool    allowed    = abp::bundle::fitsBundles(item, clientSide);
-        abp::bundle::note(clientSide, allowed, item);
+        abp::bundle::noteDecision(clientSide, allowed, item);
         if (!allowed) return false;
     }
     return origin(screenContext, slot, item, amount, isInternalTransfer);
