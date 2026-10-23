@@ -3,8 +3,8 @@
 //
 //   parity limits       a diamond backpack (hotbar 0) with Crafting (upgrade slot 0) and Jukebox
 //                       (slot 1), a second Crafting upgrade (hotbar 1) and a second Jukebox (hotbar 2)
-//   parity status       logs "parity status: health=.. piglins=.. targeting=.." (piglins within 16
-//                       blocks and how many of them target the player)
+//   parity status       logs "parity status: health=.. piglins=.. targeting=.. block=x,y,z" (piglins
+//                       within 16 blocks, how many of them target the player, the feet block)
 //   parity everlasting  drops an everlasting backpack 3 blocks east of the player
 //   parity explode      an explosion 1.5 blocks west of the nearest dropped everlasting backpack;
 //                       10 ticks later logs "parity explode: moved <blocks>"
@@ -130,7 +130,8 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
             if (a->mTargetId->rawID == me) ++targeting;
         }
         auto line = "health=" + std::to_string(player->getHealth()) + " piglins=" + std::to_string(piglins)
-                  + " targeting=" + std::to_string(targeting);
+                  + " targeting=" + std::to_string(targeting) + " block=" + std::to_string(static_cast<int>(std::floor(at.x))) + ","
+                  + std::to_string(static_cast<int>(std::floor(at.y - 1.62f + 0.01f))) + "," + std::to_string(static_cast<int>(std::floor(at.z)));
         log().info("parity status: {}", line);
         output.success(trFor(*player, "abp.parity.status", "parity status: {}", line));
     });

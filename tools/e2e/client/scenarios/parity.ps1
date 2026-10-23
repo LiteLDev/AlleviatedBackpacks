@@ -60,8 +60,12 @@ function Get-Status {
     if ($line -notmatch 'health=(\d+) piglins=(\d+) targeting=(\d+)') { throw "unexpected status: $line" }
     [pscustomobject]@{ Health = [int]$Matches[1]; Piglins = [int]$Matches[2]; Targeting = [int]$Matches[3]; Line = $line }
 }
+$script:PlacedAt = @()
 function Get-PlacedCount {
+    $mark = Get-LogMark
     $line = Invoke-Checked '/backpack placed' 'placed backpacks: \d+'
+    Start-Sleep -Milliseconds 300
+    $script:PlacedAt = @(Get-LeviLog -Since $mark | ForEach-Object { if ($_ -match 'dim 0 at (-?\d+) (-?\d+) (-?\d+):') { "$($Matches[1]) $($Matches[2]) $($Matches[3])" } } | Sort-Object -Unique)
     return [int]([regex]::Match($line, 'placed backpacks: (\d+)').Groups[1].Value)
 }
 function Sneak([bool]$down) { Focus-Game; [AbpE2E.Native]::Key(0x10, -not $down); Start-Sleep -Milliseconds 300 }
@@ -150,10 +154,17 @@ Start-Sleep -Seconds 1
 Invoke-Chat '/clear @s'
 Invoke-Chat '/gamemode survival'
 Invoke-Chat '/replaceitem entity @s slot.hotbar 0 alleviatedbackpacks:iron_backpack'
-Invoke-Chat '/tp @s ~ ~ ~ 0 40' # the ground two blocks ahead (not the player's own block)
+# Stand in the middle of a block looking steeply down at the next block south: the backpack goes
+# there and the crosshair stays on it.
+$s = Get-Status
+if ($s.Line -notmatch 'block=(-?\d+),(-?\d+),(-?\d+)') { throw "no position in: $($s.Line)" }
+$inv = [cultureinfo]::InvariantCulture
+$cx = ([int]$Matches[1] + 0.5).ToString($inv); $cy = [int]$Matches[2]; $cz = ([int]$Matches[3] + 0.5).ToString($inv)
+Invoke-Chat "/tp @s $cx $cy $cz 0 60"
 Press-Key '1'
 Start-Sleep -Seconds 1
 $before = Get-PlacedCount
+$placedBefore = $script:PlacedAt
 Sneak $true
 Click 0.5 0.5 -Relative -Right
 Start-Sleep -Milliseconds 400

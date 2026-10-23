@@ -756,9 +756,23 @@ ABP_REGISTER_SELFTEST("wearable.piglin_neutral", [](Context& ctx) -> ll::coro::C
     }
     ctx.check(!targeted, "the piglin leaves a Gold Backpack wearer alone");
     ctx.check(piglinTargetsSkipped() > skippedBefore, "the gold-armour target entry was skipped for the wearer");
-    // Same piglin, iron backpack: it attacks (the setup can target the player at all).
+    // Iron backpack: a fresh piglin attacks (the setup can target the player at all). Fresh: an
+    // overworld piglin zombifies after 15 s.
+    if (auto* m = player.getLevel().fetchEntity(pid, false)) m->despawn();
     player.setArmor(ArmorSlot::Torso, ctx.backpackItem(*iron));
-    for (int t = 0; t < 100 && !targeted; t += 5) {
+    Mob* control = nullptr;
+    for (int attempt = 0; attempt < 8 && !control; ++attempt) {
+        auto* m = spawnMob(ctx, "minecraft:piglin", 4);
+        co_await ctx.ticks(1);
+        if (m && m->isBaby()) {
+            m->despawn();
+            continue;
+        }
+        control = m;
+    }
+    ctx.require(control != nullptr, "an adult control piglin");
+    pid = control->getOrCreateUniqueID();
+    for (int t = 0; t < 200 && !targeted; t += 5) {
         co_await ctx.ticks(5);
         targeted = targetsMe();
     }
