@@ -158,6 +158,12 @@ xmake build -y abp-tests; xmake run abp-tests
   `tools/e2e/{server,client}/scenarios/<unit>.ps1`. There is one game client per machine: respect the
   e2e lock files in `%APPDATA%\levilauncher.exe\` (the harness handles them).
 
+Releasing: the mod and pack versions come from the latest `v*` tag (`git describe`, untagged =
+0.0.0). Move *Unreleased* in `CHANGELOG.md` to `## [x.y.z] - <date>`, bump `tooth.json` `version`,
+merge, then push the tag `vx.y.z`: `.github/workflows/release.yml` builds both targets, checks the
+versions, and publishes `alleviatedbackpacks-{server,client}-windows-x64.zip` with that changelog
+section as notes. lip: `lip install github.com/LiteLDev/AlleviatedBackpacks[#client]`.
+
 Deploying by hand: copy `bin/server/AlleviatedBackpacks` to `<BDS>/plugins/` (LeviLamina's BDS mod
 folder is `plugins`), or `bin/client/AlleviatedBackpacks` to
 `%APPDATA%\levilauncher.exe\versions\1.26.51.01\mods\`.

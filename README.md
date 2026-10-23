@@ -1,11 +1,15 @@
 # AlleviatedBackpacks
 
+[![Build](https://github.com/LiteLDev/AlleviatedBackpacks/actions/workflows/build.yml/badge.svg)](https://github.com/LiteLDev/AlleviatedBackpacks/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/LiteLDev/AlleviatedBackpacks)](https://github.com/LiteLDev/AlleviatedBackpacks/releases)
+[![License](https://img.shields.io/github/license/LiteLDev/AlleviatedBackpacks)](COPYING.LESSER)
+
 Backpacks with upgrades for **Minecraft Bedrock Edition**, as a [LeviLamina](https://github.com/LiteLDev/LeviLamina)
 mod. It brings the gameplay of the Java mod *Sophisticated Backpacks* to Bedrock and works on
 dedicated servers (BDS) and in single-player / local worlds on the client.
 
 - Minecraft **1.26.51**, LeviLamina **26.51.7**, Windows x64.
-- Players need the **client mod** (the `client` build, [download](https://github.com/LiteLDev/AlleviatedBackpacks/releases)):
+- Players need the **client mod** (the `client` build, [download](https://github.com/LiteLDev/AlleviatedBackpacks/releases/latest)):
   it draws Sophisticated Backpacks' own screens (storage with scroll bar and search, upgrade column
   with switches, upgrade tabs, settings screen), adds the key bindings and the Shift contents
   tooltip. Every item move is still done by the server. A player without the client mod can join
@@ -77,13 +81,26 @@ Commands (alias `/abp`):
 ## Install
 
 There are two builds from the same source: `server` (for BDS) and `client` (for the game). Every
-player needs the **client** build, both on a server and in single player.
+player needs the **client** build, both on a server and in single player. Use the same version on
+the server and on the clients.
+
+With [lip](https://github.com/futrime/lip):
+
+```sh
+lip install github.com/LiteLDev/AlleviatedBackpacks          # in the BDS folder (server build)
+lip install github.com/LiteLDev/AlleviatedBackpacks#client   # in the game folder (client build)
+```
+
+Manually: download `alleviatedbackpacks-server-windows-x64.zip` or
+`alleviatedbackpacks-client-windows-x64.zip` from the
+[latest release](https://github.com/LiteLDev/AlleviatedBackpacks/releases/latest) and follow the
+steps below.
 
 ### Dedicated server (BDS + LeviLamina)
 
 1. Install LeviLamina 26.51.7 for the server (`lip install github.com/LiteLDev/LeviLamina@26.51.7`).
-2. Download the `server` build (or build it, see below) and copy the folder
-   `AlleviatedBackpacks/` into the server's `plugins/` folder.
+2. Download the `server` build (or build it, see below) and extract it so that the folder
+   `AlleviatedBackpacks/` ends up in the server's `plugins/` folder.
 3. Start the server. On first start the mod adds its resource pack to
    `worlds/<level-name>/world_resource_packs.json` and asks clients to download it. The behavior pack
    (items and recipes) is loaded automatically.
@@ -93,7 +110,7 @@ player needs the **client** build, both on a server and in single player.
 ### Players: the client mod (LeviLauncher), for servers and single player
 
 1. In LeviLauncher, install the 1.26.51 game version with LeviLamina 26.51.7.
-2. Download the `client` build and copy its `AlleviatedBackpacks/` folder into
+2. Download the `client` build and extract it so that its `AlleviatedBackpacks/` folder ends up in
    `%APPDATA%\levilauncher.exe\versions\<version>\mods\` (for example `versions\1.26.51.01\mods\`).
 3. Start the game.
    - **Single player:** every local world gets the backpacks, recipes and upgrades. No world
@@ -134,7 +151,32 @@ pwsh tools/build.ps1 -Target all -Tests
 
 Outputs: `bin/server/AlleviatedBackpacks/` and `bin/client/AlleviatedBackpacks/`.
 
+[AGENTS.md](AGENTS.md) describes the architecture, the conventions and the rules for working with
+Bedrock internals. [tools/e2e](tools/e2e/README.md) holds the end-to-end test harnesses that drive
+the real server and game.
+
+## Maintainers
+
+[@futrime (Zijian Zhang)](https://github.com/futrime)
+
+## Contributing
+
+PRs and issues are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report security issues as described in
+[SECURITY.md](SECURITY.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
 ## Credits
 
 Inspired by Sophisticated Backpacks by P3pp3rF1y. This is an independent implementation for
 Bedrock; no code or assets are taken from the original mod.
+
+## License
+
+LGPL-3.0 © 2026 Zijian Zhang
+
+AlleviatedBackpacks is free software: you can redistribute it and/or modify it under the terms of
+the GNU Lesser General Public License version 3, the same license as LeviLamina. See
+[COPYING.LESSER](COPYING.LESSER) and [COPYING](COPYING).
+
+AlleviatedBackpacks is not affiliated with Mojang Studios, Microsoft, or the Sophisticated
+Backpacks project.
