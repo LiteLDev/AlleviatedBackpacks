@@ -45,4 +45,13 @@ enum class KeyAction {
 /// The key `action` is bound to, for display ("V", "Middle Button", "Not Bound"). Client thread.
 [[nodiscard]] std::string keyDisplayName(KeyAction action);
 
+/// GX-3: the game's own bindings that container screens follow (vanilla AbstractContainerScreen
+/// keyPressed: inventory key closes, drop key throws the hovered stack, hotbar keys swap), read
+/// from the keyboard layout like ours ("key.inventory", "key.drop", "key.hotbar.1".."9").
+enum class VanillaKey { Inventory, Drop, Hotbar1, Hotbar2, Hotbar3, Hotbar4, Hotbar5, Hotbar6, Hotbar7, Hotbar8, Hotbar9 };
+/// `vk` is bound to `key` (defaults E, Q, 1..9 until the layout is read). Any thread.
+[[nodiscard]] bool vanillaKeyMatches(VanillaKey key, int vk);
+/// The hotbar slot (0..8) `vk` is bound to, or -1. Any thread.
+[[nodiscard]] int hotbarKeyIndex(int vk);
+
 } // namespace abp::client::input

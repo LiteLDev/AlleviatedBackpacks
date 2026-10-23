@@ -336,9 +336,54 @@ Start-Sleep -Milliseconds 600
 if ((Get-LeviLog -Since $mark) -match 'dropCursor') { throw 'a click on a tab border threw the cursor item' }
 Save-Screenshot 'tab-border-click-keeps-cursor' | Out-Null
 Gui-Click $h[0] $h[1]
+# The hotbar keys work over upgrade slots too (vanilla SWAP): the pickup upgrade to hotbar slot 9
+# and back; the empty upgrade slots show their outline icon.
+Gui-Move -7 14
+Start-Sleep -Milliseconds 300
+$mark = Get-LogMark
+Press-Key '9'
+Wait-LogLine 'native screen: hotbar key on upgrade slot 0' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 600
+Save-Screenshot 'upgrade-slot-hotbar-key' | Out-Null
+$mark = Get-LogMark
+Press-Key '9'
+Wait-LogLine 'native screen: hotbar key on upgrade slot 0' 10 -Since $mark | Out-Null
+Start-Sleep -Milliseconds 400
 $mark = Get-LogMark
 Press-Key 'ESC'
 Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 800
+}
+# ---- 6. linked storage role icon before the title ------------------------------------------------------------
+if ($from -le 6) {
+$mark = Get-LogMark
+Invoke-Chat '/backpack gx3 linked'           # hotbar 3: main endpoint, hotbar 4: linked endpoint
+Wait-LogLine 'gx3 linked ready' 10 -Since $mark | Out-Null
+Press-Key '9'
+Start-Sleep -Milliseconds 400
+foreach ($case in @(@{ Slot = 2; Name = 'linked-main' }, @{ Slot = 3; Name = 'linked-secondary' })) {
+    $mark = Get-LogMark
+    Open-Inventory
+    Read-VanillaSlots $mark
+    V-Move "inventory:$($case.Slot)"
+    Start-Sleep -Milliseconds 300
+    $mark = Get-LogMark
+    Press-Key 'B'
+    Wait-LogLine "key action: .* opens the backpack at inventory $($case.Slot)" 10 -Since $mark | Out-Null
+    Read-Layout $mark
+    Start-Sleep -Milliseconds 800
+    Gui-Move 60 100
+    Start-Sleep -Milliseconds 300
+    Save-Screenshot "$($case.Name)-title" | Out-Null
+    Gui-Move (6 + 8) (2 + 8)                    # the role icon: its tooltip
+    Start-Sleep -Milliseconds 600
+    Save-Screenshot "$($case.Name)-tooltip" | Out-Null
+    $mark = Get-LogMark
+    Press-Key 'ESC'
+    Wait-LogLine 'native screen action: close by' 10 -Since $mark | Out-Null
+    Start-Sleep -Milliseconds 800
+    $last = (Get-LeviLog -Since $mark | Select-String -Pattern 'input: screen ' | Select-Object -Last 1).Line
+    if ($last -match 'inventory_screen') { Close-Screen }   # back on the inventory screen: close it too
+}
 }
 Assert-NoErrors

@@ -93,6 +93,17 @@ constexpr std::size_t      MAX_KEYS   = 16;
 std::array<std::array<std::atomic<int>, KEYS_PER>, MAX_KEYS> gKeys{};
 std::atomic<bool>                                            gActive{false};
 
+/// GX-3: the game's container-screen keys (Keys.h VanillaKey order), as currently mapped.
+constexpr std::size_t VANILLA_KEYS = 11;
+std::array<std::array<std::atomic<int>, KEYS_PER>, VANILLA_KEYS> gVanilla{};
+std::atomic<bool>                                                gVanillaRead{false}; ///< else the defaults
+int vanillaDefault(std::size_t i) { return i == 0 ? 'E' : i == 1 ? 'Q' : '1' + static_cast<int>(i) - 2; }
+std::string vanillaAction(std::size_t i) {
+    if (i == 0) return "key.inventory";
+    if (i == 1) return "key.drop";
+    return "key.hotbar." + std::to_string(i - 1);
+}
+
 void resetToDefaults() {
     auto const& defs = keyDefs();
     for (std::size_t i = 0; i < defs.size(); ++i) {
@@ -116,6 +127,19 @@ bool bound(std::size_t i, int code) {
     return false;
 }
 
+/// Up to KEYS_PER non-zero codes of an assigned mapping (none when it is unassigned).
+template <class Mapping>
+std::array<int, KEYS_PER> keysOf(Mapping const& mapping) {
+    std::array<int, KEYS_PER> keys{};
+    std::size_t               n = 0;
+    if (mapping.isAssigned()) {
+        for (int key : *mapping.mKeys) {
+            if (key != 0 && n < KEYS_PER) keys[n++] = key;
+        }
+    }
+    return keys;
+}
+
 /// Client thread: refresh gKeys from the (possibly remapped) keyboard layout.
 void readLayout(RemappingLayout const& layout) {
     auto const& defs = keyDefs();
@@ -123,14 +147,25 @@ void readLayout(RemappingLayout const& layout) {
         auto        action  = std::string{KEY_PREFIX} + std::string{defs[i].name};
         auto const& mapping = layout.getKeymappingByAction(action);
         if (*mapping.mAction != action) continue; // not in the layout: keep defaults
-        std::array<int, KEYS_PER> keys{};
-        std::size_t               n = 0;
-        if (mapping.isAssigned()) {
-            for (int key : *mapping.mKeys) {
-                if (key != 0 && n < KEYS_PER) keys[n++] = key;
-            }
-        }
+        auto keys = keysOf(mapping);
         for (std::size_t k = 0; k < KEYS_PER; ++k) gKeys[i][k] = keys[k];
+    }
+    // The game's own container-screen keys (vanilla screens follow the player's bindings).
+    std::string vanilla;
+    for (std::size_t i = 0; i < VANILLA_KEYS; ++i) {
+        auto        action  = vanillaAction(i);
+        auto const& mapping = layout.getKeymappingByAction(action);
+        std::array<int, KEYS_PER> keys{};
+        if (*mapping.mAction != action) keys[0] = vanillaDefault(i); // not in the layout: the default
+        else keys = keysOf(mapping);
+        for (std::size_t k = 0; k < KEYS_PER; ++k) gVanilla[i][k] = keys[k];
+        vanilla += " " + action + "=" + std::to_string(keys[0]);
+    }
+    gVanillaRead = true;
+    static std::string loggedVanilla;
+    if (vanilla != loggedVanilla) {
+        loggedVanilla = vanilla;
+        log().info("keys: vanilla{}", vanilla);
     }
     std::string summary;
     for (std::size_t i = 0; i < defs.size(); ++i) {
@@ -488,6 +523,23 @@ int mouseExtraCode(int which) { return which == 1 ? MOUSE_X1 : MOUSE_X2; }
 } // namespace detail
 
 bool keyMatches(KeyAction action, int vk) { return vk > 0 && detail::bound(detail::indexOf(action), vk); }
+
+bool vanillaKeyMatches(VanillaKey key, int vk) {
+    auto i = static_cast<std::size_t>(key);
+    if (vk <= 0 || i >= detail::VANILLA_KEYS) return false;
+    if (!detail::gVanillaRead.load()) return vk == detail::vanillaDefault(i);
+    for (auto const& k : detail::gVanilla[i]) {
+        if (k.load() == vk) return true;
+    }
+    return false;
+}
+
+int hotbarKeyIndex(int vk) {
+    for (int i = 0; i < 9; ++i) {
+        if (vanillaKeyMatches(static_cast<VanillaKey>(static_cast<int>(VanillaKey::Hotbar1) + i), vk)) return i;
+    }
+    return -1;
+}
 
 std::string keyDisplayName(KeyAction action) {
     auto i = detail::indexOf(action);
