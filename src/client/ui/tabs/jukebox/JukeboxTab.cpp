@@ -11,6 +11,7 @@
 
 #ifdef ABP_CLIENT
 
+#include <chrono>
 #include <algorithm>
 #include <memory>
 #include <vector>
@@ -321,15 +322,27 @@ public:
         mShuffle  = j.value("shuffle", false);
         auto r    = j.value("repeat", std::string("no"));
         mRepeat   = r == "all" ? 0 : r == "one" ? 1 : 2;
-        mPlaying  = j.value("playing", -1);
-        mElapsed  = j.value("elapsed", 0);
-        mDuration = j.value("duration", 0);
+        int playing  = j.value("playing", -1);
+        int elapsed  = j.value("elapsed", 0);
+        int duration = j.value("duration", 0);
+        // SC computes the remaining time every frame from the game time (getDiscFinishTime); the
+        // server sends whole seconds, so the client runs its own clock between updates. The true
+        // elapsed time is in [elapsed, elapsed + 19] ticks: the estimate is kept in that range.
+        double est = estimatedElapsed();
+        if (playing != mPlaying || duration != mDuration || est < elapsed || est > elapsed + 40) {
+            setBase(elapsed);
+        } else if (est > elapsed + 19) {
+            setBase(elapsed + 19);
+        }
+        mPlaying  = playing;
+        mElapsed  = elapsed;
+        mDuration = duration;
     }
 
     void render(Painter& p, TabContext const&, Rect area, float, float) override {
         // SC renderPlaytimeOverLay: the remaining part of the playing disc's slot in green.
         if (!mAdvanced || mPlaying < 0 || mPlaying >= mCount || mDuration <= 0) return;
-        float remaining = static_cast<float>(mDuration - mElapsed) / static_cast<float>(mDuration);
+        float remaining = static_cast<float>((mDuration - estimatedElapsed()) / mDuration);
         if (remaining <= 0) return;
         int   over = 16 - static_cast<int>(16 * remaining);
         float x    = area.x + 4 + static_cast<float>(mPlaying % mPerRow) * 18;
@@ -355,6 +368,23 @@ private:
     int                    mPlaying  = -1;
     int                    mElapsed  = 0;
     int                    mDuration = 0;
+    double                 mBaseTicks = 0; ///< elapsed ticks at mBaseAt
+    double                 mBaseAt    = -1;
+
+    static double nowSeconds() {
+        using namespace std::chrono;
+        return duration<double>(steady_clock::now().time_since_epoch()).count();
+    }
+    void setBase(double ticks) {
+        mBaseTicks = ticks;
+        mBaseAt    = nowSeconds();
+    }
+    /// Elapsed ticks now (20 per second since the last base), never past the disc's length.
+    [[nodiscard]] double estimatedElapsed() const {
+        if (mBaseAt < 0 || mPlaying < 0) return mElapsed;
+        // At most 2 s past the last server value: a stalled server stops the overlay too.
+        return std::min<double>({mBaseTicks + (nowSeconds() - mBaseAt) * 20.0, static_cast<double>(mElapsed) + 40.0, static_cast<double>(mDuration)});
+    }
 };
 
 } // namespace

@@ -85,6 +85,9 @@ enum class Icon {
     KeepTabOpenOff,
     KeepSearchOn,
     KeepSearchOff,
+    EmptyUpgradeSlot, ///< 16x16 outline in an empty upgrade slot (SC slot noItemIcon), opaque
+    LinkedPrimary,    ///< 16x16 linked storage role: main endpoint
+    LinkedSecondary,  ///< 16x16 linked storage role: other endpoint
 };
 /// SC ColorToggleButton face: the dye colour in a 12x12 square at (x+3, y+3) of an 18x18 button.
 void colorSquare(Painter& p, float x, float y, std::uint32_t rgb);

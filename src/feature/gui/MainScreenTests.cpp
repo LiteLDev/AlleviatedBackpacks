@@ -14,14 +14,17 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/platform/UUID.h"
 
 #include "core/Tier.h"
 #include "core/BackpackData.h"
 #include "feature/gui/Gui.h"
 #include "feature/gui/SbSettings.h"
+#include "feature/linked/Linked.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
+#include "game/PlayerScan.h"
 #include "game/Storage.h"
 #include "mod/Commands.h"
 #include "mod/I18n.h"
@@ -288,6 +291,56 @@ ABP_REGISTER_SELFTEST("mainscreen.upgrade_drag_and_switch", [](Context& ctx) {
     ctx.check(act(p, s, "toggleUpgrade", {{"slot", 0}}), "switch it off");
     auto const& st = bp->data().settings;
     ctx.check(st.value("mainscreen", json::object()).value("openTab", -1) == -1, "the open tab is dropped");
+});
+
+// GX-3: the hotbar and drop keys over an upgrade slot (vanilla SWAP / THROW on any slot).
+ABP_REGISTER_SELFTEST("mainscreen.upgrade_slot_keys", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Gold);
+    clearInventory(p);
+    ctx.installUpgrade(bp, "magnet");
+    Companion c(p);
+    auto      s = open(ctx, p, bp);
+    ctx.check(act(p, s, "hotbar", {{"area", "upgrade"}, {"index", 0}, {"hotbar", 3}}), "hotbar key over the upgrade slot");
+    ctx.check(bp->data().upgrades[0].empty(), "upgrade taken out");
+    auto const& in = p.getInventory().getItem(3);
+    ctx.check(!in.isNull() && upgrade::upgradeFor(game::ItemConv::toData(in)) != nullptr, "into hotbar slot 4");
+    ctx.check(act(p, s, "hotbar", {{"area", "upgrade"}, {"index", 1}, {"hotbar", 3}}), "and back into another slot");
+    ctx.check(!bp->data().upgrades[1].empty() && p.getInventory().getItem(3).isNull(), "installed from the hotbar");
+    ctx.check(act(p, s, "drop", {{"area", "upgrade"}, {"index", 1}, {"all", false}}), "drop key over the upgrade slot");
+    ctx.check(bp->data().upgrades[1].empty(), "thrown out");
+    ctx.check(!act(p, s, "drop", {{"area", "upgrade"}, {"index", 1}, {"all", false}}), "nothing left to throw");
+});
+
+// GX-3: the linked storage role shown before the title (SC getLinkedStorageEndpointRole).
+ABP_REGISTER_SELFTEST("mainscreen.linked_role_in_model", [](Context& ctx) {
+    auto& p = ctx.player();
+    clearInventory(p);
+    auto bp        = ctx.createBackpack(Tier::Copper);
+    auto primary   = ctx.backpackItem(*bp);
+    auto secondary = game::makeBackpackItem(Tier::Copper);
+    auto linker    = game::ItemConv::make(std::string(linked::kLinkerId), 1);
+    auto owner     = p.getUuid().asString();
+    ctx.require(linked::Service::get().link(owner, linker, primary) == linked::LinkResult::Success, "main endpoint");
+    ctx.require(linked::Service::get().link(owner, linker, secondary) == linked::LinkResult::Success, "linked endpoint");
+    game::setItemAt(p, {game::ItemLocation::Kind::Inventory, 2}, primary);
+    game::setItemAt(p, {game::ItemLocation::Kind::Inventory, 3}, secondary);
+    Companion c(p);
+    auto roleAt = [&](int slot) {
+        ctx.require(ui::BackpackMenu::openFor(p, {game::ItemLocation::Kind::Inventory, slot}), "open");
+        ui::MenuManager::get().forceShown(p);
+        auto const* m    = net::sentModel(p);
+        auto        role = m ? m->extra.value("mainscreen", json::object()).value("linkedRole", std::string{}) : std::string{"(no model)"};
+        ui::MenuManager::get().close(p);
+        return role;
+    };
+    ctx.check(roleAt(2) == "primary", "main endpoint: primary");
+    ctx.check(roleAt(3) == "secondary", "linked endpoint: secondary");
+    auto plain = ctx.createBackpack(Tier::Copper);
+    open(ctx, p, plain);
+    auto const* m = net::sentModel(p);
+    ctx.check(m && !m->extra.value("mainscreen", json::object()).contains("linkedRole"), "an unlinked backpack has no role");
+    clearInventory(p);
 });
 
 ABP_REGISTER_SELFTEST("mainscreen.error_overlay", [](Context& ctx) -> ll::coro::CoroTask<> {

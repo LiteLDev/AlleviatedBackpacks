@@ -118,16 +118,16 @@ Statuses:
 | Closed tabs drawn unless fully covered; tooltip only when the open tab doesn't cover its top | Exact (GX-4) | `BackpackScreen.cpp` | The two checks were swapped |
 | Storage settings tab opens on any mouse button | Exact (GX-4) | `BackpackScreen.cpp` | |
 | XP Pump action buttons work with any mouse button | Exact (GX-4) | `tabs/xppump/XpPumpTab.cpp` | |
-| Empty upgrade slot icon | Gap | `SbStyle.cpp` | Not done by GX-3 (needs the outline icon art) |
+| Empty upgrade slot icon | Exact (GX-3) | `SbStyle.cpp`, `BackpackScreen.cpp` | Original outline art, opaque, in the slot's 16x16 item area (SC upgrade slot noItemIcon) |
 | Switching an upgrade on/off closes the open tab (SC RELOAD_NEEDED) | Exact (GX-3) | `BackpackScreen::rebuildTabs`, `NativeScreens.cpp` | The enabled flags are part of the tab signature; the server drops the open tab id |
 | Enter in text boxes keeps focus | Exact (GX-3) | `widgets/TextBox.cpp` | |
-| Linked-storage role icon before the title | Gap | `BackpackScreen.cpp` | Not done by GX-3 (needs the role in the screen model) |
+| Linked-storage role icon before the title | Exact (GX-3) | `BackpackScreen.cpp`, `NativeScreens.cpp`, `SbStyle.cpp` | The server sends the role (`mainscreen.linkedRole`); 16x16 icon (original art) at (6, 2), the title at x + 14, "Main Linked" / "Linked" tooltip |
 | Truncated open-tab title tooltip | Exact (GX-3) | `BackpackScreen.cpp` | |
 | Clicking a tab border doesn't throw the cursor item | Exact (GX-3) | `BackpackScreen::onMouseButton` | SC hasClickedOutside: upgrade slots rectangle and tab rectangles |
 | Middle-click sort anywhere but the player inventory, before other handlers | Exact (GX-3) | `BackpackScreen::onMouseButton` | |
 | Drag distribution over upgrade slots | Exact (GX-3) | `BackpackScreen::canDragTo`, `NativeScreens.cpp` | One upgrade per empty slot |
-| Q / 1-9 over upgrade slots; bound (not literal) keys | Gap | `BackpackScreen::onKey`, `NativeScreens.cpp` | Not done by GX-3 |
-| Jukebox playtime overlay updates smoothly | Gap | `tabs/jukebox` | Not done by GX-3 |
+| Q / 1-9 over upgrade slots; bound (not literal) keys | Exact (GX-3) | `BackpackScreen::onKey`, `NativeScreens.cpp`, `input/Hotkeys.cpp` | Inventory / drop / hotbar keys are read from the keyboard layout (`key.inventory`, `key.drop`, `key.hotbar.N`); drop and hotbar swap work on upgrade slots with SC's remove / install checks |
+| Jukebox playtime overlay updates smoothly | Exact (GX-3) | `tabs/jukebox` | The client advances the remaining time every frame between the server's whole-second updates (SC computes it from the game time) |
 | Crafting "Previous" tooltip on the left | Exact (GX-3) | `tabs/crafting`, `widgets/Tooltip.*` | SC LEFT_SIDE_TOOLTIP_POSITIONER |
 | LargeResultSelector, anvil name box, smithing help tooltips, stonecutter hit box details | Exact (GX-3) | `tabs/stonecutter`, `upgrade/anvil/AnvilTab.cpp`, `upgrade/smithing` | Scrollbar moves on drag only, centred "Search" hint (0xBBBBBB); anvil box padding 1 / 86 wide, right click doesn't clear; onboarding tooltips with an item carried; recipe tooltip hit box from x (clicks from x + 1). Alchemy disabled condition button: no background already (SC DISABLED_CONDITION blit only); left as audited |
 | Settings screens (main, memory, no sort, item display, templates) | Exact | `client/ui/settings`, `feature/gui` | Item Display preview draws the real 3D model (display entity with the backpack attachable and its display item) with SB's rotation and drag (GX-1). GX-3: the open tab id is kept on the storage (server side, removed when Keep Tab Open is off, like SC removeOpenTabIfKeepOff); Match-NBT memory slots take only the exact stack when sorting, in filter-by-storage and in the stash overlay |
