@@ -58,6 +58,9 @@ struct FilterDefaults {
 /// A tag as a ResourceLocation string: a tag without ':' is in the `minecraft` namespace, so
 /// "logs" and "minecraft:logs" are the same tag ("logs" -> "minecraft:logs").
 [[nodiscard]] std::string normalizeTag(std::string_view tag);
+/// `normalized` (a tag as `normalizeTag` returns it) names the same tag as `tag` (with or without a
+/// namespace). Doesn't allocate.
+[[nodiscard]] bool sameTag(std::string_view normalized, std::string_view tag);
 /// Normalizes (`normalizeTag`), sorts and de-duplicates tags in that order.
 void sortTags(std::vector<std::string>& tags);
 

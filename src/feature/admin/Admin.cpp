@@ -47,6 +47,7 @@
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/stack/StackUpgrade.h"
 
 ABP_REGISTER_CONFIG("admin", abp::admin::AdminConfig);
 
@@ -402,6 +403,11 @@ std::string pathOf(std::string_view id) {
 
 /// Name for SC's message: the upgrade group's SC name, else the upgrade's item name.
 std::string groupDisplayName(std::string_view group, Player* player) {
+    // SC upgrade group names -> our keys (SC's furnace group "furnace_upgrades" is translated as
+    // upgrade_group.cooking_upgrades).
+    if (group == "furnace_upgrades" || group == "cooking_upgrades") group = "cooking";
+    else if (group == "stack_upgrades") group = "stack";
+    else if (group == "jukebox_upgrades") group = "jukebox";
     auto key      = "abp.admin.upgrade_group." + std::string(group);
     auto fallback = std::string(group);
     if (group == "stack") fallback = "Stack Upgrades";
@@ -618,8 +624,18 @@ std::vector<std::string> carriedNow() {
 }
 
 namespace {
+/// Deletes stored backpacks for which `pred(backpack)` holds, skipping carried, protected and in-use
+/// ones. `skipUuid(uuid)` true = keep without loading the backpack.
+template <class Pred, class Skip>
+std::vector<std::string> removeWhere(Pred&& pred, Skip&& skipUuid);
+
 template <class Pred>
 std::vector<std::string> removeWhere(Pred&& pred) {
+    return removeWhere(std::forward<Pred>(pred), [](std::string const&) { return false; });
+}
+
+template <class Pred, class Skip>
+std::vector<std::string> removeWhere(Pred&& pred, Skip&& skipUuid) {
     std::vector<std::string> removed;
     auto&                    storage = game::Storage::get();
     auto                     list    = carriedNow();
@@ -628,7 +644,7 @@ std::vector<std::string> removeWhere(Pred&& pred) {
         for (auto& u : provider()) carried.insert(std::move(u));
     }
     for (auto const& uuid : storage.storedUuids()) {
-        if (carried.contains(uuid)) continue;
+        if (carried.contains(uuid) || skipUuid(uuid)) continue;
         auto bp = storage.find(uuid);
         if (!bp) continue;           // unreadable data stays untouched
         if (bp.use_count() > 2) continue; // cache + this reference: anything more is a user (menu, upgrade)
@@ -677,9 +693,12 @@ std::vector<std::string> dropEmptyStorages() {
     // Placed backpacks keep their storage (the block stands for it).
     std::unordered_set<std::string> placedUuids;
     for (auto const& e : placed::PlacedBackpacks::get().entries()) placedUuids.insert(e.uuid);
-    auto removed = removeWhere([&](game::Backpack& bp) {
-        return !placedUuids.contains(bp.uuid()) && !playerAccessed(bp) && holdsNothing(bp);
-    });
+    auto& accessLog = AccessLog::get();
+    // Accessed and placed backpacks are kept without loading them; the rest are loaded once.
+    auto removed = removeWhere(
+        [&](game::Backpack& bp) { return !holderOf(bp).first && holdsNothing(bp); },
+        [&](std::string const& uuid) { return placedUuids.contains(uuid) || accessLog.contains(uuid) || isLegacy(uuid); }
+    );
     log().info("admin: dropped {} empty, never accessed backpack storage(s) on load", removed.size());
     return removed;
 }
@@ -844,6 +863,18 @@ namespace {
 bool gDropEmptyPending = false;
 } // namespace
 
+void adoptLegacyStackLimit() {
+    auto& legacy = upgrade::stack::StackConfig::legacyStackLimit();
+    if (!legacy) return;
+    int   limit   = std::max(0, *legacy);
+    auto& entries = config::mut<SbServerConfig>().maxUpgradesPerStorage;
+    std::erase_if(entries, [](std::string const& e) { return e.starts_with("stack_upgrades|") || e.starts_with("stack|"); });
+    entries.push_back("stack_upgrades|" + std::to_string(limit));
+    legacy.reset();
+    config::saveAll();
+    log().info("admin: stack.json maxPerBackpack {} moved to maxUpgradesPerStorage (stack_upgrades|{})", limit, limit);
+}
+
 class AdminModule {
 public:
     void install() {
@@ -861,9 +892,11 @@ public:
         if (!reloadHooked) {
             reloadHooked = true;
             config::onReload([] {
+                adoptLegacyStackLimit();
                 if (gInstalled) applyRules();
             });
         }
+        adoptLegacyStackLimit(); // read at mod load, before this callback existed
         auto& bus = ll::event::EventBus::getInstance();
         mListeners.push_back(bus.emplaceListener<ll::event::ServerStartedEvent>([](auto&) { onWorld(); }));
         mListeners.push_back(bus.emplaceListener<ll::event::ServerStoppingEvent>([](auto&) { AccessLog::get().save(); }));

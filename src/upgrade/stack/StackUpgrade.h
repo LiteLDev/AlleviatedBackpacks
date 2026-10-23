@@ -48,6 +48,25 @@ struct StackConfig {
         "minecraft:red_shulker_box",
         "minecraft:black_shulker_box",
     };
+
+    /// Version 2 had `maxPerBackpack` (the "stack" group limit). SB keeps that limit in
+    /// `maxUpgradesPerStorage` (`stack_upgrades|3`): a changed value is handed to the admin unit,
+    /// which moves it there (`legacyStackLimit`).
+    template <class J>
+    static void migrate(J& data) {
+        if (!data.is_object() || !data.contains("maxPerBackpack")) return;
+        if (data["maxPerBackpack"].is_number_integer()) {
+            int old = data["maxPerBackpack"].template get<int>();
+            if (old != 3) legacyStackLimit() = old;
+        }
+        data.erase("maxPerBackpack");
+    }
+    /// A `maxPerBackpack` other than SB's 3 read from a version 2 `config/stack.json`, until the
+    /// admin unit has moved it into `maxUpgradesPerStorage`.
+    static std::optional<int>& legacyStackLimit() {
+        static std::optional<int> value;
+        return value;
+    }
 };
 
 /// One Stack upgrade / downgrade tier.

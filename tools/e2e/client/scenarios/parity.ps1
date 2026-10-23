@@ -100,7 +100,7 @@ Invoke-Chat '/gamemode survival'
 Invoke-Chat '/difficulty easy'
 Invoke-Chat '/replaceitem entity @s slot.armor.chest 0 alleviatedbackpacks:gold_backpack'
 Invoke-Chat '/tp @s ~ ~ ~ 0 15'
-Invoke-Chat '/summon piglin ~ ~ ~4 spawn_adult_melee'
+Invoke-Chat '/summon piglin ~ ~ ~4 0 0 spawn_adult_melee'
 Start-Sleep -Seconds 6
 $s = Get-Status
 Save-Screenshot 'piglin-gold-backpack' | Out-Null

@@ -100,7 +100,6 @@ DynamicResult dynamicBegin(std::string const& name, core::Tier tier);
 DynamicResult dynamicBeginFromTemplate(std::string const& name, std::string const& baseTemplate);
 /// `slot` -1 = add at the end; `upgrade` = upgrade slots.
 DynamicResult dynamicAdd(std::string const& name, int slot, core::ItemStackData const& item, bool upgrade);
-/// Ends the template: returns the backpack item (+ messages for items that didn't fit).
 /// An item a dynamic template couldn't take (SB's `%d x %s` message arguments).
 struct DynamicLeftover {
     int         count = 0;
@@ -111,6 +110,7 @@ struct DynamicEnd {
     std::vector<DynamicLeftover> leftovers;
     std::optional<ItemStack> item;
 };
+/// Ends the template: returns the backpack item (+ messages for items that didn't fit).
 DynamicEnd dynamicEnd(std::string const& name);
 [[nodiscard]] bool dynamicInUse(std::string const& name);
 /// Test hook: pretend `seconds` passed for the cache (expiry after 300 s without access).

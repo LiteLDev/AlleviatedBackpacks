@@ -87,7 +87,7 @@ std::vector<std::string> const& cachedTags(core::ItemStackData const& item) {
 
 bool TagProvider::hasTag(core::ItemStackData const& item, std::string_view tag) const {
     auto const& tags = cachedTags(item);
-    return std::find(tags.begin(), tags.end(), core::normalizeTag(tag)) != tags.end();
+    return std::any_of(tags.begin(), tags.end(), [&](std::string const& t) { return core::sameTag(t, tag); });
 }
 
 std::vector<std::string> TagProvider::tagsOf(core::ItemStackData const& item) const { return cachedTags(item); }

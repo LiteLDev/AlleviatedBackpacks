@@ -37,6 +37,7 @@
 #include "game/ItemConv.h"
 #include "game/Storage.h"
 #include "mod/Commands.h"
+#include "mod/I18n.h"
 #include "mod/Log.h"
 #include "upgrade/UpgradeManager.h"
 
@@ -45,15 +46,20 @@ namespace {
 
 Player* operatorOf(CommandOrigin const& origin, CommandOutput& output) {
     auto* e = origin.getEntity();
-    if (!e || !e->isPlayer() || !game::Storage::get().available()) {
-        output.error("players only");
+    if (!e || !e->isPlayer()) {
+        output.error(tr("abp.parity.players_only", "Only players can use this."));
         return nullptr;
     }
+    auto* player = static_cast<Player*>(e);
     if (origin.getPermissionsLevel() < CommandPermissionLevel::GameDirectors) {
-        output.error("operators only");
+        output.error(trFor(*player, "abp.parity.operators_only", "You need operator permission."));
         return nullptr;
     }
-    return static_cast<Player*>(e);
+    if (!game::Storage::get().available()) {
+        output.error(trFor(*player, "abp.parity.no_storage", "Backpack storage is not available."));
+        return nullptr;
+    }
+    return player;
 }
 
 void giveAt(Player& player, int slot, ItemStack stack) {
@@ -101,7 +107,7 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
         if (!player) return;
         auto bp = game::Storage::get().create(core::Tier::Diamond);
         if (!bp || !installById(bp, "crafting", 0) || !installById(bp, "jukebox", 1)) {
-            output.error("could not set up the backpack");
+            output.error(trFor(*player, "abp.parity.setup_failed", "Could not set up the backpack."));
             return;
         }
         game::Storage::get().save(*bp, true);
@@ -110,7 +116,7 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
         giveAt(*player, 2, upgradeItem("jukebox"));
         player->sendInventory(false);
         log().info("parity limits: gave diamond backpack {}", bp->uuid());
-        output.success("parity limits: gave diamond backpack " + bp->uuid());
+        output.success(trFor(*player, "abp.parity.limits", "parity limits: gave diamond backpack {}", bp->uuid()));
     });
     cmd.overload().text("parity").text("status").execute([](CommandOrigin const& origin, CommandOutput& output) {
         auto* player = operatorOf(origin, output);
@@ -126,14 +132,14 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
         auto line = "health=" + std::to_string(player->getHealth()) + " piglins=" + std::to_string(piglins)
                   + " targeting=" + std::to_string(targeting);
         log().info("parity status: {}", line);
-        output.success("parity status: " + line);
+        output.success(trFor(*player, "abp.parity.status", "parity status: {}", line));
     });
     cmd.overload().text("parity").text("everlasting").execute([](CommandOrigin const& origin, CommandOutput& output) {
         auto* player = operatorOf(origin, output);
         if (!player) return;
         auto bp = game::Storage::get().create(core::Tier::Gold);
         if (!bp || !installById(bp, "everlasting", 0)) {
-            output.error("could not set up the backpack");
+            output.error(trFor(*player, "abp.parity.setup_failed", "Could not set up the backpack."));
             return;
         }
         game::Storage::get().save(*bp, true);
@@ -143,25 +149,25 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
         Vec3  spot{static_cast<float>(x) + 0.5f, static_cast<float>(region.getAboveTopSolidBlock(x, z, false, false)) + 0.05f, static_cast<float>(z) + 0.5f};
         auto* actor = player->getLevel().getSpawner().spawnItem(region, game::makeBackpackItem(core::Tier::Gold, bp->uuid()), nullptr, spot, 0);
         if (!actor) {
-            output.error("could not drop the backpack");
+            output.error(trFor(*player, "abp.parity.drop_failed", "Could not drop the backpack."));
             return;
         }
         static_cast<ItemActor*>(actor)->pickupDelay() = 32767;
         log().info("parity everlasting: dropped {} at {:.2f} {:.2f} {:.2f}", bp->uuid(), spot.x, spot.y, spot.z);
-        output.success("parity everlasting: dropped " + bp->uuid());
+        output.success(trFor(*player, "abp.parity.everlasting", "parity everlasting: dropped {}", bp->uuid()));
     });
     cmd.overload().text("parity").text("explode").execute([](CommandOrigin const& origin, CommandOutput& output) {
         auto* player = operatorOf(origin, output);
         if (!player) return;
         auto* item = nearestEverlastingDrop(*player);
         if (!item) {
-            output.error("no everlasting backpack nearby");
+            output.error(trFor(*player, "abp.parity.no_everlasting", "No dropped Everlasting backpack nearby."));
             return;
         }
         auto id     = item->getOrCreateUniqueID();
         auto before = item->getPosition();
         (void)player->getLevel().explode(player->getDimensionBlockSource(), nullptr, before + Vec3{-1.5f, 0.2f, 0.0f}, 3.0f, false, false, 0.0f, true);
-        output.success("parity explode: boom");
+        output.success(trFor(*player, "abp.parity.explode", "parity explode: boom"));
         ll::coro::keepThis([id, before]() -> ll::coro::CoroTask<> {
             co_await ll::chrono::ticks(10);
             auto level = ll::service::getLevel();

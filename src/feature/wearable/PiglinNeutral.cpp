@@ -78,11 +78,16 @@ LL_TYPE_INSTANCE_HOOK(
         if (isGoldArmorFilter(filter)) {
             // The entry matched, so every part of it passes: as "none_of" it fails for this player,
             // and the entries after it get their turn. Restored before anything else runs.
-            auto saved                 = filter.mCollectionType;
+            // The filter belongs to the piglin definition (shared by every piglin): restored on
+            // every way out.
+            struct Restore {
+                FilterGroup&                group;
+                FilterGroup::CollectionType saved;
+                ~Restore() { group.mCollectionType = saved; }
+            } restore{filter, filter.mCollectionType};
             filter.mCollectionType = FilterGroup::CollectionType::Not;
-            matched                    = nullptr;
-            ok                         = origin(testMob, target, mustSee, &matched);
-            filter.mCollectionType = saved;
+            matched                = nullptr;
+            ok                     = origin(testMob, target, mustSee, &matched);
             if (!ok) gSkipped.fetch_add(1, std::memory_order_relaxed);
         }
     }

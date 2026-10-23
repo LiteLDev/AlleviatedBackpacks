@@ -127,6 +127,10 @@ TEST(FilterLogic, TagsWithoutNamespaceAreMinecraft) {
     EXPECT_EQ(abp::core::normalizeTag("minecraft:logs"), "minecraft:logs");
     EXPECT_EQ(abp::core::normalizeTag("c:wood"), "c:wood");
     EXPECT_EQ(abp::core::normalizeTag(""), "");
+    EXPECT_TRUE(abp::core::sameTag("minecraft:logs", "logs"));
+    EXPECT_TRUE(abp::core::sameTag("minecraft:logs", "minecraft:logs"));
+    EXPECT_FALSE(abp::core::sameTag("c:logs", "logs"));
+    EXPECT_FALSE(abp::core::sameTag("minecraft:logs2", "logs"));
     Filter f(1);
     EXPECT_TRUE(f.addTag("logs"));
     EXPECT_FALSE(f.addTag("minecraft:logs"));

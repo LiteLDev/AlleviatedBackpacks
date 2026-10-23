@@ -147,6 +147,10 @@ std::vector<std::string> removeNonPlayer(bool onlyWithEmptyInventory = false);
 /// access log record that hold nothing (no items, no upgrades, default colours and settings).
 /// Runs once per world load (logs the count). Placed, linked and in-use backpacks are kept.
 std::vector<std::string> dropEmptyStorages();
+/// `config/stack.json` version 2 had its own limit for the "stack" group: a changed value read by
+/// its migration moves into SB's `maxUpgradesPerStorage` (`stack_upgrades|N`, config saved).
+/// Runs on mod enable and after every config reload.
+void adoptLegacyStackLimit();
 /// Settings key marking an unopened mob backpack whose loot is still to be generated (counts as
 /// data for `dropEmptyStorages`).
 inline constexpr std::string_view kPendingLootSetting = "pendingLoot";

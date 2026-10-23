@@ -184,6 +184,13 @@ std::string normalizeTag(std::string_view tag) {
     return "minecraft:" + std::string(tag);
 }
 
+bool sameTag(std::string_view normalized, std::string_view tag) {
+    if (tag.find(':') != std::string_view::npos) return normalized == tag;
+    constexpr std::string_view kMinecraft = "minecraft:";
+    return normalized.size() == kMinecraft.size() + tag.size() && normalized.starts_with(kMinecraft)
+        && normalized.substr(kMinecraft.size()) == tag;
+}
+
 void sortTags(std::vector<std::string>& tags) {
     for (auto& t : tags) t = normalizeTag(t);
     std::sort(tags.begin(), tags.end(), [](std::string const& a, std::string const& b) { return tagLess(a, b); });
@@ -207,7 +214,7 @@ bool Filter::removeTag(std::string const& raw) {
 }
 
 bool Filter::hasTag(std::string_view tag) const {
-    return std::find(tags.begin(), tags.end(), normalizeTag(tag)) != tags.end();
+    return std::any_of(tags.begin(), tags.end(), [&](std::string const& t) { return sameTag(t, tag); });
 }
 
 std::vector<std::string> Filter::tagsToAdd(std::vector<std::string> itemTags) const {

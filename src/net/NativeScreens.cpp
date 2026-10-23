@@ -261,7 +261,9 @@ SlotError installError(Player& p, ui::BackpackMenu& menu, int slot, core::ItemSt
     // SB `maxUpgradesPerStorage` (SC checkUpgradePerStorageTypeLimit): highlight the upgrades of
     // the limited item / group already in the backpack.
     if (auto hit = admin::maxUpgradesHit(*menu.backpack(), info.itemId, info.groupOrId(), slot)) {
-        return {admin::maxUpgradesMessage(*hit, *menu.backpack(), info.itemId, info.groupOrId(), &p), hit->slots};
+        // Only when that limit is what refused it (another check may have answered first).
+        auto msg = admin::maxUpgradesMessage(*hit, *menu.backpack(), info.itemId, info.groupOrId(), &p);
+        if (msg == reason) return {std::move(msg), hit->slots};
     }
     return {reason, {slot}};
 }

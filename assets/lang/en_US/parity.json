@@ -1,0 +1,12 @@
+{
+  "abp.parity.players_only": "Only players can use this.",
+  "abp.parity.operators_only": "You need operator permission.",
+  "abp.parity.no_storage": "Backpack storage is not available.",
+  "abp.parity.setup_failed": "Could not set up the backpack.",
+  "abp.parity.drop_failed": "Could not drop the backpack.",
+  "abp.parity.no_everlasting": "No dropped Everlasting backpack nearby.",
+  "abp.parity.limits": "parity limits: gave diamond backpack {}",
+  "abp.parity.status": "parity status: {}",
+  "abp.parity.everlasting": "parity everlasting: dropped {}",
+  "abp.parity.explode": "parity explode: boom"
+}

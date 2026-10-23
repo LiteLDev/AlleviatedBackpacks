@@ -35,6 +35,7 @@
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/stack/StackUpgrade.h"
 
 namespace abp::admin {
 namespace {
@@ -283,6 +284,11 @@ ABP_REGISTER_SELFTEST("admin.sb_upgrade_limits", [](Context& ctx) {
     ctx.check(upgrade::canInstall(bp, 3, starter, nullptr), "stack limit raised by config");
     ctx.check(ctx.installUpgrade(bp, "smelting", 3) == 3 && ctx.installUpgrade(bp, "auto_blasting", 4) == 4, "two furnace upgrades with furnace_upgrades|2");
     ctx.check(ctx.installUpgrade(bp, "jukebox", 5) == 5 && ctx.installUpgrade(bp, "advanced_jukebox", 6) == 6, "two jukeboxes with jukebox_upgrades|2");
+    cfg.maxUpgradesPerStorage = {"furnace_upgrades|1"};
+    auto furnace              = ctx.createBackpack(Tier::Iron);
+    ctx.check(ctx.installUpgrade(furnace, "smelting", 0) == 0, "one furnace upgrade");
+    ctx.check(!upgrade::canInstall(furnace, 1, data("alleviatedbackpacks:blasting_upgrade", 1), nullptr, &reason), "a second one is refused");
+    ctx.check(contains(reason, "Only 1x Furnace Upgrades"), "SC group name (upgrade_group.cooking_upgrades): " + reason);
     cfg.maxUpgradesPerStorage = {"crafting_upgrade|0"};
     auto other = ctx.createBackpack(Tier::Iron);
     ctx.check(!upgrade::canInstall(other, 0, data("alleviatedbackpacks:crafting_upgrade", 1), nullptr, &reason), "|0 = not allowed");
@@ -325,6 +331,36 @@ ABP_REGISTER_SELFTEST("admin.drop_empty_on_load", [](Context& ctx) {
     ctx.check(!gone(coloured), "non-default data keeps it");
     ctx.check(!gone(loot), "an unopened mob backpack waiting for its loot keeps it");
     AccessLog::get().erase(accessed);
+});
+
+// config/stack.json v2 `maxPerBackpack` moves into SB's maxUpgradesPerStorage (stack_upgrades|N).
+ABP_REGISTER_SELFTEST("admin.stack_limit_migrates", [](Context& ctx) {
+    auto& sb         = config::mut<SbServerConfig>();
+    auto  savedSb    = sb.maxUpgradesPerStorage;
+    auto  savedStack = config::get<upgrade::stack::StackConfig>();
+    auto  path       = std::filesystem::temp_directory_path() / "abp_stack_migrate.json";
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << R"({"version":2,"maxPerBackpack":5,"tier1":2.0})";
+    }
+    for (auto const& e : config::ConfigRegistry::entries()) {
+        if (e.section == "stack") (void)e.load(path);
+    }
+    ctx.check(upgrade::stack::StackConfig::legacyStackLimit() == 5, "the old limit is read");
+    adoptLegacyStackLimit();
+    ctx.check(!upgrade::stack::StackConfig::legacyStackLimit().has_value(), "handed over once");
+    auto const& entries = sb.maxUpgradesPerStorage;
+    ctx.check(std::count(entries.begin(), entries.end(), std::string("stack_upgrades|5")) == 1, "stack_upgrades|5");
+    ctx.check(std::none_of(entries.begin(), entries.end(), [](std::string const& e) { return e == "stack_upgrades|3"; }), "SB default entry replaced");
+    std::ifstream in(path);
+    auto          written = nlohmann::json::parse(in, nullptr, false);
+    in.close();
+    ctx.check(written.value("version", 0) == 3 && !written.contains("maxPerBackpack"), "stack.json rewritten without the key");
+    sb.maxUpgradesPerStorage                     = savedSb;
+    config::mut<upgrade::stack::StackConfig>()   = savedStack;
+    config::saveAll(); // the adoption saved the test values
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 });
 
 ABP_REGISTER_SELFTEST("admin.enabled_items", [](Context& ctx) {
