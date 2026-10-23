@@ -4,7 +4,7 @@
 $expect = @(
     'templates.snbt_files', 'templates.export_pack',
     'sbsettings.memory_match_nbt_sort',
-    'mainscreen.open_tab_on_storage', 'mainscreen.kept_search_and_tab', 'mainscreen.upgrade_drag_and_switch', 'mainscreen.upgrade_slot_keys',
+    'mainscreen.open_tab_on_storage', 'mainscreen.kept_search_and_tab', 'mainscreen.upgrade_drag_and_switch', 'mainscreen.upgrade_slot_keys', 'mainscreen.linked_role_in_model',
     'stash.vanilla_station_slots',
     'tiers.smithing_without_durability', 'tiers.recipes_registered', 'tiers.lore_and_tint'
 )

@@ -382,7 +382,8 @@ private:
     /// Elapsed ticks now (20 per second since the last base), never past the disc's length.
     [[nodiscard]] double estimatedElapsed() const {
         if (mBaseAt < 0 || mPlaying < 0) return mElapsed;
-        return std::min<double>(mBaseTicks + (nowSeconds() - mBaseAt) * 20.0, mDuration);
+        // At most 2 s past the last server value: a stalled server stops the overlay too.
+        return std::min<double>({mBaseTicks + (nowSeconds() - mBaseAt) * 20.0, static_cast<double>(mElapsed) + 40.0, static_cast<double>(mDuration)});
     }
 };
 

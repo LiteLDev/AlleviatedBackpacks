@@ -106,7 +106,6 @@ char const* areaName(SlotRef::Area a) {
     }
 }
 
-/// "Name..." fitting into `maxWidth` (SC Label.getTruncatedText).
 /// SC getLinkedStorageEndpointRole as sent by the server: "primary", "secondary" or "" (not linked).
 std::string linkedRole(cs::BackpackScreenModel const& m) {
     auto it = m.extra.find("mainscreen");
@@ -120,6 +119,7 @@ float titleDecorationWidth(cs::BackpackScreenModel const& m) { return linkedRole
 constexpr float kRoleIconX = cs::geometry::kTitleX - 2;
 constexpr float kRoleIconY = cs::geometry::kTitleY + (9 - 16) / 2 - 1;
 
+/// "Name..." fitting into `maxWidth` (SC Label.getTruncatedText).
 std::string truncated(Painter& p, std::string const& text, float maxWidth) {
     if (p.textWidth(text) <= maxWidth) return text;
     std::string out = text;

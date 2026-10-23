@@ -872,30 +872,41 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
             auto const& content = bp->data().upgrades[static_cast<std::size_t>(idx)].item;
             if (!slot) return false;
             std::string reason;
-            if (!content.empty()) {
-                if (auto* type = upgrade::upgradeFor(content); type && !type->canRemove(upgrade::UpgradeContext(bp, idx, &player), reason)) {
-                    setError(*s, reason, {idx}, type->refusalStorageSlots(upgrade::UpgradeContext(bp, idx, &player)));
+            auto*       installed = content.empty() ? nullptr : upgrade::upgradeFor(content);
+            upgrade::UpgradeContext ctx(bp, idx, &player);
+            // Taking the upgrade out (drop, or a swap with an empty hotbar slot): SC mayPickup.
+            auto mayTake = [&] {
+                if (installed && !installed->canRemove(ctx, reason)) {
+                    setError(*s, reason, {idx}, installed->refusalStorageSlots(ctx));
                     return false;
                 }
-            }
+                return true;
+            };
             if (action == "drop") {
-                if (content.empty()) return false;
+                if (content.empty() || !mayTake()) return false;
                 ok = mm.simulateOn(player, act(ActionType::Drop, {Where::Menu, idx}, {}, 1), slot);
             } else {
                 int hb = body.value("hotbar", -1);
                 if (hb < 0 || hb > 8) return false;
                 if (menu->lockedInventorySlot && *menu->lockedInventorySlot == hb) return false;
                 auto const& in = player.getInventory().getItem(hb);
-                if (!in.isNull()) {
+                if (in.isNull()) {
+                    if (content.empty() || !mayTake()) return false;
+                } else {
                     auto data = game::ItemConv::toData(in).withCount(1);
                     if (in.mCount > 1 || !upgrade::upgradeFor(data)) return false; // one upgrade per slot
-                    if (content.empty() && !upgrade::canInstall(bp, idx, data, &player, &reason)) {
-                        auto e = installError(player, *menu, idx, data, reason);
-                        if (!e.message.empty()) setError(*s, std::move(e.message), std::move(e.upgradeSlots));
+                    if (content.empty()) {
+                        if (!upgrade::canInstall(bp, idx, data, &player, &reason)) {
+                            auto e = installError(player, *menu, idx, data, reason);
+                            if (!e.message.empty()) setError(*s, std::move(e.message), std::move(e.upgradeSlots));
+                            return false;
+                        }
+                    } else if (installed && !installed->canReplaceWith(ctx, data, reason)) {
+                        // A swap replaces the upgrade (like a click with it on the cursor).
+                        setError(*s, reason, {idx}, installed->refusalStorageSlots(ctx));
                         return false;
                     }
                 }
-                if (content.empty() && in.isNull()) return false;
                 ok = mm.simulateOn(player, act(ActionType::Swap, {Where::Menu, idx}, {Where::Inventory, hb}, 0), slot);
             }
             if (ok && !s->errorMessage.empty()) setError(*s, {}, {});

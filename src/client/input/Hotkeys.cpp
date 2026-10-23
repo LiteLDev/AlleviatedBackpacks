@@ -127,6 +127,19 @@ bool bound(std::size_t i, int code) {
     return false;
 }
 
+/// Up to KEYS_PER non-zero codes of an assigned mapping (none when it is unassigned).
+template <class Mapping>
+std::array<int, KEYS_PER> keysOf(Mapping const& mapping) {
+    std::array<int, KEYS_PER> keys{};
+    std::size_t               n = 0;
+    if (mapping.isAssigned()) {
+        for (int key : *mapping.mKeys) {
+            if (key != 0 && n < KEYS_PER) keys[n++] = key;
+        }
+    }
+    return keys;
+}
+
 /// Client thread: refresh gKeys from the (possibly remapped) keyboard layout.
 void readLayout(RemappingLayout const& layout) {
     auto const& defs = keyDefs();
@@ -134,13 +147,7 @@ void readLayout(RemappingLayout const& layout) {
         auto        action  = std::string{KEY_PREFIX} + std::string{defs[i].name};
         auto const& mapping = layout.getKeymappingByAction(action);
         if (*mapping.mAction != action) continue; // not in the layout: keep defaults
-        std::array<int, KEYS_PER> keys{};
-        std::size_t               n = 0;
-        if (mapping.isAssigned()) {
-            for (int key : *mapping.mKeys) {
-                if (key != 0 && n < KEYS_PER) keys[n++] = key;
-            }
-        }
+        auto keys = keysOf(mapping);
         for (std::size_t k = 0; k < KEYS_PER; ++k) gKeys[i][k] = keys[k];
     }
     // The game's own container-screen keys (vanilla screens follow the player's bindings).
@@ -149,14 +156,8 @@ void readLayout(RemappingLayout const& layout) {
         auto        action  = vanillaAction(i);
         auto const& mapping = layout.getKeymappingByAction(action);
         std::array<int, KEYS_PER> keys{};
-        if (*mapping.mAction != action) {
-            keys[0] = vanillaDefault(i); // not in the layout: the default
-        } else if (mapping.isAssigned()) {
-            std::size_t n = 0;
-            for (int key : *mapping.mKeys) {
-                if (key != 0 && n < KEYS_PER) keys[n++] = key;
-            }
-        }
+        if (*mapping.mAction != action) keys[0] = vanillaDefault(i); // not in the layout: the default
+        else keys = keysOf(mapping);
         for (std::size_t k = 0; k < KEYS_PER; ++k) gVanilla[i][k] = keys[k];
         vanilla += " " + action + "=" + std::to_string(keys[0]);
     }
