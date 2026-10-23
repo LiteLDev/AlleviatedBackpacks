@@ -80,7 +80,9 @@ void drawTooltip(
     float h = static_cast<float>(rows.size()) * LINE_H - (rows.empty() ? 0 : 1) + gap + (image ? image->height + (rows.empty() ? 0 : 1) : 0);
 
     float bx = x + 12, by = y - 12;
-    if (bx + w + 4 > screen.right() - MARGIN) bx = x - 16 - w;
+    bool  left = std::any_of(lines.begin(), lines.end(), [](TooltipLine const& l) { return l.leftSide; });
+    if (left) bx = std::max(x + 12 - 24 - w, screen.x + 4);
+    else if (bx + w + 4 > screen.right() - MARGIN) bx = x - 16 - w;
     bx = std::clamp(bx, screen.x + MARGIN + 4, std::max(screen.x + MARGIN + 4, screen.right() - MARGIN - 4 - w));
     by = std::clamp(by, screen.y + MARGIN + 4, std::max(screen.y + MARGIN + 4, screen.bottom() - MARGIN - 4 - h));
 

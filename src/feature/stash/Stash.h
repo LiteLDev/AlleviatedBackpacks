@@ -14,11 +14,13 @@
 // Slots are addressed by location (`{"area": "...", "slot": n}`):
 //   inventory 0-35, armor 0-3, offhand 0 - the player's own slots;
 //   container n                     - the open vanilla container (chest, barrel, shulker box, ...);
+//   vanilla.<container> n           - any other slot of the open vanilla screen (stashableContainer);
 //   storage n                       - the open backpack screen's storage.
 //
 // Thread: server thread.
 
 #include <optional>
+#include <string_view>
 #include <string>
 
 #include "nlohmann/json.hpp"
@@ -38,12 +40,25 @@ namespace abp::feature::stash {
 enum class Result { NoSpace = 0, Space = 1, MatchAndSpace = 2 };
 
 struct Location {
-    enum class Area { Inventory, Armor, Offhand, Container, Storage };
+    enum class Area { Inventory, Armor, Offhand, Container, Storage, Vanilla };
     Area area = Area::Inventory;
     int  slot = 0;
+    /// Area::Vanilla: the `ContainerEnumName` of the vanilla screen collection (the client maps
+    /// its collection name, e.g. "crafting_input_items"); on the wire the area is
+    /// "vanilla.<number>".
+    int container = -1;
 
     [[nodiscard]] bool operator==(Location const&) const = default;
 };
+
+/// GX-3: SB's overrideStackedOnOther / overrideOtherStackedOnMe work on any slot of any container
+/// menu. Besides the player's slots and chest-like containers, these vanilla screen containers
+/// (`ContainerEnumName` values) take part: the crafting grids, the furnace / blast furnace /
+/// smoker slots (taking from the result slot pops the furnace's experience, like vanilla), the
+/// brewing stand, anvil, smithing table, enchanting table, grindstone, stonecutter, cartography
+/// table, loom, beacon, villager trade inputs, crafter and horse equipment. Result previews
+/// (crafting output, anvil result, ...) are not slots items can be taken from, so they don't.
+[[nodiscard]] bool stashableContainer(int containerEnumName);
 
 [[nodiscard]] std::optional<Location> parseLocation(nlohmann::json const& j);
 [[nodiscard]] std::string            areaName(Location::Area area);

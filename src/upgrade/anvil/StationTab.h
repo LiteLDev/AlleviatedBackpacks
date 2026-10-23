@@ -82,9 +82,10 @@ public:
         return true;
     }
     void tooltip(float x, float y, std::vector<ui::TooltipLine>& out) const override {
-        if (!hovered(x, y) || !cursorEmpty()) return;
+        if (!hovered(x, y)) return;
         auto const* s = stack ? stack() : nullptr;
         if (s && !s->isNull()) {
+            if (!cursorEmpty()) return; // vanilla item tooltips need an empty cursor
             auto lines = ui::itemTooltipLines(*s);
             out.insert(out.end(), lines.begin(), lines.end());
         } else if (emptyTooltip) {

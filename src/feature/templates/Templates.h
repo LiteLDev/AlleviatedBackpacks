@@ -9,10 +9,11 @@
 //   `abp:settings_templates` and `abp:backpack_templates`), like SB's SavedData in the overworld.
 // - Bedrock has no data packs. Their equivalent is the "template packs" folder
 //   `<mod>/config/templates/`, laid out exactly like SB's data packs:
-//     <pack>/data/<namespace>/sophisticated_settingstemplates/<name>.json   settings templates
-//     <pack>/data/<namespace>/sophisticatedbackpacks_templates/<path>.json  backpack templates
-//   (SNBT files become JSON). It is read when the mod enables and on `/backpack reload`; exports
-//   (settings screen "Export", `/sbp template export`) are written there and registered at once.
+//     <pack>/data/<namespace>/sophisticated_settingstemplates/<name>.snbt   settings templates
+//     <pack>/data/<namespace>/sophisticatedbackpacks_templates/<path>.snbt  backpack templates
+//   SNBT like SB (Snbt.h); `.json` files of earlier exports are still read. It is read when the
+//   mod enables and on `/backpack reload`; exports (settings screen "Export", `/sbp template
+//   export`) are written there as `.snbt` and registered at once.
 
 #include <filesystem>
 #include <map>
@@ -54,7 +55,7 @@ using PackTemplates = std::map<std::string, std::map<std::string, nlohmann::json
 void putPackSettingsTemplate(std::string const& pack, std::string const& fileName, nlohmann::json settings);
 
 /// SC TemplatePersistanceContainer.exportTemplate after the name checks: writes
-/// `<root>/<player>_soph_templates/data/<player>_soph_templates/sophisticated_settingstemplates/<file>.json`
+/// `<root>/<player>_soph_templates/data/<player>_soph_templates/sophisticated_settingstemplates/<file>.snbt`
 /// and registers it. Returns the written path relative to the packs root, nullopt on I/O errors.
 [[nodiscard]] std::optional<std::string> exportSettingsTemplate(Player& player, std::string const& fileName, nlohmann::json const& settings);
 
@@ -74,7 +75,7 @@ void putPackSettingsTemplate(std::string const& pack, std::string const& fileNam
 [[nodiscard]] std::vector<std::string>      packBackpackTemplateNames();
 void setBackpackTemplate(std::string const& name, std::string const& itemId, nlohmann::json contents);
 void removeBackpackTemplate(std::string const& name);
-/// Writes `<root>/<ns>_backpack_templates/data/<ns>/sophisticatedbackpacks_templates/<path>.json`.
+/// Writes `<root>/<ns>_backpack_templates/data/<ns>/sophisticatedbackpacks_templates/<path>.snbt`.
 [[nodiscard]] std::optional<std::string> exportBackpackTemplate(std::string const& name, nlohmann::json const& data);
 
 /// The contents of `backpack` as a template's `backpackContents` (inventory, upgrades, settings,

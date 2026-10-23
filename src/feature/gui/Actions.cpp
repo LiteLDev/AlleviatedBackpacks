@@ -99,7 +99,8 @@ bool backpackHas(game::Backpack& bp, core::ItemStackData const& item, bool exact
         if (exact ? (!inv.at(i).empty() && inv.at(i).sameItem(item)) : core::memoryMatches(inv.at(i), item)) return true;
     }
     auto const& mem = memory(bp);
-    return std::any_of(mem.begin(), mem.end(), [&](core::ItemStackData const& m) { return core::memoryMatches(m, item); });
+    bool ignoreNbt = memoryIgnoresNbt(bp);
+    return std::any_of(mem.begin(), mem.end(), [&](core::ItemStackData const& m) { return memoryAccepts(ignoreNbt, m, item); });
 }
 
 TransferOptions transferOptions(ui::BackpackMenuContext const& c, bool matchingOnly) {
@@ -117,6 +118,7 @@ bool sortBackpack(game::Backpack& backpack, core::SortBy by) {
     core::SortLayout layout;
     layout.locked = noSort(backpack);
     layout.memory = memory(backpack);
+    layout.memoryMatchNbt = !memoryIgnoresNbt(backpack); // SC MemorySettingsCategory::matchesFilter
     return core::sortInventory(
         backpack.inventory(),
         core::comparatorFor(by, &game::ItemConv::tags(), [](core::ItemStackData const& d) { return itemDisplayName(d); }),
