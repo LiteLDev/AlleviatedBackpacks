@@ -383,6 +383,43 @@ PixelArt const kBackpackIcon{
      },
     {"D=3B2614", "B=8A5A2E", "L=B5824E", "G=E0C060"},
 };
+// Original art: corner brackets and side ticks marking an empty upgrade slot (opaque, like the
+// slot icon SC sets as the upgrade slots' noItemIcon).
+PixelArt const kEmptyUpgradeSlot{
+    {
+     "................",
+     ".OOO...OO...OOO.",
+     ".O............O.",
+     ".O............O.",
+     "................",
+     "................",
+     "................",
+     ".O............O.",
+     ".O............O.",
+     "................",
+     "................",
+     "................",
+     ".O............O.",
+     ".O............O.",
+     ".OOO...OO...OOO.",
+     "................",
+     },
+    {"O=262626"},
+};
+// Original art: two interlocked chain links (linked storage); the main endpoint adds a gold star.
+#define ABP_LINK_ROWS                                                                                                  \
+    ".DDDDDDDD.......", ".DLLLLLLD.......", ".DLDDDDLD.......", ".DLD..DDDDDDDDD.", ".DLD..DDLLLLLLD.",               \
+        ".DLDDDDDLDDDDLD.", ".DLLLLLDL....LD.", ".DDDDDDDL....LD.", ".......DLDDDDLD.", ".......DLLLLLLD.",           \
+        ".......DDDDDDDD.", "................", "................"
+PixelArt const kLinkedSecondary{
+    {"................", "................", "................", ABP_LINK_ROWS},
+    {"D=2B1B33", "L=AE8BC7"},
+};
+PixelArt const kLinkedPrimary{
+    {"............Y...", "...........YYY..", "............Y...", ABP_LINK_ROWS},
+    {"D=2B1B33", "L=AE8BC7", "Y=F2C94C"},
+};
+#undef ABP_LINK_ROWS
 PixelArt const kMemoryIcon{
     {
      "................",
@@ -716,6 +753,16 @@ void icon(Painter& p, Icon which, float x, float y, float alpha) {
         break;
     case Icon::KeepSearchOff:
         p.pixels(kKeepSearchOff, x, y, 1, L::Foreground, alpha);
+        break;
+    case Icon::EmptyUpgradeSlot:
+        // Drawn like a slot background (under the hover highlight), not as a foreground icon.
+        p.pixels(kEmptyUpgradeSlot, x, y, 1, L::Background, alpha);
+        break;
+    case Icon::LinkedPrimary:
+        p.pixels(kLinkedPrimary, x, y, 1, L::Foreground, alpha);
+        break;
+    case Icon::LinkedSecondary:
+        p.pixels(kLinkedSecondary, x, y, 1, L::Foreground, alpha);
         break;
     }
 }

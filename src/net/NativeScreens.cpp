@@ -17,6 +17,7 @@
 #include "core/Sorting.h"
 #include "feature/gui/Gui.h"
 #include "feature/gui/SbSettings.h"
+#include "feature/linked/Linked.h"
 #include "game/Backpack.h"
 #include "game/ItemConv.h"
 #include "mod/I18n.h"
@@ -721,6 +722,12 @@ BackpackScreenModel buildScreenModel(Player& player, ui::BackpackMenu& menu) {
     m.noSortColor     = core::kDyes[static_cast<std::size_t>(feature::gui::noSortColor(bp))].argb & 0xFFFFFF;
     m.extra["settings"] = feature::gui::settingsScreenJson(player, bp);
     m.extra["mainscreen"] = nlohmann::json{{"openTab", openTabOf(player, bp)}}; // kept open upgrade tab
+    // SC getLinkedStorageEndpointRole: the role icon before the title of a linked endpoint.
+    if (auto opened = menu.openedItem(player); !opened.empty()) {
+        if (auto role = linked::roleOf(game::ItemConv::toStack(opened, 1))) {
+            m.extra["mainscreen"]["linkedRole"] = *role == linked::Role::Primary ? "primary" : "secondary";
+        }
+    }
     return m;
 }
 
@@ -858,6 +865,41 @@ bool handleScreenAction(Player& player, nlohmann::json const& body) {
             ok          = clickMenuSlot(player, *menu, *s, area, idx, button, shift, ctrl);
             // A successful upgrade slot change replaces SC's error result (no overlay).
             if (ok && area == Area::Upgrade && !s->errorMessage.empty()) setError(*s, {}, {});
+        } else if (area == Area::Upgrade) {
+            // Vanilla doClick THROW / SWAP on an upgrade slot (SC StorageUpgradeSlot: mayPickup
+            // = canRemove, mayPlace = canInstall), with SC's error overlay on refusal.
+            auto        slot    = menu->upgradeSlot(idx);
+            auto const& content = bp->data().upgrades[static_cast<std::size_t>(idx)].item;
+            if (!slot) return false;
+            std::string reason;
+            if (!content.empty()) {
+                if (auto* type = upgrade::upgradeFor(content); type && !type->canRemove(upgrade::UpgradeContext(bp, idx, &player), reason)) {
+                    setError(*s, reason, {idx}, type->refusalStorageSlots(upgrade::UpgradeContext(bp, idx, &player)));
+                    return false;
+                }
+            }
+            if (action == "drop") {
+                if (content.empty()) return false;
+                ok = mm.simulateOn(player, act(ActionType::Drop, {Where::Menu, idx}, {}, 1), slot);
+            } else {
+                int hb = body.value("hotbar", -1);
+                if (hb < 0 || hb > 8) return false;
+                if (menu->lockedInventorySlot && *menu->lockedInventorySlot == hb) return false;
+                auto const& in = player.getInventory().getItem(hb);
+                if (!in.isNull()) {
+                    auto data = game::ItemConv::toData(in).withCount(1);
+                    if (in.mCount > 1 || !upgrade::upgradeFor(data)) return false; // one upgrade per slot
+                    if (content.empty() && !upgrade::canInstall(bp, idx, data, &player, &reason)) {
+                        auto e = installError(player, *menu, idx, data, reason);
+                        if (!e.message.empty()) setError(*s, std::move(e.message), std::move(e.upgradeSlots));
+                        return false;
+                    }
+                }
+                if (content.empty() && in.isNull()) return false;
+                ok = mm.simulateOn(player, act(ActionType::Swap, {Where::Menu, idx}, {Where::Inventory, hb}, 0), slot);
+            }
+            if (ok && !s->errorMessage.empty()) setError(*s, {}, {});
+            if (ok) log().info("native screen: {} key on upgrade slot {} by {}", action, idx, player.getRealName());
         } else if (action == "drop") {
             if (area != Area::Storage) return false;
             bool all = body.value("all", false);

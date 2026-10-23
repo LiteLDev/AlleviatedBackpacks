@@ -107,6 +107,19 @@ char const* areaName(SlotRef::Area a) {
 }
 
 /// "Name..." fitting into `maxWidth` (SC Label.getTruncatedText).
+/// SC getLinkedStorageEndpointRole as sent by the server: "primary", "secondary" or "" (not linked).
+std::string linkedRole(cs::BackpackScreenModel const& m) {
+    auto it = m.extra.find("mainscreen");
+    if (it == m.extra.end() || !it->is_object()) return {};
+    auto r = it->find("linkedRole");
+    return r != it->end() && r->is_string() ? r->get<std::string>() : std::string{};
+}
+/// SC getStorageTitleDecorationWidth: 14 for a linked endpoint.
+float titleDecorationWidth(cs::BackpackScreenModel const& m) { return linkedRole(m).empty() ? 0.f : 14.f; }
+/// SC renderStorageTitleDecoration: the role icon at (titleX - 2, titleY + (9 - 16) / 2 - 1) = (6, 2).
+constexpr float kRoleIconX = cs::geometry::kTitleX - 2;
+constexpr float kRoleIconY = cs::geometry::kTitleY + (9 - 16) / 2 - 1;
+
 std::string truncated(Painter& p, std::string const& text, float maxWidth) {
     if (p.textWidth(text) <= maxWidth) return text;
     std::string out = text;
@@ -239,15 +252,16 @@ public:
         // handled here rather than left to the host dialog scene: the dialog's own ESC handling is
         // not reliable (ignored under synthetic input), and an uncaptured key also reaches vanilla's
         // key bindings.
-        if (vk == VK_ESCAPE_ || vk == 'E') return true;
+        if (vk == VK_ESCAPE_ || input::vanillaKeyMatches(input::VanillaKey::Inventory, vk)) return true;
         using input::KeyAction;
         // Open Backpack closes a menu screen; captured so vanilla (B = emote) never sees it.
-        if (m->kind == "menu") return vk == 'Q' || (vk >= '1' && vk <= '9') || input::keyMatches(KeyAction::OpenBackpack, vk);
+        bool vanillaSlotKey = input::vanillaKeyMatches(input::VanillaKey::Drop, vk) || input::hotbarKeyIndex(vk) >= 0;
+        if (m->kind == "menu") return vanillaSlotKey || input::keyMatches(KeyAction::OpenBackpack, vk);
         if (input::keyMatches(KeyAction::OpenBackpack, vk) || input::keyMatches(KeyAction::Sort, vk)
             || input::keyMatches(KeyAction::TransferToStorage, vk) || input::keyMatches(KeyAction::TransferToInventory, vk)) {
             return true;
         }
-        return vk == 'Q' || (vk >= '1' && vk <= '9');
+        return vanillaSlotKey;
     }
 
     void render(Painter& p, FrameInfo const& f) override;
@@ -771,8 +785,12 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     sb::upgradeColumn(p, L - cs::geometry::kUpgradeInventoryOffset, T, static_cast<int>(m.upgrades.size()), switches);
 
     // Labels.
-    auto title = truncated(p, m.title, static_cast<float>(mLayout.titleMaxWidth()));
-    p.text(title, L + cs::geometry::kTitleX, T + cs::geometry::kTitleY - kFontDrop, Color::rgb(kTextColor));
+    float deco  = titleDecorationWidth(m);
+    auto  title = truncated(p, m.title, std::max(0.f, static_cast<float>(mLayout.titleMaxWidth()) - deco));
+    p.text(title, L + cs::geometry::kTitleX + deco, T + cs::geometry::kTitleY - kFontDrop, Color::rgb(kTextColor));
+    if (auto role = linkedRole(m); !role.empty()) {
+        sb::icon(p, role == "primary" ? sb::Icon::LinkedPrimary : sb::Icon::LinkedSecondary, L + kRoleIconX, T + kRoleIconY);
+    }
     p.text(
         ctr("abp.companion.screen.inventory", "Inventory"),
         L + static_cast<float>(mLayout.inventoryLabelX),
@@ -797,6 +815,7 @@ void BackpackScreenLayer::drawSlots(Painter& p, cs::BackpackScreenModel const& m
     for (std::size_t i = 0; i < mLayout.upgradeSlots.size(); ++i) {
         float x = L + static_cast<float>(mLayout.upgradeSlots[i].x), y = T + static_cast<float>(mLayout.upgradeSlots[i].y);
         if (i < mUpgradeStacks.size() && !mUpgradeStacks[i].isNull()) p.item(mUpgradeStacks[i], x, y);
+        else sb::icon(p, sb::Icon::EmptyUpgradeSlot, x, y); // SC upgrade slot noItemIcon
         if (mHover.area == SlotRef::Area::Upgrade && mHover.index == static_cast<int>(i)) highlight(x, y);
     }
 
@@ -990,9 +1009,23 @@ void BackpackScreenLayer::drawTooltips(Painter& p, cs::BackpackScreenModel const
         );
         return;
     }
+    // SC renderStorageTitleDecorationTooltip: the linked storage role.
+    if (auto role = linkedRole(m); !role.empty()) {
+        Rect icon{mLeft + kRoleIconX, mTop + kRoleIconY, 16, 16};
+        if (icon.contains(mx, my)) {
+            drawTooltip(
+                p,
+                {{role == "primary" ? ctr("abp.linked.tooltip.primary", "Main Linked") : ctr("abp.linked.tooltip.secondary", "Linked"), 0xFFFFFF}},
+                mx,
+                my
+            );
+            return;
+        }
+    }
     // Truncated title.
     if (!mSearch.focused() && mSearch.rect.w <= cs::geometry::kSearchMinWidth + 1) {
-        Rect titleRect{mLeft + cs::geometry::kTitleX, mTop + cs::geometry::kTitleY, static_cast<float>(mLayout.titleMaxWidth()), 9};
+        float deco = titleDecorationWidth(m);
+        Rect  titleRect{mLeft + cs::geometry::kTitleX + deco, mTop + cs::geometry::kTitleY, std::max(0.f, static_cast<float>(mLayout.titleMaxWidth()) - deco), 9};
         if (titleRect.contains(mx, my) && p.textWidth(m.title) > titleRect.w) {
             drawTooltip(p, {{m.title, 0xFFFFFF}}, mx, my);
             return;
@@ -1567,16 +1600,27 @@ bool BackpackScreenLayer::onKey(int vk, bool down) {
         send({{"action", "back"}});
         return true;
     }
-    if (vk == VK_ESCAPE_ || vk == 'E') {
+    if (vk == VK_ESCAPE_) {
         requestClose();
         return true;
     }
+    // Vanilla AbstractContainerScreen.keyPressed follows the player's bindings: the inventory key
+    // closes, the hotbar keys swap the hovered slot, the drop key throws it (Ctrl: the stack).
+    using input::VanillaKey;
+    int hotbar = input::hotbarKeyIndex(vk);
     if (m->kind == "menu" || mView == View::Settings) {
-        if (m->kind == "menu" && mHover.area == SlotRef::Area::Inventory) {
-            if (vk == 'Q') send({{"action", "drop"}, {"area", "inventory"}, {"index", mHover.index}, {"all", input::ctrlDown()}});
-            else if (vk >= '1' && vk <= '9') send({{"action", "hotbar"}, {"area", "inventory"}, {"index", mHover.index}, {"hotbar", vk - '1'}});
+        if (m->kind == "menu" && input::keyMatches(KeyAction::OpenBackpack, vk)) {
+            requestClose();
+            return true;
         }
-        if (input::keyMatches(KeyAction::OpenBackpack, vk) && m->kind == "menu") requestClose();
+        if (input::vanillaKeyMatches(VanillaKey::Inventory, vk)) {
+            requestClose();
+            return true;
+        }
+        if (m->kind == "menu" && mHover.area == SlotRef::Area::Inventory) {
+            if (input::vanillaKeyMatches(VanillaKey::Drop, vk)) send({{"action", "drop"}, {"area", "inventory"}, {"index", mHover.index}, {"all", input::ctrlDown()}});
+            else if (hotbar >= 0) send({{"action", "hotbar"}, {"area", "inventory"}, {"index", mHover.index}, {"hotbar", hotbar}});
+        }
         return true;
     }
     if (input::keyMatches(KeyAction::OpenBackpack, vk)) {
@@ -1597,11 +1641,16 @@ bool BackpackScreenLayer::onKey(int vk, bool down) {
         keySound("transfer_to_inventory");
         return true;
     }
-    if (mHover.area == SlotRef::Area::Storage || mHover.area == SlotRef::Area::Inventory) {
-        if (vk == 'Q') {
+    if (input::vanillaKeyMatches(VanillaKey::Inventory, vk)) {
+        requestClose();
+        return true;
+    }
+    // Upgrade slots too (vanilla: any hovered slot).
+    if (mHover.area == SlotRef::Area::Storage || mHover.area == SlotRef::Area::Inventory || mHover.area == SlotRef::Area::Upgrade) {
+        if (input::vanillaKeyMatches(VanillaKey::Drop, vk)) {
             send({{"action", "drop"}, {"area", areaName(mHover.area)}, {"index", mHover.index}, {"all", input::ctrlDown()}});
-        } else if (vk >= '1' && vk <= '9') {
-            send({{"action", "hotbar"}, {"area", areaName(mHover.area)}, {"index", mHover.index}, {"hotbar", vk - '1'}});
+        } else if (hotbar >= 0) {
+            send({{"action", "hotbar"}, {"area", areaName(mHover.area)}, {"index", mHover.index}, {"hotbar", hotbar}});
         }
     }
     return true;

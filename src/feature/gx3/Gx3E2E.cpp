@@ -24,6 +24,7 @@
 #include "mc/world/actor/player/Player.h"
 #include "mc/world/actor/player/PlayerUISlot.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/platform/UUID.h"
 
 #include "core/Tier.h"
 #include "game/Backpack.h"
@@ -31,6 +32,7 @@
 #include "game/ItemConv.h"
 #include "game/PlayerScan.h"
 #include "game/Storage.h"
+#include "feature/linked/Linked.h"
 #include "mod/Commands.h"
 #include "mod/Log.h"
 #include "upgrade/IUpgrade.h"
@@ -155,6 +157,35 @@ ABP_REGISTER_SUBCOMMAND([](ll::command::CommandHandle& cmd) {
         player->sendInventory(false);
         log().info("gx3 smithing ready");
         output.success("gx3 smithing ready");
+    });
+    // linked: hotbar 2 = the main endpoint of a new linked group (a copper backpack with 5
+    // diamonds), hotbar 3 = an empty copper backpack linked to it (secondary).
+    cmd.overload().text("gx3").text("linked").execute([](CommandOrigin const& origin, CommandOutput& output) {
+        auto* player = playerOf(origin, output);
+        if (!player) return;
+        auto main = game::Storage::get().create(core::Tier::Copper);
+        if (!main) {
+            output.error("could not create the backpack");
+            return;
+        }
+        main->inventory().set(0, game::ItemConv::toData(game::ItemConv::make("minecraft:diamond", 5)));
+        main->markDirty();
+        game::Storage::get().save(*main, true);
+        auto primary   = game::makeBackpackItem(core::Tier::Copper, main->uuid());
+        auto secondary = game::makeBackpackItem(core::Tier::Copper);
+        auto linker    = game::ItemConv::make(std::string(linked::kLinkerId), 1);
+        auto owner     = player->getUuid().asString();
+        auto r1        = linked::Service::get().link(owner, linker, primary);
+        auto r2        = linked::Service::get().link(owner, linker, secondary);
+        if (r1 != linked::LinkResult::Success || r2 != linked::LinkResult::Success) {
+            output.error("link failed: " + std::string(linked::resultName(r1)) + " / " + std::string(linked::resultName(r2)));
+            return;
+        }
+        game::setItemAt(*player, {game::ItemLocation::Kind::Inventory, 2}, primary);
+        game::setItemAt(*player, {game::ItemLocation::Kind::Inventory, 3}, secondary);
+        player->sendInventory(false);
+        log().info("gx3 linked ready: main {}", main->uuid());
+        output.success("gx3 linked ready");
     });
     cmd.overload().text("gx3").text("where").execute([](CommandOrigin const& origin, CommandOutput& output) {
         auto* player = playerOf(origin, output);

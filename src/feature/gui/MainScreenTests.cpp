@@ -290,6 +290,25 @@ ABP_REGISTER_SELFTEST("mainscreen.upgrade_drag_and_switch", [](Context& ctx) {
     ctx.check(st.value("mainscreen", json::object()).value("openTab", -1) == -1, "the open tab is dropped");
 });
 
+// GX-3: the hotbar and drop keys over an upgrade slot (vanilla SWAP / THROW on any slot).
+ABP_REGISTER_SELFTEST("mainscreen.upgrade_slot_keys", [](Context& ctx) {
+    auto& p  = ctx.player();
+    auto  bp = ctx.createBackpack(Tier::Gold);
+    clearInventory(p);
+    ctx.installUpgrade(bp, "magnet");
+    Companion c(p);
+    auto      s = open(ctx, p, bp);
+    ctx.check(act(p, s, "hotbar", {{"area", "upgrade"}, {"index", 0}, {"hotbar", 3}}), "hotbar key over the upgrade slot");
+    ctx.check(bp->data().upgrades[0].empty(), "upgrade taken out");
+    auto const& in = p.getInventory().getItem(3);
+    ctx.check(!in.isNull() && upgrade::upgradeFor(game::ItemConv::toData(in)) != nullptr, "into hotbar slot 4");
+    ctx.check(act(p, s, "hotbar", {{"area", "upgrade"}, {"index", 1}, {"hotbar", 3}}), "and back into another slot");
+    ctx.check(!bp->data().upgrades[1].empty() && p.getInventory().getItem(3).isNull(), "installed from the hotbar");
+    ctx.check(act(p, s, "drop", {{"area", "upgrade"}, {"index", 1}, {"all", false}}), "drop key over the upgrade slot");
+    ctx.check(bp->data().upgrades[1].empty(), "thrown out");
+    ctx.check(!act(p, s, "drop", {{"area", "upgrade"}, {"index", 1}, {"all", false}}), "nothing left to throw");
+});
+
 ABP_REGISTER_SELFTEST("mainscreen.error_overlay", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& p  = ctx.player();
     auto  bp = ctx.createBackpack(Tier::Iron);
