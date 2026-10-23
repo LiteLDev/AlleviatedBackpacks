@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the mod version comes from the latest tag
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/AppData/Local/.xmake
+          key: xmake-release-${{ hashFiles('xmake.lua', 'xmake-requires.lock') }}
+          restore-keys: |
+            xmake-release-
+            xmake-server-
+
+      - name: Setup LLVM
+        uses: ZhongRuoyu/setup-llvm@v0
+        with:
+          llvm-version: 22
+
+      - run: git config --global core.longpaths true
+
+      - run: xmake repo -u
+
+      - name: Build and unit tests
+        shell: pwsh
+        run: pwsh tools/build.ps1 -Target all -Tests
+
+      - name: Dump xmake package install logs
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem "$env:LOCALAPPDATA/.xmake/cache/packages" -Recurse -Filter install.txt -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "::group::$($_.FullName)"; Get-Content $_.FullName -Tail 400; Write-Host '::endgroup::' }
+
+      - name: Check version
+        shell: pwsh
+        run: |
+          $expected = "${{ github.ref_name }}".TrimStart('v')
+          foreach ($t in 'server', 'client') {
+            $manifest = Get-Content "bin/$t/AlleviatedBackpacks/manifest.json" | ConvertFrom-Json
+            if ($manifest.version -ne $expected) { throw "$t manifest version $($manifest.version) does not match tag $expected" }
+            if ($manifest.platform -ne $t) { throw "$t manifest platform is $($manifest.platform)" }
+          }
+          $tooth = (Get-Content tooth.json | ConvertFrom-Json).version
+          if ($tooth -ne $expected) { throw "tooth.json version $tooth does not match tag $expected" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          foreach ($t in 'server', 'client') {
+            Copy-Item COPYING, COPYING.LESSER, README.md -Destination "bin/$t/AlleviatedBackpacks/"
+            Compress-Archive -Path "bin/$t/AlleviatedBackpacks" -DestinationPath "alleviatedbackpacks-$t-windows-x64.zip"
+          }
+
+      - name: Release notes
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $lines = Get-Content CHANGELOG.md
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]").LineNumber
+          if (-not $start) { throw "CHANGELOG.md has no section for $version" }
+          $rest = $lines[$start..($lines.Count - 1)]
+          $end = ($rest | Select-String -Pattern '^## \[|^\[[^\]]+\]: ' | Select-Object -First 1).LineNumber
+          $body = if ($end) { $rest[0..($end - 2)] } else { $rest }
+          ($body -join "`n").Trim() | Set-Content RELEASE_NOTES.md -Encoding utf8
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            alleviatedbackpacks-server-windows-x64.zip
+            alleviatedbackpacks-client-windows-x64.zip
+          body_path: RELEASE_NOTES.md

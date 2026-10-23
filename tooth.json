@@ -1,0 +1,46 @@
+{
+  "format_version": 3,
+  "format_uuid": "289f771f-2c9a-4d73-9f3f-8492495a924d",
+  "tooth": "github.com/LiteLDev/AlleviatedBackpacks",
+  "version": "0.1.0",
+  "info": {
+    "name": "AlleviatedBackpacks",
+    "description": "Backpacks with upgrades for Minecraft Bedrock Edition: the gameplay of Sophisticated Backpacks",
+    "tags": ["platform:levilamina", "type:mod"]
+  },
+  "variants": [
+    {
+      "platform": "win-x64",
+      "dependencies": {
+        "github.com/LiteLDev/LeviLamina": "26.51.*"
+      },
+      "assets": [
+        {
+          "type": "zip",
+          "urls": ["https://{{tooth}}/releases/download/v{{version}}/alleviatedbackpacks-server-windows-x64.zip"],
+          "placements": [
+            { "type": "dir", "src": "AlleviatedBackpacks/", "dest": "plugins/AlleviatedBackpacks/" }
+          ]
+        }
+      ],
+      "preserve_files": ["plugins/AlleviatedBackpacks/config/*"]
+    },
+    {
+      "label": "client",
+      "platform": "win-x64",
+      "dependencies": {
+        "github.com/LiteLDev/LeviLamina#client": "26.51.*"
+      },
+      "assets": [
+        {
+          "type": "zip",
+          "urls": ["https://{{tooth}}/releases/download/v{{version}}/alleviatedbackpacks-client-windows-x64.zip"],
+          "placements": [
+            { "type": "dir", "src": "AlleviatedBackpacks/", "dest": "mods/AlleviatedBackpacks/" }
+          ]
+        }
+      ],
+      "preserve_files": ["mods/AlleviatedBackpacks/config/*"]
+    }
+  ]
+}
