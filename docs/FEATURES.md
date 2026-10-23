@@ -12,6 +12,7 @@ Statuses:
   are noted where they differ only in form (e.g. LevelDB instead of NBT files).
 - **Gap**: SB does something we don't do, or do differently. The row describes both sides.
 - **PLATFORM-LIMIT**: Bedrock (or LeviLamina) has no way to do what SB does; the row says why.
+- **Extra**: ours only (not in SB).
 - **N/A**: SB's compat with Java-only mods (Chipped, Sawmill; also Curios, Accessories, Botania,
   JEI/EMI/REI, Create, FTB Chunks, Mouse Tweaks, Inventory Sorter, ...) and Java-only internals.
 
