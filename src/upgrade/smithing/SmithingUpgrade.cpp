@@ -120,6 +120,7 @@ UpgradeInfo const& SmithingUpgrade::info() const {
         .itemId       = "alleviatedbackpacks:smithing_upgrade",
         .nameKey      = "abp.upgrade.smithing.name",
         .nameFallback = "Smithing Upgrade",
+        .maxPerBackpack = kUnlimitedPerBackpack, // SB: no limit
         .hasSettings  = true,
         .toggleable   = false,
     };

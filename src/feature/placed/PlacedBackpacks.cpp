@@ -627,6 +627,26 @@ bool PlacedBackpacks::placeFromHand(Player& player, BlockPos const& clicked, int
     return true;
 }
 
+int PlacedBackpacks::facingForDispenser(int dispenserFace) {
+    switch (dispenserFace) {
+    case 2: return 0; // dispenser north -> backpack faces south (back at the dispenser)
+    case 3: return 2; // south -> north
+    case 4: return 3; // west -> east
+    case 5: return 1; // east -> west
+    default: return 2; // up / down -> north
+    }
+}
+
+PlacedBackpacks::PlaceResult
+PlacedBackpacks::placeFromDispenser(BlockSource& region, BlockPos const& target, int dispenserFace, ItemStack& item) {
+    if (!game::isBackpack(item)) return PlaceResult::NotBackpack;
+    // SB DirectionalPlaceContext.canPlace + Level.isUnobstructed: replaceable and no entity in the way.
+    if (!region.isUnobstructedByEntities(AABB(target), nullptr)) return PlaceResult::Blocked;
+    auto result = place(region, target, item, facingForDispenser(dispenserFace));
+    if (result == PlaceResult::Ok) playSoundAt(region, target, "use.cloth", kWoolVolume, kWoolPitch);
+    return result;
+}
+
 bool PlacedBackpacks::pickUp(Player& player, BlockPos const& pos) {
     if (!player.canUseAbility(AbilitiesIndex::Build)) return false;
     auto& region = player.getDimensionBlockSource();

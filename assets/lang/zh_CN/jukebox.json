@@ -2,9 +2,9 @@
   "abp.upgrade.jukebox.name": "唱片机升级",
   "abp.upgrade.advanced_jukebox.name": "高级唱片机升级",
 
-  "abp.jukebox.tooltip": "§7便携式唱片机",
-  "abp.jukebox.advanced_tooltip1": "§7支持更多唱片的便携式唱片机",
-  "abp.jukebox.advanced_tooltip2": "§7还有更多播放选项",
+  "abp.jukebox.tooltip": "§7便携唱片机",
+  "abp.jukebox.advanced_tooltip1": "§7支持更多唱片的便携唱片机",
+  "abp.jukebox.advanced_tooltip2": "§7当然还有更多播放选项",
   "abp.jukebox.tab": "唱片机",
   "abp.jukebox.tab.tooltip": "唱片机",
   "abp.jukebox.tab.advanced_tooltip": "高级唱片机",
@@ -14,11 +14,11 @@
   "abp.jukebox.stop": "停止",
   "abp.jukebox.previous": "上一首",
   "abp.jukebox.next": "下一首",
-  "abp.jukebox.shuffle_on": "随机播放已启用",
-  "abp.jukebox.shuffle_off": "随机播放已禁用",
+  "abp.jukebox.shuffle_on": "启用随机播放",
+  "abp.jukebox.shuffle_off": "关闭随机播放",
   "abp.jukebox.repeat_all": "全部循环",
   "abp.jukebox.repeat_one": "单曲循环",
-  "abp.jukebox.no_repeat": "循环已禁用",
+  "abp.jukebox.no_repeat": "关闭循环",
   "abp.jukebox.no_disc": "请先在唱片机中放入一张唱片。",
   "abp.jukebox.not_carried": "需要携带（或放置）背包才能播放音乐。"
 }

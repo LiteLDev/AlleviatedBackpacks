@@ -5,12 +5,12 @@
   "abp.void.tab.advanced": "高级虚空",
   "abp.void.tab.tooltip": "虚空设置",
   "abp.void.tab.advanced.tooltip": "高级虚空设置",
-  "abp.void.button.works_in_gui": "在界面中同样生效",
-  "abp.void.button.only_automatic": "仅对其他升级/自动化生效",
+  "abp.void.button.works_in_gui": "在GUI中工作",
+  "abp.void.button.only_automatic": "仅与其他升级/自动化方式（如漏斗）配合工作",
   "abp.void.button.void_always": "总是销毁",
-  "abp.void.button.void_slot_overflow": "销毁槽位溢出",
-  "abp.void.button.void_slot_overflow.detail": "允许一个槽位装满该物品\n并销毁所有溢出的部分",
-  "abp.void.button.void_storage_overflow": "销毁存储溢出",
-  "abp.void.button.void_storage_overflow.detail": "允许整个存储装满该物品\n并销毁所有溢出的部分",
-  "abp.void.button.void_always_disabled": "“总是销毁”选项已被禁用"
+  "abp.void.button.void_slot_overflow": "销毁槽位过量",
+  "abp.void.button.void_slot_overflow.detail": "允许一个槽位填满物品\n销毁所有过量物品",
+  "abp.void.button.void_storage_overflow": "销毁存储过量",
+  "abp.void.button.void_storage_overflow.detail": "允许整体存储空间填满物品\n销毁所有过量物品",
+  "abp.void.button.void_always_disabled": "总是销毁选项已关闭"
 }

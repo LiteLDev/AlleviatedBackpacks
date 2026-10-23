@@ -70,6 +70,7 @@
 
 #include "core/WorldRules.h"
 #include "feature/admin/AccessLog.h"
+#include "feature/admin/Admin.h"
 #include "feature/admin/SbConfig.h"
 #include "feature/wearable/Wearable.h"
 #include "feature/wearable/WearableConfig.h"
@@ -463,6 +464,8 @@ bool consumePendingLoot(ItemStack& stack) {
     auto bp = game::Storage::get().find(*uuid);
     if (!bp) return false;
     fillBackpack(bp, *loot);
+    if (bp->data().settings.is_object()) bp->data().settings.erase(std::string(admin::kPendingLootSetting));
+    bp->markDirty();
     setUserData(stack, [](CompoundTag& tag) { tag.remove(kPendingLootKey); });
     return true;
 }
@@ -554,7 +557,15 @@ bool equipMob(Mob& mob, std::optional<core::Tier> forcedTier, std::optional<bool
             rest.lootFactor = loot.lootFactor;
             rest.dimension  = loot.dimension;
             rest.seed       = loot.seed;
-            if (!rest.table.empty()) setPendingLoot(backpack, rest);
+            if (!rest.table.empty()) {
+                setPendingLoot(backpack, rest);
+                // The storage exists before its loot: mark it so load-time cleanup keeps it (SB
+                // keeps the stack's loot table data with the backpack).
+                if (bp) {
+                    bp->data().settings[std::string(admin::kPendingLootSetting)] = true;
+                    bp->markDirty();
+                }
+            }
         }
     }
     // Health before the potions: Bedrock's health boost effect then adds on top of the raised max

@@ -136,6 +136,14 @@ public:
     /// Sneak + use with a backpack in the main hand on `clicked` / `face`: places it. In creative
     /// the placed backpack is a clone with a new uuid and the item stays in the hand (SB).
     bool placeFromHand(Player& player, BlockPos const& clicked, int face);
+    /// SB BackpackDispenseBehavior: a dispenser facing `dispenserFace` (Facing: 0 down, 1 up,
+    /// 2 north, 3 south, 4 west, 5 east) places `item` (count 1) at `target`, the block in front of
+    /// it. The backpack faces the dispenser (north when the dispenser faces up or down). On `Ok`
+    /// the caller removes the item from the dispenser; on failure nothing happens.
+    PlaceResult placeFromDispenser(BlockSource& region, BlockPos const& target, int dispenserFace, ItemStack& item);
+    /// Our facing (0 south, 1 west, 2 north, 3 east) of a backpack placed by a dispenser facing
+    /// `dispenserFace` (SB: the opposite of the dispenser's direction; north for up / down).
+    [[nodiscard]] static int facingForDispenser(int dispenserFace);
     /// Fills / drains the backpack's tanks with the fluid container in the main hand (SB
     /// BackpackBlock.useItemOn). True if the click was a fluid container on a backpack with tanks.
     bool useFluidContainer(Player& player, BlockPos const& pos);

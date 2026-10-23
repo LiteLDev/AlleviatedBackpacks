@@ -206,6 +206,35 @@ ABP_REGISTER_SELFTEST("everlasting.world_hazards", [](Context& ctx) -> ll::coro:
     ctx.check(drops.get(nBoom) == nullptr, "plain backpack is blown up");
 });
 
+// SB EverlastingBackpackItemEntity.ignoreExplosion: explosions don't push it either.
+ABP_REGISTER_SELFTEST("everlasting.explosion_knockback", [](Context& ctx) -> ll::coro::CoroTask<> {
+    auto& player = ctx.player();
+    co_await placed::test::toGround(ctx, player); // the client's test player spawns above the world
+    auto  p = makePair(ctx);
+    Drops drops(player);
+    auto const& pp   = player.getPosition();
+    int         bx   = static_cast<int>(std::floor(pp.x)) + 14;
+    int         bz   = static_cast<int>(std::floor(pp.z)) + 6;
+    auto&       bs   = player.getDimensionBlockSource();
+    int         y    = bs.getAboveTopSolidBlock(bx, bz, false, false);
+    Vec3        spot{static_cast<float>(bx) + 0.5f, static_cast<float>(y) + 0.05f, static_cast<float>(bz) + 0.5f};
+    auto        e = drops.spawn(ctx.backpackItem(*p.everlasting), 0.0f);
+    ctx.require(drops.get(e) != nullptr, "everlasting item spawned");
+    drops.get(e)->teleport(spot, drops.get(e)->getDimensionId());
+    co_await ctx.ticks(20); // settle on the ground
+    ctx.require(drops.get(e) != nullptr, "still there");
+    auto before = drops.get(e)->getPosition();
+    // 1.5 blocks west of it, at its height: a plain item there would be thrown east.
+    (void)player.getLevel().explode(bs, nullptr, before + Vec3{-1.5f, 0.2f, 0.0f}, 3.0f, false, false, 0.0f, true);
+    co_await ctx.ticks(4);
+    auto* a = drops.get(e);
+    ctx.require(a != nullptr, "survives the explosion");
+    auto  after = a->getPosition();
+    float moved = std::sqrt((after.x - before.x) * (after.x - before.x) + (after.z - before.z) * (after.z - before.z));
+    ctx.info("everlasting item moved " + std::to_string(moved) + " blocks horizontally");
+    ctx.check(moved < 0.05f, "not pushed by the explosion (moved " + std::to_string(moved) + ")");
+});
+
 ABP_REGISTER_SELFTEST("everlasting.indestructible", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& player = ctx.player();
     co_await ctx.ticks(10); // let the simulated player and its chunks load

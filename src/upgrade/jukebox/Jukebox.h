@@ -22,15 +22,32 @@ class Player;
 
 namespace abp::upgrade::jukebox {
 
-/// `config/jukebox.json` (SC `JukeboxUpgradeConfig` of the advanced jukebox).
+/// SC `JukeboxUpgradeConfig` (SB section `advancedJukeboxUpgrade`).
+struct AdvancedJukeboxConfig {
+    /// Disc slots of the advanced jukebox (default 12, 1..16).
+    int numberOfSlots = 12;
+    /// Disc slots per row in the advanced jukebox's tab (default 4, 1..6).
+    int slotsInRow = 4;
+};
+
+/// `config/jukebox.json`, keys as SB's `sophisticatedbackpacks-server` config.
 struct JukeboxConfig {
-    int  version = 2;
-    /// Disc slots of the advanced jukebox (SC `numberOfSlots`: default 12, 1..16).
-    int  advancedSlots = 12;
-    /// Disc slots per row in the advanced jukebox's tab (SC `slotsInRow`: default 4, 1..6).
-    int  advancedSlotsInRow = 4;
+    int                   version = 3;
+    AdvancedJukeboxConfig advancedJukeboxUpgrade;
     /// Note particles above a playing backpack.
     bool particles = true;
+
+    /// Version 2 had flat keys `advancedSlots` / `advancedSlotsInRow`.
+    template <class J>
+    static void migrate(J& data) {
+        if (!data.is_object()) return;
+        for (auto [from, to] : {std::pair{"advancedSlots", "numberOfSlots"}, std::pair{"advancedSlotsInRow", "slotsInRow"}}) {
+            if (!data.contains(from)) continue;
+            if (!data["advancedJukeboxUpgrade"].is_object()) data["advancedJukeboxUpgrade"] = J::object();
+            data["advancedJukeboxUpgrade"][to] = data[from];
+            data.erase(from);
+        }
+    }
 };
 
 inline constexpr std::string_view kBasicId          = "jukebox";

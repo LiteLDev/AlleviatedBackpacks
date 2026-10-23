@@ -16,7 +16,8 @@ Statuses:
 - **N/A**: only SB's compat with Java-only mods (Chipped, Sawmill; also Curios, Accessories,
   Botania, JEI/EMI/REI, Create, FTB Chunks, Mouse Tweaks, Inventory Sorter, ...).
 
-"GX-4" in a row means the gap was found and fixed by the parity audit (this revision).
+"GX-4" in a row means the gap was found and fixed by the parity audit; "GX-5" marks the gaps from
+that audit closed afterwards.
 
 ## Items, tiers and recipes
 
@@ -47,16 +48,16 @@ Statuses:
 | `BackpackItem.cloneBackpack` -> `cloneSubbackpacks` (creative placement) | Gap | `PlacedBackpacks::placeFromHand` | SB gives nested backpacks of the clone new storages; ours copies the data, so nested backpacks share uuids with the originals |
 | `inventoryTick` skips spectators and the dead | Exact (GX-4) | `game/PlayerTicker.cpp` | |
 | `onDroppedByPlayer` (the open backpack can't be dropped) | Exact | `net/NativeScreens.cpp` | |
-| `makesPiglinsNeutral` (gold backpack worn) | Gap | | Bedrock piglins only check golden armour |
+| `makesPiglinsNeutral` (gold backpack worn) | Exact (GX-5) | `feature/wearable/PiglinNeutral.cpp` | A worn Gold Backpack counts as gold armour: the piglin's "player without golden armour" target entry is skipped for its wearer (`TargetGoal::_matchesTargetTypes`); its other entries (open container, block breaking, hurt-by) still anger it, as in SB |
 | `createEntity` / UUID deduplication | Exact | `feature/dedup` | |
-| Everlasting item entity (no despawn, floats from void/lava, fire immune, particles) | Exact | `upgrade/everlasting` | Wither/dragon: GX-2. Explosion knock-back (`ignoreExplosion`) is unverified |
+| Everlasting item entity (no despawn, floats from void/lava, fire immune, particles) | Exact | `upgrade/everlasting` | Wither/dragon: GX-2. Explosions no longer push it (`ignoreExplosion`, GX-5: Bedrock pushed it 1.6 blocks; `Explosion::explode` now restores its motion) |
 | `BackpackBlock`: open, sneak pick-up, comparator, waterlogging, states, hardness, pistons | Exact | `feature/placed` | |
 | `BackpackBlock.useItemOn` with a fluid container: fill/drain tanks, bucket sounds; a bucket does nothing without tanks | Exact (GX-4) | `PlacedBackpacks::useFluidContainer` | Before: no sound; a bucket on a backpack without tanks opened the GUI |
-| Dispenser places a backpack (`BackpackDispenseBehavior`) | Gap | | |
+| Dispenser places a backpack (`BackpackDispenseBehavior`) | Exact (GX-5) | `feature/placed/Dispense.cpp` | In front of the dispenser, facing it (north for up / down); nothing happens (the backpack stays) when it can't be placed |
 | `BackpackBlockEntity`: placed ticks, hopper/automation I/O, `noConnectionBlocks`, loot on first access | Exact | `feature/placed`, `feature/admin/Connections.cpp` | |
-| `BackpackStorage` drops empty, never-accessed storages on load | Gap | `game/Storage.cpp` | `removeNonPlayer` is exact |
+| `BackpackStorage` drops empty, never-accessed storages on load | Exact (GX-5) | `admin::dropEmptyStorages` | Once per world load (first tick), count logged. No access-log record and no items, upgrades, colours or settings; unopened mob backpacks waiting for loot carry a marker and are kept. Placed backpacks keep their storage. `removeNonPlayer` is exact |
 | `BackpackAccessLogger`, `/sbp list/give/removeNonPlayer` | Exact | `feature/admin` | Bedrock chat has no click/hover events |
-| Backpack templates (`/sbp template ...`) | Exact | `feature/templates` | GX-3: settings and backpack templates are exported as SNBT (`.snbt`, like SB); older `.json` exports still load |
+| Backpack templates (`/sbp template ...`) | Exact | `feature/templates` | GX-3: settings and backpack templates are exported as SNBT (`.snbt`, like SB); older `.json` exports still load. Leftover messages take SB's two arguments (`%d x %s`, GX-5) |
 | Opening another player's worn backpack | Exact | `feature/access` | |
 | Mob backpacks (spawn chances, weights, loot, potions, armour, jukebox, drops) | Exact | `feature/wearable/MobBackpacks.cpp` | Mob jukebox disc count follows `advancedJukeboxUpgrade` size (GX-4). Converted-mob health, creeper buff strip, jukebox follow: GX-2 |
 | Too-many-backpacks slowness, `onlyWornBackpackTriggersUpgrades` | Exact | `feature/nerf` | |
@@ -71,7 +72,7 @@ Statuses:
 | Pickup / Advanced Pickup | Exact | `upgrade/pickup` | |
 | Filter / Advanced Filter (direction, contents filter) | Exact | `upgrade/filter` | |
 | Several Filter upgrades combine as SC `FilteredItemHandler` (OR of allow lists, else AND) | Exact (GX-4) | `FilterUpgrade.cpp` | Before: always AND |
-| Filter logic (item/mod/tags, durability, NBT, any/all tags, primary match) | Exact | `core/Filter.*`, `upgrade/filter/FilterCommon.cpp` | |
+| Filter logic (item/mod/tags, durability, NBT, any/all tags, primary match) | Exact | `core/Filter.*`, `upgrade/filter/FilterCommon.cpp` | A tag without a namespace is `minecraft:` (ResourceLocation), so `logs` and `minecraft:logs` are one tag (GX-5) |
 | Tag list order (TreeSet<ResourceLocation>: path, then namespace) | Exact (GX-4) | `core::tagLess` | Before: plain string order |
 | Magnet / Advanced Magnet (range 3/5, cooldowns, XP into tanks) | Exact | `upgrade/magnet` | |
 | Feeding / Advanced Feeding | Exact | `upgrade/feeding` | |
@@ -81,7 +82,7 @@ Statuses:
 | Refill / Advanced Refill (6/12 slots, targets, pick block) | Exact | `upgrade/refill` | Slot counts configurable in `config/refill.json` (GX-4) |
 | Stack upgrades (starter..omega, downgrades, conversions) | Exact | `upgrade/stack` | |
 | Smelting / Smoking / Blasting and Auto versions | Exact | `upgrade/cooking` | Flame / smoke particles and the furnace crackle (10% per render call) on worn and placed backpacks; placed ones at Java's animateTick rate (GX-1) |
-| Crafting | Exact | `upgrade/crafting` | Several per backpack: see the limits row |
+| Crafting | Exact | `upgrade/crafting` | Several per backpack, each with its own grid, results and open-tab state (GX-5) |
 | Stonecutter (SC `blockconverter` base) | Exact | `upgrade/stonecutter` | |
 | Jukebox / Advanced Jukebox | Exact | `upgrade/jukebox` | |
 | Tank (capacity, I/O rates, container slots, cooldown) | Exact | `upgrade/tank` | Tank bars use the game's animated still textures (water_still_grey tinted 0x3F76E4, lava_still, milk, potions tinted by potion colour; frame-blended flipbooks) (GX-1). SB's red error overlay on tank / battery bars when a Stack Upgrade removal / swap / downgrade check fails (GX-1). Model tanks: the real animated sprites (water_still, lava_still, grey water for milk / potions); per-potion tint on the 3D model is PLATFORM-LIMIT: attachables get their shader constants once per attachable (`ActorShaderManager::setEntityConstants`, measured: one call per attachable, render-controller `color` / `overlay_color` / `uv_anim` never reach it) and the change colours already carry the cloth / border colours |
@@ -96,7 +97,7 @@ Statuses:
 | Advanced Tool Swapper filter with TAGS mode (SC FilterLogicControl.Advanced) | Exact (GX-4) | `client/ui/tabs/toolswapper`, `toolswapper/Upgrades.cpp` | Slot count from `config/toolswapper.json` `toolSwapperUpgrade` |
 | Anvil, Smithing | Exact | `upgrade/anvil`, `upgrade/smithing` | |
 | Mob Catcher / Advanced Mob Catcher | Exact | `upgrade/mobcatcher` | Config list defaults are empty, as in SB (GX-4). Captured mobs keep their actor properties (climate variants, ...) in the preview, and SB's 5-tick shrink-into-the-backpack capture animation plays before the poof / pop (GX-1) |
-| Upgrade limits per backpack: SB only limits through `maxUpgradesPerStorage` (stack 3, furnace 1, jukebox 1) and its conflict rules | Gap | `IUpgrade.h` `maxPerBackpack` | Crafting, stonecutter, anvil, smithing and refill are limited to 1 per backpack; cooking, jukebox and stack have built-in limits that config can't raise |
+| Upgrade limits per backpack: SB only limits through `maxUpgradesPerStorage` (stack 3, furnace 1, jukebox 1) and its conflict rules | Exact (GX-5) | `admin::maxUpgradesHit`, `NativeScreens.cpp` `installError` | Upgrades SB doesn't limit have `kUnlimitedPerBackpack`; the three groups follow the config (item entries before group entries, `\|0` = not allowed), and a refusal highlights the upgrades of that item / group (SC `checkUpgradePerStorageTypeLimit`). `StackConfig::maxPerBackpack` is gone |
 | Chipped / Sawmill compat upgrades | N/A | | Java-only mods |
 
 ## Configuration
@@ -106,7 +107,7 @@ Statuses:
 | `sophisticatedbackpacks-server.json`: disallowed items, container items, no-interaction/no-connection blocks, slot counts, entity additions, nerfs, `maxUpgradesPerStorage`, fluid handler, other-player opening, item display, dedup, `canBePlacedInContainerItems` | Exact | `allowOpeningOtherPlayerBackpacks` and `itemDisplayDisabled` were split with `gui.json`: both files now count (off in either = off) (GX-4) |
 | `sophisticatedbackpacks-common.json` `chestLootEnabled`, `sophisticatedcore-common.json` `enabledItems` | Exact | |
 | Per-upgrade sections (filter slots, ranges, multipliers, tank/battery/pump/xp pump, cooking, compacting, inception, mob catcher) | Exact | Refill and Tool Swapper sections added (GX-4) |
-| Jukebox `advancedJukeboxUpgrade.numberOfSlots/slotsInRow`, Alchemy `alchemyUpgrade.filterSlots` | Gap | Same values, but flat key names (`advancedSlots`, `alchemyFilterSlots`) instead of SB's sections |
+| Jukebox `advancedJukeboxUpgrade.numberOfSlots/slotsInRow`, Alchemy `alchemyUpgrade.filterSlots` / `advancedAlchemyUpgrade.filterSlots` | Exact (GX-5) | SB's section names (`config/jukebox.json` v3, `config/alchemy.json` v2); the old flat keys migrate |
 | SC client `sortButtonsPosition`, `playButtonSound` | Exact | `client/ui/screen/ScreenConfig.*` |
 | Unopened backpack lore uses the configured slot counts | Exact (GX-4) | `TierLore.cpp` |
 
@@ -144,6 +145,7 @@ Statuses:
 
 All 548 SB/SC strings in scope match SB's English (Java config-screen and compat strings are N/A).
 GX-4 added the Infinity / Survival Infinity tooltips and the three "already in another upgrade slot"
-messages. Messages now use SB's "Backpack" for the leather tier. Our zh_CN is an independent
-translation: every string has one, but about 220 are worded differently from SB's zh_cn.json
-(e.g. item names such as 压缩升级 vs SB's 压制升级). That is a Gap if SB's Chinese wording is required.
+messages. Messages now use SB's "Backpack" for the leather tier. zh_CN (GX-5): every string that has
+an SB / SC `zh_cn.json` equivalent uses SB's exact text (342 strings in the mod lang files and the
+resource pack `texts.d`, e.g. 压制升级, 铜制背包, 空白升级); strings SB doesn't have keep our own
+translation.

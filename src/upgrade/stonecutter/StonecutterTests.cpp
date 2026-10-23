@@ -139,6 +139,27 @@ ABP_REGISTER_SELFTEST("stonecutter.input_travels_with_item", [](Context& ctx) {
     ctx.check(inputOf(u2).count == 5 && selectedOption(u2).has_value(), "input and recipe restored");
 });
 
+ABP_REGISTER_SELFTEST("stonecutter.two_upgrades_independent", [](Context& ctx) {
+    auto& player = ctx.player();
+    clearPlayer(player);
+    auto bp = ctx.createBackpack(Tier::Gold);
+    int  s0 = ctx.installUpgrade(bp, std::string(crafting::kStonecutterId), 0);
+    int  s1 = ctx.installUpgrade(bp, std::string(crafting::kStonecutterId), 1);
+    ctx.require(s0 == 0 && s1 == 1, "two stonecutter upgrades installed (SB: no limit)");
+    UpgradeContext a(bp, s0), b(bp, s1);
+    NativeScreen   screen(ctx, player, bp);
+    setCursor(player, game::ItemConv::make("minecraft:stone", 3));
+    screen.tab(s1, {{"input", true}, {"button", 0}});
+    ctx.check(inputOf(b).count == 3 && inputOf(a).empty(), "input goes into the clicked upgrade only");
+    int bricks = optionIndex(b, "minecraft:stone_bricks");
+    screen.tab(s1, {{"recipe", bricks}});
+    ctx.check(selectedIndex(b) == bricks && selectedIndex(a) == -1, "selection per upgrade");
+    setInput(a, data("minecraft:stone", 1));
+    ctx.check(selectedIndex(a) == -1 && selectedIndex(b) == bricks, "the first keeps its own (no) selection");
+    setCursor(player, ItemStack::EMPTY_ITEM());
+    clearPlayer(player);
+});
+
 ABP_REGISTER_SELFTEST("stonecutter.shift_into_open_tab", [](Context& ctx) {
     auto& player = ctx.player();
     clearPlayer(player);

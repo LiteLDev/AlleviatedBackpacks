@@ -583,7 +583,7 @@ DynamicEnd dynamicEnd(std::string const& name) {
     core::AccessContext ctx{core::Source::Internal, {}};
     for (auto const& item : d->forInventory) {
         auto r = d->data.inventory.insert(item, ctx);
-        if (!r.remainder.empty()) out.leftovers.push_back(std::to_string(r.remainder.count) + " x [" + stackName(r.remainder) + "]");
+        if (!r.remainder.empty()) out.leftovers.push_back({r.remainder.count, "[" + stackName(r.remainder) + "]"});
     }
     for (auto const& item : d->forUpgrades) {
         bool placed = false;
@@ -595,7 +595,7 @@ DynamicEnd dynamicEnd(std::string const& name) {
                 break;
             }
         }
-        if (!placed) out.leftovers.push_back(std::to_string(item.count) + " x [" + stackName(item) + "]");
+        if (!placed) out.leftovers.push_back({item.count, "[" + stackName(item) + "]"});
     }
     d->forInventory.clear();
     d->forUpgrades.clear();

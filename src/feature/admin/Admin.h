@@ -60,6 +60,27 @@ struct AdminConfig {
     Player*               player,
     std::string*          reason
 );
+/// One SB `maxUpgradesPerStorage` limit reached by adding an upgrade (SC
+/// `checkUpgradePerStorageTypeLimit`): the limit (0 = not allowed in this storage), whether it is
+/// the item's own entry (else the group's) and the upgrade slots already counting against it
+/// (the slots SC highlights).
+struct UpgradeLimitHit {
+    int              max    = 0;
+    bool             byItem = false;
+    std::vector<int> slots;
+};
+/// The limit one more upgrade (`upgradeItemId`, `group`) would exceed, ignoring upgrade slot
+/// `excludeSlot`; nullopt when it fits.
+[[nodiscard]] std::optional<UpgradeLimitHit>
+maxUpgradesHit(game::Backpack const& backpack, std::string_view upgradeItemId, std::string_view group, int excludeSlot = -1);
+/// SC's message for `hit` ("Only 3x Stack Upgrades can be used in Backpack", "... can't be used in ...").
+[[nodiscard]] std::string maxUpgradesMessage(
+    UpgradeLimitHit const& hit,
+    game::Backpack const&  backpack,
+    std::string_view       upgradeItemId,
+    std::string_view       group,
+    Player*                player
+);
 /// "Iron Backpack" (the item name of a tier, in `player`'s language when given).
 [[nodiscard]] std::string backpackDisplayName(core::Tier tier, Player const* player = nullptr);
 /// How many levels of backpacks the backpack `uuid` contains (0 = none). Stops counting above `limit`.
@@ -122,6 +143,17 @@ resolveUuid(std::string const& input, std::string* errorKey = nullptr, std::stri
 /// items, no upgrades, no other data). Linked-storage groups and backpacks in use are kept.
 /// Returns the removed uuids.
 std::vector<std::string> removeNonPlayer(bool onlyWithEmptyInventory = false);
+/// SB BackpackStorage.load (`isPlayerBackpackOrNotEmpty`): deletes stored backpacks without an
+/// access log record that hold nothing (no items, no upgrades, default colours and settings).
+/// Runs once per world load (logs the count). Placed, linked and in-use backpacks are kept.
+std::vector<std::string> dropEmptyStorages();
+/// `config/stack.json` version 2 had its own limit for the "stack" group: a changed value read by
+/// its migration moves into SB's `maxUpgradesPerStorage` (`stack_upgrades|N`, config saved).
+/// Runs on mod enable and after every config reload.
+void adoptLegacyStackLimit();
+/// Settings key marking an unopened mob backpack whose loot is still to be generated (counts as
+/// data for `dropEmptyStorages`).
+inline constexpr std::string_view kPendingLootSetting = "pendingLoot";
 /// Removes stored backpacks that hold nothing (no items, no upgrades, default colours) and that
 /// nobody is using right now. Items bound to them get fresh storage on next open. Returns the uuids.
 std::vector<std::string> cleanupEmpty();

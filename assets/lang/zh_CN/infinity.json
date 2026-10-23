@@ -1,9 +1,9 @@
 {
   "abp.upgrade.infinity.name": "无限升级（管理员）",
-  "abp.upgrade.survival_infinity.name": "生存无限升级",
-  "abp.infinity.error.any_upgrade_exists": "所有升级槽位都必须为空",
-  "abp.infinity.error.no_upgrade_can_be_added": "无法添加任何升级",
-  "abp.infinity.error.only_admin_remove": "只有管理员可以移除无限升级",
-  "abp.infinity.status.only_admin_break": "§c只有管理员可以破坏装有无限升级的背包",
-  "abp.infinity.status.only_admin_pickup": "§c只有管理员可以拾起装有无限升级的背包"
+  "abp.upgrade.survival_infinity.name": "生存模式无限升级",
+  "abp.infinity.error.any_upgrade_exists": "所有升级插槽必须为空",
+  "abp.infinity.error.no_upgrade_can_be_added": "无法加装升级",
+  "abp.infinity.error.only_admin_remove": "只有管理员可移除无限升级",
+  "abp.infinity.status.only_admin_break": "§c只有管理员可破坏装有无限升级的背包",
+  "abp.infinity.status.only_admin_pickup": "§c只有管理员可拾取装有无限升级的背包"
 }

@@ -1,16 +1,16 @@
 {
-  "abp.pump.name": "泵升级",
-  "abp.pump.advanced.name": "高级泵升级",
-  "abp.pump.tab": "泵",
+  "abp.pump.name": "液泵升级",
+  "abp.pump.advanced.name": "高级液泵升级",
+  "abp.pump.tab": "液泵",
   "abp.pump.tab.tooltip": "泵",
-  "abp.pump.advanced.tab": "高级泵",
+  "abp.pump.advanced.tab": "高级液泵",
   "abp.pump.advanced.tab.tooltip": "高级泵",
   "abp.pump.button.input": "输入",
   "abp.pump.button.output": "输出",
-  "abp.pump.button.interact_with_world": "作用于世界",
-  "abp.pump.button.do_not_interact_with_world": "不作用于世界",
-  "abp.pump.button.interact_with_hand": "作用于\n手中的流体容器",
-  "abp.pump.button.do_not_interact_with_hand": "不作用于\n手中的流体容器",
-  "abp.pump.button.interact_with_tanks_and_pipes": "作用于储罐和管道",
-  "abp.pump.button.do_not_interact_with_tanks_and_pipes": "不作用于储罐和管道"
+  "abp.pump.button.interact_with_world": "与世界中方块交互",
+  "abp.pump.button.do_not_interact_with_world": "不与世界中方块交互",
+  "abp.pump.button.interact_with_hand": "与手持流体容器交互",
+  "abp.pump.button.do_not_interact_with_hand": "不与手持流体容器交互",
+  "abp.pump.button.interact_with_tanks_and_pipes": "与储罐&管道交互",
+  "abp.pump.button.do_not_interact_with_tanks_and_pipes": "不与与储罐&管道交互"
 }

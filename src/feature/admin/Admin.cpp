@@ -34,6 +34,7 @@
 #include "mc/world/level/storage/db_helpers/Category.h"
 
 #include "core/Codec.h"
+#include "feature/placed/PlacedBackpacks.h"
 #include "core/Format.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
@@ -46,6 +47,7 @@
 #include "ui/menu/BackpackMenu.h"
 #include "ui/menu/MenuManager.h"
 #include "upgrade/UpgradeManager.h"
+#include "upgrade/stack/StackUpgrade.h"
 
 ABP_REGISTER_CONFIG("admin", abp::admin::AdminConfig);
 
@@ -401,6 +403,11 @@ std::string pathOf(std::string_view id) {
 
 /// Name for SC's message: the upgrade group's SC name, else the upgrade's item name.
 std::string groupDisplayName(std::string_view group, Player* player) {
+    // SC upgrade group names -> our keys (SC's furnace group "furnace_upgrades" is translated as
+    // upgrade_group.cooking_upgrades).
+    if (group == "furnace_upgrades" || group == "cooking_upgrades") group = "cooking";
+    else if (group == "stack_upgrades") group = "stack";
+    else if (group == "jukebox_upgrades") group = "jukebox";
     auto key      = "abp.admin.upgrade_group." + std::string(group);
     auto fallback = std::string(group);
     if (group == "stack") fallback = "Stack Upgrades";
@@ -419,12 +426,16 @@ std::string backpackDisplayName(core::Tier tier, Player const* player) {
     return player ? trFor(*player, key, fb) : tr(key, fb);
 }
 
-bool withinMaxUpgrades(game::Backpack const& backpack, std::string_view itemId, std::string_view group, Player* player, std::string* reason) {
+std::optional<UpgradeLimitHit>
+maxUpgradesHit(game::Backpack const& backpack, std::string_view itemId, std::string_view group, int excludeSlot) {
     auto const& entries = sbServer().maxUpgradesPerStorage;
-    if (entries.empty()) return true;
+    if (entries.empty()) return std::nullopt;
     auto itemPath  = pathOf(itemId);
     auto groupName = lower(group);
     auto alias     = sbGroupAlias(groupName);
+    // SC getUpgradesPerStorage / getUpgradesInGroupPerStorage: the first matching entry wins,
+    // Integer.MAX_VALUE without one.
+    std::optional<int> itemMax, groupMax;
     for (auto const& e : entries) {
         auto bar = e.find('|');
         if (bar == std::string::npos) continue;
@@ -435,32 +446,52 @@ bool withinMaxUpgrades(game::Backpack const& backpack, std::string_view itemId, 
         } catch (...) {
             continue;
         }
-        bool byItem  = name == itemPath;
-        bool byGroup = !byItem && (name == groupName || (!alias.empty() && name == alias));
-        if (!byItem && !byGroup) continue;
-        int count = 0;
-        for (auto const& s : backpack.data().upgrades) {
-            if (s.empty()) continue;
-            if (byItem && pathOf(s.item.id) == itemPath) ++count;
-            if (byGroup) {
-                if (auto* u = upgrade::upgradeFor(s.item); u && lower(u->info().groupOrId()) == groupName) ++count;
-            }
-        }
-        if (count < max) continue;
-        if (reason) {
-            auto what = byItem ? std::string(itemId) : groupDisplayName(groupName, player);
-            if (byItem) {
-                if (auto* u = upgrade::upgradeFor(core::ItemStackData::of(std::string(itemId), 1))) {
-                    what = upgrade::displayName(*u, player);
-                }
-            }
-            auto storage = backpackDisplayName(backpack.tier(), player);
-            *reason      = player ? trFor(*player, "abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", max, what, storage)
-                                  : tr("abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", max, what, storage);
-        }
-        return false;
+        if (!itemMax && name == itemPath) itemMax = max;
+        else if (!groupMax && (name == groupName || (!alias.empty() && name == alias))) groupMax = max;
     }
-    return true;
+    if (!itemMax && !groupMax) return std::nullopt;
+    // SC checkUpgradePerStorageTypeLimit: 0 = not allowed at all; then the item's own limit
+    // (slots holding this item), then the group's (slots holding any upgrade of the group).
+    if (itemMax && *itemMax == 0) return UpgradeLimitHit{0, true, {}};
+    if (groupMax && *groupMax == 0) return UpgradeLimitHit{0, false, {}};
+    std::vector<int> sameItem, sameGroup;
+    auto const&      slots = backpack.data().upgrades;
+    for (int i = 0; i < static_cast<int>(slots.size()); ++i) {
+        auto const& s = slots[static_cast<std::size_t>(i)];
+        if (s.empty() || i == excludeSlot) continue;
+        if (pathOf(s.item.id) == itemPath) sameItem.push_back(i);
+        if (auto* u = upgrade::upgradeFor(s.item); u && lower(u->info().groupOrId()) == groupName) sameGroup.push_back(i);
+    }
+    if (itemMax && static_cast<int>(sameItem.size()) >= *itemMax) return UpgradeLimitHit{*itemMax, true, std::move(sameItem)};
+    if (groupMax && static_cast<int>(sameGroup.size()) >= *groupMax) return UpgradeLimitHit{*groupMax, false, std::move(sameGroup)};
+    return std::nullopt;
+}
+
+std::string maxUpgradesMessage(
+    UpgradeLimitHit const& hit,
+    game::Backpack const&  backpack,
+    std::string_view       itemId,
+    std::string_view       group,
+    Player*                player
+) {
+    std::string what = hit.byItem ? std::string(itemId) : groupDisplayName(lower(group), player);
+    if (hit.byItem) {
+        if (auto* u = upgrade::upgradeFor(core::ItemStackData::of(std::string(itemId), 1))) what = upgrade::displayName(*u, player);
+    }
+    auto storage = backpackDisplayName(backpack.tier(), player);
+    if (hit.max == 0) {
+        return player ? trFor(*player, "abp.mainscreen.error.add.upgrade_not_allowed", "{0} can't be used in {1}", what, storage)
+                      : tr("abp.mainscreen.error.add.upgrade_not_allowed", "{0} can't be used in {1}", what, storage);
+    }
+    return player ? trFor(*player, "abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", hit.max, what, storage)
+                  : tr("abp.admin.only_x_upgrades_allowed", "Only {}x {} can be used in {}", hit.max, what, storage);
+}
+
+bool withinMaxUpgrades(game::Backpack const& backpack, std::string_view itemId, std::string_view group, Player* player, std::string* reason) {
+    auto hit = maxUpgradesHit(backpack, itemId, group);
+    if (!hit) return true;
+    if (reason) *reason = maxUpgradesMessage(*hit, backpack, itemId, group, player);
+    return false;
 }
 
 int nestedDepth(std::string const& uuid, int limit) { return depthRec(uuid, limit, 0); }
@@ -593,8 +624,18 @@ std::vector<std::string> carriedNow() {
 }
 
 namespace {
+/// Deletes stored backpacks for which `pred(backpack)` holds, skipping carried, protected and in-use
+/// ones. `skipUuid(uuid)` true = keep without loading the backpack.
+template <class Pred, class Skip>
+std::vector<std::string> removeWhere(Pred&& pred, Skip&& skipUuid);
+
 template <class Pred>
 std::vector<std::string> removeWhere(Pred&& pred) {
+    return removeWhere(std::forward<Pred>(pred), [](std::string const&) { return false; });
+}
+
+template <class Pred, class Skip>
+std::vector<std::string> removeWhere(Pred&& pred, Skip&& skipUuid) {
     std::vector<std::string> removed;
     auto&                    storage = game::Storage::get();
     auto                     list    = carriedNow();
@@ -603,7 +644,7 @@ std::vector<std::string> removeWhere(Pred&& pred) {
         for (auto& u : provider()) carried.insert(std::move(u));
     }
     for (auto const& uuid : storage.storedUuids()) {
-        if (carried.contains(uuid)) continue;
+        if (carried.contains(uuid) || skipUuid(uuid)) continue;
         auto bp = storage.find(uuid);
         if (!bp) continue;           // unreadable data stays untouched
         if (bp.use_count() > 2) continue; // cache + this reference: anything more is a user (menu, upgrade)
@@ -617,27 +658,48 @@ std::vector<std::string> removeWhere(Pred&& pred) {
 }
 } // namespace
 
+namespace {
+/// SB BackpackStorage.hasItems / hasOtherBackpackData: no items, no upgrades and nothing else
+/// stored (default colours, no settings but our own bookkeeping). Unopened mob backpacks waiting
+/// for their loot carry a settings marker (`kPendingLootSetting`), so they count as having data.
+bool holdsNothing(game::Backpack& bp) {
+    auto const& d = bp.data();
+    if (!bp.inventory().isEmpty()) return false;
+    for (auto const& u : d.upgrades)
+        if (!u.empty()) return false;
+    core::BackpackData const defaults;
+    if (d.mainColor != defaults.mainColor || d.accentColor != defaults.accentColor) return false;
+    if (d.settings.is_object()) {
+        for (auto const& [k, _] : d.settings.items())
+            if (k != kSettingsKey) return false;
+    }
+    return true;
+}
+} // namespace
+
 std::vector<std::string> removeNonPlayer(bool onlyWithEmptyInventory) {
-    auto const& log_ = AccessLog::get();
     auto removed = removeWhere([&](game::Backpack& bp) {
         // SB: no access log record (and, with onlyWithEmptyInventory, no items, no upgrades and no
         // other backpack data). Backpacks players had before the access log existed count as
         // accessed (legacy / holder records) so updating never deletes them.
-        if (log_.contains(bp.uuid()) || holderOf(bp).first || isLegacy(bp.uuid())) return false;
-        if (!onlyWithEmptyInventory) return true;
-        auto const& d = bp.data();
-        if (!bp.inventory().isEmpty()) return false;
-        for (auto const& u : d.upgrades)
-            if (!u.empty()) return false;
-        core::BackpackData const defaults;
-        if (d.mainColor != defaults.mainColor || d.accentColor != defaults.accentColor) return false;
-        if (d.settings.is_object()) {
-            for (auto const& [k, _] : d.settings.items())
-                if (k != kSettingsKey) return false;
-        }
-        return true;
+        if (playerAccessed(bp)) return false;
+        return !onlyWithEmptyInventory || holdsNothing(bp);
     });
     if (!removed.empty()) log().info("admin: removed {} non player backpacks", removed.size());
+    return removed;
+}
+
+std::vector<std::string> dropEmptyStorages() {
+    // Placed backpacks keep their storage (the block stands for it).
+    std::unordered_set<std::string> placedUuids;
+    for (auto const& e : placed::PlacedBackpacks::get().entries()) placedUuids.insert(e.uuid);
+    auto& accessLog = AccessLog::get();
+    // Accessed and placed backpacks are kept without loading them; the rest are loaded once.
+    auto removed = removeWhere(
+        [&](game::Backpack& bp) { return !holderOf(bp).first && holdsNothing(bp); },
+        [&](std::string const& uuid) { return placedUuids.contains(uuid) || accessLog.contains(uuid) || isLegacy(uuid); }
+    );
+    log().info("admin: dropped {} empty, never accessed backpack storage(s) on load", removed.size());
     return removed;
 }
 
@@ -796,6 +858,23 @@ void migrateHolderRecords() {
 
 // ---- module -------------------------------------------------------------------------------------------
 
+namespace {
+/// SB BackpackStorage.load: empty, never accessed storages are dropped once per world load.
+bool gDropEmptyPending = false;
+} // namespace
+
+void adoptLegacyStackLimit() {
+    auto& legacy = upgrade::stack::StackConfig::legacyStackLimit();
+    if (!legacy) return;
+    int   limit   = std::max(0, *legacy);
+    auto& entries = config::mut<SbServerConfig>().maxUpgradesPerStorage;
+    std::erase_if(entries, [](std::string const& e) { return e.starts_with("stack_upgrades|") || e.starts_with("stack|"); });
+    entries.push_back("stack_upgrades|" + std::to_string(limit));
+    legacy.reset();
+    config::saveAll();
+    log().info("admin: stack.json maxPerBackpack {} moved to maxUpgradesPerStorage (stack_upgrades|{})", limit, limit);
+}
+
 class AdminModule {
 public:
     void install() {
@@ -813,9 +892,11 @@ public:
         if (!reloadHooked) {
             reloadHooked = true;
             config::onReload([] {
+                adoptLegacyStackLimit();
                 if (gInstalled) applyRules();
             });
         }
+        adoptLegacyStackLimit(); // read at mod load, before this callback existed
         auto& bus = ll::event::EventBus::getInstance();
         mListeners.push_back(bus.emplaceListener<ll::event::ServerStartedEvent>([](auto&) { onWorld(); }));
         mListeners.push_back(bus.emplaceListener<ll::event::ServerStoppingEvent>([](auto&) { AccessLog::get().save(); }));
@@ -874,6 +955,7 @@ private:
         AccessLog::get().load();
         loadOrMarkLegacy();
         migrateHolderRecords();
+        gDropEmptyPending = true; // on the first tick, once every unit has loaded the world
         if (auto level = ll::service::getLevel()) {
             level->forEachPlayer([](Player& p) {
                 if (!p.isClientSide()) loadStash(p);
@@ -884,6 +966,14 @@ private:
 
     void tick(Level& level) {
         ++mTicks;
+        if (gDropEmptyPending && game::Storage::get().available()) {
+            gDropEmptyPending = false;
+            try {
+                (void)dropEmptyStorages();
+            } catch (std::exception const& e) {
+                log().error("admin: dropping empty storages failed: {}", e.what());
+            }
+        }
         runPendingOpens(level);
         if (mTicks % 600 == 0) AccessLog::get().save(); // every 30 s, like the storage
         bool scan  = mTicks % std::max(1, cfg().holderScanInterval) == 0;

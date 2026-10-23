@@ -328,7 +328,7 @@ void registerTemplateCommands() {
             if (!isOp(o, out)) return;
             auto end = dynamicEnd(p.templateName);
             for (auto const& l : end.leftovers) {
-                out.error(say(o, "abp.templates.dynamic.end.addRemainingItemsFailed", "Not all items could be added: Remaining {}", l));
+                out.error(say(o, "abp.templates.dynamic.end.addRemainingItemsFailed", "Not all items could be added: Remaining {0} x {1}", l.count, l.name));
             }
             if (end.item) {
                 if (auto* self = playerOf(o)) giveTo(*self, *end.item);

@@ -78,6 +78,20 @@ BlockPos groundBelow(Player& p) {
 
 /// Waits (up to 5 s) until the chunk under the player is loaded.
 ll::coro::CoroTask<BlockPos> waitGround(Context& ctx, Player& p) {
+    // On the client the test player spawns far above the world (y=32768: the world spawn is not
+    // set): bring it into the world first, so its chunk loads and the ground below can be found.
+    {
+        auto& region = p.getDimensionBlockSource();
+        auto  feet   = p.getFeetBlockPos();
+        if (feet.y >= region.getMaxHeight() || feet.y < region.getMinHeight()) {
+            ctx.info("test player at y=" + std::to_string(feet.y) + ": moving it into the world");
+            p.teleport(
+                Vec3{static_cast<float>(feet.x) + 0.5f, static_cast<float>(std::min(region.getMaxHeight() - 2, 100)), static_cast<float>(feet.z) + 0.5f},
+                p.getDimensionId()
+            );
+            co_await ctx.ticks(2);
+        }
+    }
     auto pos = groundBelow(p);
     for (int i = 0; i < 100 && p.getDimensionBlockSourceConst().getBlock(pos).isAir(); ++i) {
         co_await ctx.ticks(1);

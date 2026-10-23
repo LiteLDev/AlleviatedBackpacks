@@ -1,8 +1,8 @@
 {
   "abp.backpack.leather": "背包",
-  "abp.backpack.copper": "铜背包",
-  "abp.backpack.iron": "铁背包",
-  "abp.backpack.gold": "金背包",
+  "abp.backpack.copper": "铜制背包",
+  "abp.backpack.iron": "铁制背包",
+  "abp.backpack.gold": "金制背包",
   "abp.backpack.diamond": "钻石背包",
   "abp.backpack.netherite": "下界合金背包",
 
@@ -33,7 +33,7 @@
   "abp.upgrade.error.conflict": "不能与{}同时安装。",
   "abp.upgrade.error.max": "这个背包已经装满了此类升级。",
 
-  "abp.filter.title": "过滤器",
+  "abp.filter.title": "过滤",
   "abp.filter.on": "§a开",
   "abp.filter.off": "§c关",
   "abp.filter.mode.allow": "白名单",

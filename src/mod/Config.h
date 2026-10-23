@@ -57,8 +57,14 @@ struct ConfigRegistrar {
         ConfigRegistry::add(ConfigEntry{
             std::move(section),
             [](std::filesystem::path const& p) {
-                T fresh{};
-                bool ok = ll::config::loadConfig(fresh, p); // false = rewritten (missing / version change)
+                T    fresh{};
+                // false = rewritten (missing / version change). A section that renamed keys
+                // declares `template <class J> static void migrate(J& data)`: it runs on the old
+                // file's JSON before the default merge.
+                bool ok = ll::config::loadConfig(fresh, p, [](T& cfg, nlohmann::ordered_json& data) {
+                    if constexpr (requires { T::migrate(data); }) T::migrate(data);
+                    return ll::config::defaultConfigUpdater<T, nlohmann::ordered_json>(cfg, data);
+                });
                 if (!ok) ll::config::saveConfig(fresh, p);
                 mut<T>() = std::move(fresh);
                 return true;

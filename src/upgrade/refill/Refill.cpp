@@ -508,6 +508,7 @@ public:
               .nameFallback = "Refill Upgrade",
               .tier         = UpgradeTier::Basic,
               .group        = "refill",
+              .maxPerBackpack = kUnlimitedPerBackpack, // SB: no limit
               .hasSettings  = true,
           }
       ) {}
@@ -525,6 +526,7 @@ public:
               .nameFallback = "Advanced Refill Upgrade",
               .tier         = UpgradeTier::Advanced,
               .group        = "refill",
+              .maxPerBackpack = kUnlimitedPerBackpack, // SB: no limit
               .hasSettings  = true,
           }
       ) {}

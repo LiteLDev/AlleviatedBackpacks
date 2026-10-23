@@ -12,7 +12,9 @@
 #include "core/Tier.h"
 #include "game/PlayerScan.h"
 
+class Actor;
 class Container;
+class FilterGroup;
 class ItemStack;
 class Mob;
 class Player;
@@ -27,6 +29,15 @@ namespace abp::wearable {
 [[nodiscard]] game::ItemLocation wornSlot();
 /// Opens the backpack the player wears (chest slot). False if none.
 bool openWorn(Player& player);
+
+// ---- piglins (SB BackpackItem.makesPiglinsNeutral) ----------------------------------------------
+
+/// True if `wearer` is a player wearing a Gold Backpack in the chest slot (counts as gold armour).
+[[nodiscard]] bool makesPiglinsNeutral(Actor const& wearer);
+/// True if a target filter tests for golden armour (`has_equipment` ... `golden_*`).
+[[nodiscard]] bool isGoldArmorFilter(FilterGroup const& group);
+/// How many times a piglin target match was refused for a Gold Backpack wearer (selftests).
+[[nodiscard]] int piglinTargetsSkipped();
 
 // ---- mobs (SB EntityBackpackAdditionHandler) ----------------------------------------------------
 

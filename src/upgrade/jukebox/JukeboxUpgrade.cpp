@@ -35,12 +35,12 @@ nlohmann::json const* discArray(UpgradeContext const& ctx) {
 
 // ---- settings ------------------------------------------------------------------------------------
 
-int advancedSlots() { return std::clamp(config::get<JukeboxConfig>().advancedSlots, 1, kMaxAdvancedSlots); }
+int advancedSlots() { return std::clamp(config::get<JukeboxConfig>().advancedJukeboxUpgrade.numberOfSlots, 1, kMaxAdvancedSlots); }
 
 bool isAdvanced(UpgradeContext const& ctx) { return ctx.state().item.id == kAdvancedItem; }
 
 int slotsInRow(UpgradeContext const& ctx) {
-    return isAdvanced(ctx) ? std::clamp(config::get<JukeboxConfig>().advancedSlotsInRow, 1, 6) : 4;
+    return isAdvanced(ctx) ? std::clamp(config::get<JukeboxConfig>().advancedJukeboxUpgrade.slotsInRow, 1, 6) : 4;
 }
 
 bool isJukebox(UpgradeContext const& ctx) {
@@ -266,7 +266,7 @@ public:
             .nameFallback   = "Jukebox Upgrade",
             .tier           = UpgradeTier::Basic,
             .group          = "jukebox",
-            .maxPerBackpack = 1,
+            .maxPerBackpack = kUnlimitedPerBackpack, // SB maxUpgradesPerStorage jukebox_upgrades
             .hasSettings    = true,
         };
         return i;
@@ -286,7 +286,7 @@ public:
             .nameFallback   = "Advanced Jukebox Upgrade",
             .tier           = UpgradeTier::Advanced,
             .group          = "jukebox",
-            .maxPerBackpack = 1,
+            .maxPerBackpack = kUnlimitedPerBackpack, // SB maxUpgradesPerStorage jukebox_upgrades
             .hasSettings    = true,
         };
         return i;
