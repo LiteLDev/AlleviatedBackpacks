@@ -291,6 +291,57 @@ try {
     catch { $problems += 'the captured cow preview did not get its properties' }
     Close-Backpack
     }
+    # ---- 9. first person: worn hidden, held with SB's first-person transform ----------------------------
+    if (Want 9) {
+    Invoke-Chat '/kill @e[type=!player]'
+    Invoke-Chat '/gamemode creative'
+    Invoke-Chat '/clear @s'
+    Invoke-Chat '/camera @s set minecraft:first_person'
+    Invoke-Chat '/tp @s 0.5 -60 0.5 0 10'
+    # Reference: a vanilla block held in first person.
+    Invoke-Chat '/replaceitem entity @s slot.weapon.mainhand 0 chest'
+    Start-Sleep -Seconds 1
+    Save-Screenshot 'fp-held-chest' | Out-Null
+    Invoke-Chat '/replaceitem entity @s slot.weapon.mainhand 0 alleviatedbackpacks:gold_backpack'
+    Start-Sleep -Seconds 1
+    Save-Screenshot 'fp-held' | Out-Null
+    if ($env:ABP_GX1_CALIBRATE) {
+        $i = 0
+        foreach ($p in $env:ABP_GX1_FP_POSES -split ';') {
+            if (-not $p) { continue }
+            Invoke-Chat "/backpack modeltest pose `"3 $p`""
+            Start-Sleep -Milliseconds 800
+            Save-Screenshot "fp-cal-$i" | Out-Null
+            $i++
+        }
+        Invoke-Chat '/backpack modeltest pose off'
+    }
+    Invoke-Chat '/replaceitem entity @s slot.weapon.mainhand 0 air'
+    Invoke-Chat '/replaceitem entity @s slot.armor.chest 0 alleviatedbackpacks:diamond_backpack'
+    Start-Sleep -Seconds 1
+    Save-Screenshot 'fp-worn' | Out-Null
+    Invoke-Chat '/tp @s 0.5 -60 0.5 0 80'
+    Start-Sleep -Seconds 1
+    Save-Screenshot 'fp-worn-look-down' | Out-Null
+    Invoke-Chat '/tp @s 0.5 -60 0.5 0 10'
+    Invoke-Chat '/camera @s set minecraft:third_person'
+    Start-Sleep -Seconds 1
+    Save-Screenshot 'tp-worn-back' | Out-Null
+    Invoke-Chat '/camera @s set minecraft:third_person_front'
+    Start-Sleep -Seconds 1
+    Save-Screenshot 'tp-worn-front' | Out-Null
+    Invoke-Chat '/replaceitem entity @s slot.weapon.mainhand 0 alleviatedbackpacks:gold_backpack'
+    Start-Sleep -Seconds 1
+    Save-Screenshot 'tp-held-front' | Out-Null
+    Invoke-Chat '/camera @s set minecraft:first_person'
+    Invoke-Chat '/camera @s clear'
+    Invoke-Chat '/gamemode survival'
+    Open-Inventory
+    Start-Sleep -Seconds 2
+    Save-Screenshot 'fp-inventory-preview' | Out-Null
+    Close-Screen
+    Invoke-Chat '/gamemode creative'
+    }
 } finally {
     try {
         Invoke-Chat '/camera @s clear'

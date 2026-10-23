@@ -530,8 +530,13 @@ function EntityPose($pose) {
         scale    = (& $o 7 $pose.scale)
     }
 }
+function HiddenInFirstPerson($pose) {
+    $pose.scale = "c.is_first_person ? 0 : ($($pose.scale))"
+    $pose
+}
 $anim = [ordered]@{
-    'animation.alleviatedbackpacks.backpack.worn'    = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 1 @(0, 12, 4.8) @(0, 180, 0) 1) } }
+    # SB draws the worn backpack as a back layer of the player model: never in first person.
+    'animation.alleviatedbackpacks.backpack.worn'    = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (HiddenInFirstPerson (Pose 1 @(0, 12, 4.8) @(0, 180, 0) 1)) } }
     'animation.alleviatedbackpacks.backpack.held_tp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 2 @(2, 12, -0.9) @(0, -90, 0) 0.75) } }
     'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 3 @(0, 12, -8) @(0, 0, 0) 0.5) } }
     'animation.alleviatedbackpacks.backpack.placed'  = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (EntityPose (Pose 4 @(0, 0, 0) @(0, 0, 0) 1)) } }
