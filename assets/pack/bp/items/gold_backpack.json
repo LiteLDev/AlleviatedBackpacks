@@ -9,7 +9,6 @@
       "minecraft:icon": { "textures": { "default": "abp_gold_backpack", "dyed": "abp_gold_backpack_dyed" } },
       "minecraft:dyeable": {},
       "minecraft:max_stack_size": 1,
-      "minecraft:storage_weight_modifier": { "weight_in_storage_item": 0 },
       "minecraft:wearable": { "slot": "slot.armor.chest", "protection": 0 },
       "minecraft:display_name": { "value": "item.alleviatedbackpacks:gold_backpack.name" }
     }

@@ -52,7 +52,7 @@ dedicated servers (BDS) and in single-player / local worlds on the client.
 - Feature-by-feature comparison with Sophisticated Backpacks: [docs/FEATURES.md](docs/FEATURES.md).
 - Backpacks can't be put into themselves, and by default not into other backpacks
   (an Inception upgrade allows it). Like Sophisticated Backpacks, shulker boxes fit in backpacks
-  (`containerItemsDisallowed` refuses them) and backpacks don't fit in shulker boxes
+  (`containerItemsDisallowed` refuses them) and backpacks don't fit in shulker boxes or bundles
   (`canBePlacedInContainerItems`).
 - World systems as in Sophisticated Backpacks: the **Ender Linker** links backpacks into a linked
   storage group with shared contents; duplicated backpacks (same storage) are sorted out; right-click
