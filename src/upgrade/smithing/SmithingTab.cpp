@@ -112,8 +112,7 @@ public:
         }
         drawArmorStand(p, area.x + kWidth / 2, area.y + kHeight - 10, 25, mResult.isNull() ? nullptr : &mResult);
         // SB renderOnboardingTooltips: the red cross explains itself.
-        if (recipeError() && mx >= arrowX && mx < arrowX + 15 && my >= arrowY && my < arrowY + 15
-            && ::abp::upgrade::anvil::client::cursorEmpty()) {
+        if (recipeError() && mx >= arrowX && mx < arrowX + 15 && my >= arrowY && my < arrowY + 15) { // any cursor (SB renderOnboardingTooltips)
             ui::drawTooltip(p, {{ctr("abp.smithing.error", "Item can't be upgraded this way"), 0xFFFFFF}}, mx, my);
         }
     }

@@ -131,6 +131,11 @@ bool memoryMatches(ItemStackData const& remembered, ItemStackData const& item) {
     return !remembered.empty() && !item.empty() && remembered.id == item.id && remembered.aux == item.aux;
 }
 
+bool memorySlotAccepts(SortLayout const& layout, ItemStackData const& remembered, ItemStackData const& item) {
+    if (remembered.empty() || item.empty()) return false;
+    return layout.memoryMatchNbt ? remembered.sameItem(item) : memoryMatches(remembered, item);
+}
+
 namespace {
 bool sortOnce(BackpackInventory& inv, ItemLess const& less, SortLayout const& layout);
 } // namespace
@@ -144,7 +149,7 @@ bool sortInventory(BackpackInventory& inv, ItemLess const& less, SortLayout cons
     relaxed.locked.resize(static_cast<std::size_t>(inv.size()), false);
     for (int i = 0; i < inv.size() && i < static_cast<int>(layout.memory.size()); ++i) {
         auto const& m = layout.memory[static_cast<std::size_t>(i)];
-        if (!m.empty() && !inv.at(i).empty() && !memoryMatches(m, inv.at(i)) && !relaxed.locked[static_cast<std::size_t>(i)]) {
+        if (!m.empty() && !inv.at(i).empty() && !memorySlotAccepts(layout, m, inv.at(i)) && !relaxed.locked[static_cast<std::size_t>(i)]) {
             relaxed.locked[static_cast<std::size_t>(i)] = true;
             changed                                    = true;
         }
@@ -187,7 +192,7 @@ bool sortOnce(BackpackInventory& inv, ItemLess const& less, SortLayout const& la
         auto const* mem = memoryOf(i);
         if (!mem || isLocked(i)) continue;
         for (std::size_t k = 0; k < kinds.size(); ++k) {
-            if (left[k] <= 0 || !memoryMatches(*mem, kinds[k])) continue;
+            if (left[k] <= 0 || !memorySlotAccepts(layout, *mem, kinds[k])) continue;
             int put                            = std::min(left[k], inv.slotLimit(i, kinds[k]));
             laid[static_cast<std::size_t>(i)] = kinds[k].withCount(put);
             left[k]                           -= put;

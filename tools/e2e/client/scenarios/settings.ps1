@@ -195,7 +195,7 @@ $mark = Get-LogMark
 Type-Text 'E2E Ores'
 Save-Screenshot 'template-export-box' | Out-Null
 Press-Key ENTER
-Wait-LogLine 'settings: .* exported template to .*e2e_ores.json' 10 -Since $mark | Out-Null
+Wait-LogLine 'settings: .* exported template to .*e2e_ores.snbt' 10 -Since $mark | Out-Null
 # Clear the no-sort / memory slots, then hover Load (template preview) and load slot 1.
 Tab-Click 3
 $a = TabW-Pos 3 (21 + 8) (24 + 8); S-Click $a[0] $a[1]

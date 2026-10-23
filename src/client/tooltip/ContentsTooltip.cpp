@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "ll/api/memory/Hook.h"
@@ -33,6 +34,7 @@
 #include "client/ui/widgets/SbStyle.h"
 #include "core/screen/CountFormat.h"
 #include "core/screen/SearchFilter.h"
+#include "core/screen/TooltipWrap.h"
 #include "game/BackpackItem.h"
 #include "game/ItemConv.h"
 #include "mod/Log.h"
@@ -325,8 +327,47 @@ void appendUpgradeLines(::ItemStackBase const& stack, std::string& s) {
         if (end == std::string::npos) break;
         start = end + (end == esc ? 2 : 1);
     }
-    if (lines.empty() || s.find(kDarkGray + lines.front()) != std::string::npos) return; // both hooks ran
-    for (auto const& l : lines) appendLine(s, kDarkGray + l);
+    if (lines.empty()) return;
+    // GX-3: long lines wrap like Java tooltips do (NeoForge gatherTooltipComponents, see
+    // core/screen/TooltipWrap.h): only when the tooltip fits on neither side of the cursor.
+    // Widths are the default font's (measuring with the game's font while it builds the hover
+    // text stalls the UI).
+    std::vector<std::string> out;
+    for (auto const& l : lines) out.push_back(kDarkGray + l);
+    try {
+        auto        width = [](std::string_view t) { return core::screen::vanillaTextWidth(t); };
+        auto const& frame = ui::UiRoot::get().lastFrame();
+        int         textWidth = 0;
+        for (std::size_t at = 0; at <= s.size();) { // the lines already there (the name first)
+            auto nl   = s.find('\n', at);
+            textWidth = std::max(textWidth, width(std::string_view(s).substr(at, nl == std::string::npos ? std::string::npos : nl - at)));
+            if (nl == std::string::npos) break;
+            at = nl + 1;
+        }
+        for (auto const& l : out) textWidth = std::max(textWidth, width(l));
+        std::optional<int> wrapAt;
+        if (frame.mouseX >= 0 && frame.screen.w > 0) {
+            wrapAt = core::screen::tooltipWrapWidth(static_cast<int>(frame.mouseX), static_cast<int>(frame.screen.w), textWidth);
+        }
+        if (wrapAt) {
+            std::vector<std::string> wrapped;
+            for (auto const& l : out) {
+                for (auto& part : core::screen::wrapTooltipLine(l, *wrapAt, width)) wrapped.push_back(std::move(part));
+            }
+            static std::unordered_map<std::string, std::pair<int, int>> loggedWrap; // id -> (last width, logs)
+            if (auto& [last, logs] = loggedWrap[id]; loggedWrap.size() <= 64 && last != *wrapAt && logs < 8) {
+                last = *wrapAt;
+                ++logs;
+                log().info("tooltip: {} wrapped at {} (mouse {:.0f} of {:.0f}, text {}): {} -> {} lines", id, *wrapAt, frame.mouseX, frame.screen.w, textWidth, out.size(), wrapped.size());
+            }
+            out = std::move(wrapped);
+        }
+    } catch (...) {
+    }
+    // Both hooks run for data-driven items: the second one finds the same first line (the wrap
+    // width does not change: the lines already added are never wider than the unwrapped ones).
+    if (out.empty() || s.find(out.front()) != std::string::npos) return;
+    for (auto const& l : out) appendLine(s, l);
 }
 
 void appendBackpackLines(::ItemStackBase const& stack, bool advanced, std::string& s) {

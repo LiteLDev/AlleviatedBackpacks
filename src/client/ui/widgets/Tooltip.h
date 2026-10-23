@@ -14,6 +14,9 @@ namespace abp::client::ui {
 struct TooltipLine {
     std::string   text;
     std::uint32_t rgb = 0xFFFFFF;
+    /// Any line with this set puts the tooltip left of the cursor (SC LEFT_SIDE_TOOLTIP_POSITIONER:
+    /// x = max(mouseX - 12 - width, 4)).
+    bool leftSide = false;
 };
 
 /// Optional custom part below the text lines (e.g. the backpack contents grid).

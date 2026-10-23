@@ -199,9 +199,9 @@ std::optional<nlohmann::json> openTarget(HoveredSlot const& slot) {
     auto const& c = slot.collection;
     int         i = slot.index;
     if (c == "hotbar_items" && i >= 0 && i < 9) return nlohmann::json{{"where", "inventory"}, {"slot", i}};
-    if ((c == "inventory_items" || c == "combined_hotbar_and_inventory_items") && i >= 0 && i < 36) {
-        return nlohmann::json{{"where", "inventory"}, {"slot", i}};
-    }
+    if (c == "combined_hotbar_and_inventory_items" && i >= 0 && i < 36) return nlohmann::json{{"where", "inventory"}, {"slot", i}};
+    // The main inventory grid counts from 0 (= player inventory slot 9).
+    if (c == "inventory_items" && i >= 0 && i < 27) return nlohmann::json{{"where", "inventory"}, {"slot", i + 9}};
     if (c == "armor_items" && i == 1) return nlohmann::json{{"where", "armor"}};
     if (c == "offhand_items") return nlohmann::json{{"where", "offhand"}};
     return std::nullopt;

@@ -104,6 +104,9 @@ using RenderInfoRegistry = StaticRegistry<RenderInfoProvider>;
 [[nodiscard]] core::screen::BackpackScreenModel const* sentModel(Player const& player);
 /// Runs one screen action (the packet handler and selftests). Returns whether it was accepted.
 bool handleScreenAction(Player& player, nlohmann::json const& body);
+/// SC `removeOpenTabIfKeepOff`: with "keep tab open" off for `player`, the backpack forgets its
+/// open upgrade tab (done when a backpack screen opens and closes).
+void removeOpenTabIfKeepOff(Player& player, game::Backpack& backpack);
 
 /// Contents of a backpack for the Shift tooltip.
 [[nodiscard]] core::screen::ContentsModel buildContents(Player& player, std::shared_ptr<game::Backpack> const& backpack);

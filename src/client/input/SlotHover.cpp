@@ -33,7 +33,9 @@ struct Hovered {
 Hovered gHovered;
 
 bool ownSlot(std::string const& c, int i) {
-    return ((c == "hotbar_items" || c == "inventory_items" || c == "combined_hotbar_and_inventory_items") && i >= 0 && i < 36)
+    // inventory_items counts the main inventory from 0 (player slot 9).
+    return (c == "hotbar_items" && i >= 0 && i < 9) || (c == "inventory_items" && i >= 0 && i < 27)
+        || (c == "combined_hotbar_and_inventory_items" && i >= 0 && i < 36)
         || (c == "armor_items" && i == 1) || c == "offhand_items";
 }
 

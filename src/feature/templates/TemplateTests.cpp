@@ -1,10 +1,12 @@
 // Selftests of backpack templates (SB BackpackTemplates / DynamicCommand) and template packs.
 
 #include <filesystem>
+#include <fstream>
 
 #include "mc/world/item/ItemStack.h"
 
 #include "feature/gui/Gui.h"
+#include "feature/templates/Snbt.h"
 #include "feature/templates/Templates.h"
 #include "game/Backpack.h"
 #include "game/BackpackItem.h"
@@ -72,7 +74,7 @@ ABP_REGISTER_SELFTEST("templates.export_pack", [](Context& ctx) {
     setBackpackTemplate("selftesttpl:food/basic", game::backpackItemId(Tier::Leather), backpackContents(*src));
     auto path = exportBackpackTemplate("selftesttpl:food/basic", *localBackpackTemplate("selftesttpl:food/basic"));
     ctx.require(path.has_value(), "exported");
-    ctx.check(path->find("selftesttpl_backpack_templates/data/selftesttpl/sophisticatedbackpacks_templates/food/basic.json") != std::string::npos,
+    ctx.check(path->find("selftesttpl_backpack_templates/data/selftesttpl/sophisticatedbackpacks_templates/food/basic.snbt") != std::string::npos,
               "SB data pack layout: " + *path);
     removeBackpackTemplate("selftesttpl:food/basic");
     reloadTemplatePacks();
@@ -83,6 +85,83 @@ ABP_REGISTER_SELFTEST("templates.export_pack", [](Context& ctx) {
     std::filesystem::remove_all(templatePacksRoot() / "selftesttpl_backpack_templates", ec);
     reloadTemplatePacks();
     ctx.check(!backpackTemplate("selftesttpl:food/basic").has_value(), "gone after removing the pack");
+});
+
+/// JSON as it comes back from SNBT: null members left out.
+nlohmann::json withoutNulls(nlohmann::json j) {
+    if (j.is_object()) {
+        for (auto it = j.begin(); it != j.end();) {
+            if (it->is_null()) it = j.erase(it);
+            else *it = withoutNulls(*it), ++it;
+        }
+    } else if (j.is_array()) {
+        for (auto& e : j) e = e.is_null() ? nlohmann::json::object() : withoutNulls(e);
+    }
+    return j;
+}
+
+// GX-3: SB writes templates as SNBT (NbtUtils.structureToSnbt); earlier JSON exports still load.
+ABP_REGISTER_SELFTEST("templates.snbt_files", [](Context& ctx) {
+    nlohmann::json j = {
+        {"flag",   true                                                       },
+        {"off",    false                                                      },
+        {"n",      42                                                         },
+        {"big",    5000000000LL                                               },
+        {"f",      1.5                                                        },
+        {"s",      "Hello \"World\""                                          },
+        {"ints",   {1, 2, 3}                                                  },
+        {"mixed",  {1, 2.5}                                                   },
+        {"strs",   nlohmann::json::array({"a", "b"})                              },
+        {"slots",  {{{"id", "minecraft:stone"}, {"count", 3}}, nullptr}       },
+        {"other",  {1, "x"}                                                   },
+        {"empty",  nlohmann::json::array()                                    },
+        {"nested", {{"memory", {{"slotFilterItems", {{"3", "minecraft:dirt"}}}}}}},
+        {"gone",   nullptr                                                    },
+    };
+    auto snbt = jsonToSnbt(j);
+    ctx.require(snbt.has_value(), "written");
+    ctx.info("snbt: " + *snbt);
+    ctx.check(snbt->find("1b") != std::string::npos && (snbt->find("5000000000L") != std::string::npos || snbt->find("5000000000l") != std::string::npos), "NBT types (byte / long) in the text");
+    auto back = snbtToJson(*snbt);
+    ctx.require(back.has_value(), "parsed back");
+    auto expect = j;
+    expect.erase("gone");                                 // null members are left out
+    expect["mixed"]    = {1.0, 2.5};                       // one numeric type per list
+    expect["slots"][1] = nlohmann::json::object();         // a null element is an empty compound
+    ctx.check(*back == expect, "round trip: " + back->dump());
+    ctx.check(!snbtToJson("{not snbt").has_value(), "invalid text refused");
+
+    // Files: an export writes .snbt (and replaces an older .json of the same template); both load.
+    namespace fs = std::filesystem;
+    auto root    = templatePacksRoot() / "gx3snbt_backpack_templates";
+    auto dir     = root / "data" / "gx3snbt" / "sophisticatedbackpacks_templates";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    auto src = ctx.createBackpack(Tier::Leather);
+    src->inventory().set(1, item("minecraft:apple", 5));
+    nlohmann::json tmpl{{"backpackItemRegistryName", game::backpackItemId(Tier::Leather)}, {"backpackContents", backpackContents(*src)}};
+    {
+        std::ofstream legacy(dir / "old.json");
+        legacy << tmpl.dump(4);
+        std::ofstream stale(dir / "kit.json");
+        stale << tmpl.dump(4);
+    }
+    auto path = exportBackpackTemplate("gx3snbt:kit", tmpl);
+    ctx.require(path.has_value() && path->ends_with("kit.snbt"), "exported as .snbt: " + path.value_or("(none)"));
+    ctx.check(fs::exists(dir / "kit.snbt") && !fs::exists(dir / "kit.json"), "the older .json export is replaced");
+    auto beforeReload = backpackTemplate("gx3snbt:kit");
+    reloadTemplatePacks();
+    auto kit = backpackTemplate("gx3snbt:kit");
+    auto old = backpackTemplate("gx3snbt:old");
+    ctx.check(kit.has_value() && *kit == withoutNulls(tmpl), "SNBT template reads back the same");
+    ctx.check(beforeReload && kit && *beforeReload == *kit, "the exported template is the same before and after a reload");
+    ctx.check(old.has_value() && *old == tmpl, "legacy JSON template still loads");
+    if (kit) {
+        auto bp = applyBackpackContents(*src, (*kit)["backpackContents"]);
+        ctx.check(bp && src->inventory().at(1).id == "minecraft:apple" && src->inventory().at(1).count == 5, "contents usable");
+    }
+    fs::remove_all(root, ec);
+    reloadTemplatePacks();
 });
 
 ABP_REGISTER_SELFTEST("templates.dynamic", [](Context& ctx) {

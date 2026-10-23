@@ -189,6 +189,8 @@ public:
         return ref;
     }
     void render(Painter& p, float mx, float my, double time);
+    /// Only widgets[from, to) (draw order split around something else, e.g. the carried item).
+    void render(Painter& p, float mx, float my, double time, std::size_t from, std::size_t to);
     bool mouseDown(MouseButton button, float x, float y);
     bool mouseUp(MouseButton button, float x, float y);
     bool mouseMove(float x, float y);

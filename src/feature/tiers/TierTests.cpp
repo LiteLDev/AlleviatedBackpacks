@@ -200,6 +200,36 @@ ABP_REGISTER_SELFTEST("tiers.recipes_match", [](Context& ctx) {
     ctx.check(!craftResult(noDye).ends_with("_backpack"), "ink sac is not one of the 16 dyes: " + craftResult(noDye));
 });
 
+// GX-3: the netherite smithing recipe is registered and matches a Diamond backpack without
+// durability (SmithingBase.cpp). The smithing container's slot order is not documented: any order.
+ABP_REGISTER_SELFTEST("tiers.smithing_without_durability", [](Context& ctx) {
+    auto smithing = recipesFor("smithing_table");
+    ctx.require(smithing != nullptr, "no smithing_table recipes");
+    auto it = smithing->find("alleviatedbackpacks:netherite_backpack");
+    ctx.require(it != smithing->end() && it->second, "netherite backpack smithing recipe loaded");
+    auto level = ll::service::getLevel();
+    ctx.require(level != nullptr, "level");
+    CraftingContext cctx(Bedrock::NotNullNonOwnerPtr<ILevel>(Bedrock::NonOwnerPointer<ILevel>(static_cast<ILevel const&>(*level))));
+    auto matches = [&](ItemStack const& base) {
+        std::array<ItemStack, 3> items{
+            game::ItemConv::make("minecraft:netherite_upgrade_smithing_template"),
+            base,
+            game::ItemConv::make("minecraft:netherite_ingot"),
+        };
+        std::array<int, 3> order{0, 1, 2};
+        do {
+            CraftingContainer container(3, 1);
+            for (int i = 0; i < 3; ++i) container.setItem(i, items[static_cast<std::size_t>(order[static_cast<std::size_t>(i)])]);
+            if (it->second->matches(container, cctx)) return true;
+        } while (std::next_permutation(order.begin(), order.end()));
+        return false;
+    };
+    auto diamond = game::makeBackpackItem(Tier::Diamond);
+    ctx.check(!diamond.isDamageableItem(), "no durability");
+    ctx.check(matches(diamond), "template + diamond backpack + netherite ingot match");
+    ctx.check(!matches(game::makeBackpackItem(Tier::Gold)), "a gold backpack does not");
+});
+
 ABP_REGISTER_SELFTEST("tiers.item_names", [](Context& ctx) {
     // SB's en_US names, resolved on the server too (behavior-pack texts).
     ctx.check(game::ItemConv::make("alleviatedbackpacks:leather_backpack").getName() == "Backpack", "leather: " + game::ItemConv::make("alleviatedbackpacks:leather_backpack").getName());
@@ -417,12 +447,10 @@ ABP_REGISTER_SELFTEST("tiers.lore_and_tint", [](Context& ctx) {
     ctx.check(loreText(fresh).empty(), "no lore: " + loreText(fresh));
     ctx.check(!game::backpackUuid(fresh), "refresh doesn't bind a uuid");
 
-    // Diamond backpacks are damageable (smithing-table base) but never wear out.
+    // GX-3: like SB, the Diamond backpack has no durability (SmithingBase.cpp makes it a smithing
+    // base without it).
     auto diamond = game::makeBackpackItem(Tier::Diamond);
-    ctx.require(diamond.isDamageableItem(), "diamond backpack has durability (smithing base)");
-    diamond.setDamageValue(5);
-    refreshItem(player, diamond, nullptr);
-    ctx.check(diamond.getDamageValue() == 0, "damage reset");
+    ctx.check(!diamond.isDamageableItem(), "diamond backpack has no durability");
 });
 
 ABP_REGISTER_SELFTEST("tiers.lore_refresh_carried", [](Context& ctx) -> ll::coro::CoroTask<> {

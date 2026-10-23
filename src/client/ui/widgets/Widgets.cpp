@@ -229,9 +229,11 @@ void Label::render(Painter& p, float, float, double) {
 
 // ---- WidgetGroup ------------------------------------------------------------------------------------------------
 
-void WidgetGroup::render(Painter& p, float mx, float my, double time) {
-    for (auto& w : widgets) {
-        if (w->visible) w->render(p, mx, my, time);
+void WidgetGroup::render(Painter& p, float mx, float my, double time) { render(p, mx, my, time, 0, widgets.size()); }
+
+void WidgetGroup::render(Painter& p, float mx, float my, double time, std::size_t from, std::size_t to) {
+    for (std::size_t i = from; i < to && i < widgets.size(); ++i) {
+        if (widgets[i]->visible) widgets[i]->render(p, mx, my, time);
     }
 }
 

@@ -80,13 +80,14 @@ public:
         return idx;
     }
 
-    /// Display index under (x, y) (SC mouseClicked: rows start 1 below the list top).
-    [[nodiscard]] int displayAt(float x, float y, float rowOffset) const {
+    /// Display index under (x, y): SC mouseClicked tests from (x + 1, top + 1), renderTooltip from
+    /// (x, top + 2).
+    [[nodiscard]] int displayAt(float x, float y, float colOffset, float rowOffset) const {
         if (!hasInput()) return -1;
         auto list = sorted();
         for (int d = offset; d < offset + kVisibleRecipes && d < static_cast<int>(list.size()); ++d) {
             int   v  = d - offset;
-            float rx = rect.x + 1 + static_cast<float>(v % 4 * 16);
+            float rx = rect.x + colOffset + static_cast<float>(v % 4 * 16);
             float ry = listTop() + rowOffset + static_cast<float>(v / 4 * 18);
             if (x >= rx && x < rx + 16 && y >= ry && y < ry + 18) return d;
         }
@@ -134,7 +135,7 @@ public:
             if (button == MouseButton::Left && onBrowse) onBrowse();
             return true;
         }
-        if (int d = displayAt(x, y, 1); d >= 0) {
+        if (int d = displayAt(x, y, 1, 1); d >= 0) {
             auto list = sorted();
             if (onSelect) onSelect(list[static_cast<std::size_t>(d)]);
             return true;
@@ -175,7 +176,7 @@ public:
             return;
         }
         if (!hasInput()) return;
-        if (int d = displayAt(x, y, 2); d >= 0) {
+        if (int d = displayAt(x, y, 0, 2); d >= 0) {
             auto list = sorted();
             auto l    = itemTooltipLines(data->recipes[static_cast<std::size_t>(list[static_cast<std::size_t>(d)])]);
             out.insert(out.end(), l.begin(), l.end());
