@@ -750,7 +750,8 @@ ABP_REGISTER_SELFTEST("wearable.piglin_neutral", [](Context& ctx) -> ll::coro::C
     };
     int skippedBefore = piglinTargetsSkipped();
     bool targeted     = false;
-    for (int t = 0; t < 60 && !targeted; t += 5) {
+    // At least 3 s, and until the piglin has looked at the wearer (target scans are not every tick).
+    for (int t = 0; t < 140 && !targeted && (t < 60 || piglinTargetsSkipped() == skippedBefore); t += 5) {
         co_await ctx.ticks(5);
         targeted = targetsMe();
     }

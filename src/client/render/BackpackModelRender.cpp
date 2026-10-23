@@ -58,6 +58,10 @@ std::unordered_map<std::string, Clock::time_point> gWanted;   ///< uuid -> last 
 
 std::thread::id gClientThread;
 
+// Transforms of client-only display entities (setEntityXf).
+std::shared_mutex                                gXfMutex;
+std::unordered_map<Actor const*, EntityXf>       gXf;
+
 // Accent colour by main colour (24 bit) of the backpacks rendered recently: the cloth tint
 // (changeColor) comes from the item colour, which the server keeps equal to the main colour, so
 // the draw call of a backpack can be recognised by it and given its accent (changeColor2) even
@@ -104,6 +108,14 @@ float argOf(RenderParams& params, std::vector<ExpressionNode> const& args, std::
 
 bool isDisplayEntity(Actor const& actor) { return actor.getTypeName() == kDisplayEntityId; }
 
+/// Ticks (20 per second) since the client started, wrapped (at a multiple of every flipbook's
+/// frames x ticks per frame) to keep the float exact.
+double animationTicks() {
+    static auto const start = Clock::now();
+    double t = std::chrono::duration<double>(Clock::now() - start).count() * 20.0;
+    return std::fmod(t, 20.0 * 32.0 * 16.0 * 10.0);
+}
+
 /// The item the attachable being rendered stands for.
 ItemStack const* itemOf(RenderParams const& params) {
     if (params.mItemStackBasePtr && !params.mItemStackBasePtr->isNull()) return static_cast<ItemStack const*>(params.mItemStackBasePtr);
@@ -136,6 +148,7 @@ float field(ModelSnapshot const* s, ModelField f, RenderParams const& params) {
     switch (f) {
     case ModelField::Known: return s ? 1.0f : 0.0f;
     case ModelField::Context: return static_cast<float>(contextOf(params));
+    case ModelField::AnimTicks: return static_cast<float>(animationTicks());
     default: break;
     }
     if (!s) return 0;
@@ -160,6 +173,16 @@ float field(ModelSnapshot const* s, ModelField f, RenderParams const& params) {
 
 MolangScriptArg const& modelQuery(RenderParams& params, std::vector<ExpressionNode> const& args) {
     int n = static_cast<int>(argOf(params, args, 0));
+    if (n >= kEntityXfField && n < kEntityXfField + 8) {
+        std::optional<EntityXf> xf;
+        if (params.mActor) {
+            std::shared_lock lock(gXfMutex);
+            if (auto it = gXf.find(params.mActor); it != gXf.end()) xf = it->second;
+        }
+        if (!xf) return ret(params, 0.0f);
+        float const v[8] = {1.0f, xf->px, xf->py, xf->pz, xf->rx, xf->ry, xf->rz, xf->scale};
+        return ret(params, v[n - kEntityXfField]);
+    }
     if (n >= 30) {
         auto& pose = model::debugPose((n - 30) / 8);
         int   k    = (n - 30) % 8;
@@ -186,7 +209,8 @@ std::optional<Tint> tintFor(ItemStack const& item) {
     auto snap = modelFor(item);
     std::uint32_t main   = snap ? snap->mainColor : core::render::kDefaultMainColor;
     std::uint32_t accent = snap ? snap->accentColor : core::render::kDefaultAccentColor;
-    return Tint{toColor(main), toColor(accent)};
+    Tint t{toColor(main), toColor(accent)};
+    return t;
 }
 
 struct TintScope {
@@ -203,6 +227,17 @@ struct TintScope {
 };
 
 } // namespace
+
+bool hasEntityXf(Actor const* displayEntity) {
+    std::shared_lock lock(gXfMutex);
+    return gXf.contains(displayEntity);
+}
+
+void setEntityXf(Actor const* displayEntity, std::optional<EntityXf> xf) {
+    std::unique_lock lock(gXfMutex);
+    if (xf) gXf[displayEntity] = *xf;
+    else gXf.erase(displayEntity);
+}
 
 std::optional<ModelSnapshot> modelFor(std::string const& uuid) {
     want(uuid);

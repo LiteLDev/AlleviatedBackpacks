@@ -224,6 +224,7 @@ MenuManager::SimAction act(ActionType type, MenuManager::SlotAddress src, MenuMa
 struct SlotError {
     std::string      message;
     std::vector<int> upgradeSlots;
+    std::vector<int> storageSlots = {};
 };
 
 /// Sophisticated Core's `canAddUpgradeTo` result for putting `item` into upgrade slot `slot` that
@@ -268,7 +269,10 @@ SlotError installError(Player& p, ui::BackpackMenu& menu, int slot, core::ItemSt
         auto msg = admin::maxUpgradesMessage(*hit, *menu.backpack(), info.itemId, info.groupOrId(), &p);
         if (msg == reason) return {std::move(msg), hit->slots};
     }
-    return {reason, {slot}};
+    // The upgrade's own check refused (e.g. a Stack downgrade: SC marks the tank / battery
+    // upgrades and their bars, and the storage slots over the new limit).
+    upgrade::UpgradeContext ctx(menu.backpack(), slot, &p);
+    return {reason, type->refusalUpgradeSlots(ctx).value_or(std::vector<int>{slot}), type->refusalStorageSlots(ctx)};
 }
 
 /// One click on a storage or upgrade slot (through `simulateOn` with that slot).
@@ -300,14 +304,15 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
         bool        installing = content.empty() && !cursor.isNull();
         if (removing) {
             if (auto* type = upgrade::upgradeFor(content); type && !type->canRemove(upgrade::UpgradeContext(bp, index, &p), reason)) {
-                setError(s, reason, {index}, type->refusalStorageSlots(upgrade::UpgradeContext(bp, index, &p)));
+                upgrade::UpgradeContext ctx(bp, index, &p);
+                setError(s, reason, type->refusalUpgradeSlots(ctx).value_or(std::vector<int>{index}), type->refusalStorageSlots(ctx));
                 return false;
             }
         } else if (installing) {
             auto data = game::ItemConv::toData(cursor).withCount(1);
             if (!upgrade::canInstall(bp, index, data, &p, &reason)) {
                 auto e = installError(p, menu, index, data, reason);
-                if (!e.message.empty()) setError(s, std::move(e.message), std::move(e.upgradeSlots));
+                if (!e.message.empty()) setError(s, std::move(e.message), std::move(e.upgradeSlots), std::move(e.storageSlots));
                 return false;
             }
         } else if (!content.empty() && !cursor.isNull()) {
@@ -316,7 +321,8 @@ bool clickMenuSlot(Player& p, ui::BackpackMenu& menu, NativeSession& s, Area are
             auto data = game::ItemConv::toData(cursor).withCount(1);
             auto* installed = upgrade::upgradeFor(content);
             if (installed && upgrade::upgradeFor(data) && !installed->canReplaceWith(upgrade::UpgradeContext(bp, index, &p), data, reason)) {
-                setError(s, reason, {index}, installed->refusalStorageSlots(upgrade::UpgradeContext(bp, index, &p)));
+                upgrade::UpgradeContext ctx(bp, index, &p);
+                setError(s, reason, installed->refusalUpgradeSlots(ctx).value_or(std::vector<int>{index}), installed->refusalStorageSlots(ctx));
                 return false;
             }
         }

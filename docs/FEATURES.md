@@ -81,11 +81,11 @@ that audit closed afterwards.
 | Restock / Deposit (+ advanced) | Exact | `upgrade/restock`, `upgrade/deposit` | Inception combined inventories: GX-2 |
 | Refill / Advanced Refill (6/12 slots, targets, pick block) | Exact | `upgrade/refill` | Slot counts configurable in `config/refill.json` (GX-4) |
 | Stack upgrades (starter..omega, downgrades, conversions) | Exact | `upgrade/stack` | |
-| Smelting / Smoking / Blasting and Auto versions | Exact | `upgrade/cooking` | Particles and sound: GX-2 |
+| Smelting / Smoking / Blasting and Auto versions | Exact | `upgrade/cooking` | Flame / smoke particles and the furnace crackle (10% per render call) on worn and placed backpacks; placed ones at Java's animateTick rate (GX-1) |
 | Crafting | Exact | `upgrade/crafting` | Several per backpack, each with its own grid, results and open-tab state (GX-5) |
 | Stonecutter (SC `blockconverter` base) | Exact | `upgrade/stonecutter` | |
 | Jukebox / Advanced Jukebox | Exact | `upgrade/jukebox` | |
-| Tank (capacity, I/O rates, container slots, cooldown) | Exact | `upgrade/tank` | Fluid textures and potion tint: GX-1 |
+| Tank (capacity, I/O rates, container slots, cooldown) | Exact | `upgrade/tank` | Tank bars use the game's animated still textures (water_still_grey tinted 0x3F76E4, lava_still, milk, potions tinted by potion colour; frame-blended flipbooks) (GX-1). SB's red error overlay on tank / battery bars when a Stack Upgrade removal / swap / downgrade check fails (GX-1). Model tanks: the real animated sprites (water_still, lava_still, grey water for milk / potions); per-potion tint on the 3D model is PLATFORM-LIMIT: attachables get their shader constants once per attachable (`ActorShaderManager::setEntityConstants`, measured: one call per attachable, render-controller `color` / `overlay_color` / `uv_anim` never reach it) and the change colours already carry the cloth / border colours |
 | Battery (FE storage, I/O) | Exact | `upgrade/battery` | Energy API: `docs/API.md` |
 | Pump / Advanced Pump | Exact | `upgrade/pump` | |
 | XP Pump (levels, mending) | Exact | `upgrade/xppump` | |
@@ -96,7 +96,7 @@ that audit closed afterwards.
 | Tool Swapper / Advanced Tool Swapper (click/attack swaps, key, modes) | Exact | `upgrade/toolswapper` | The swap key now works in creative, as in SB (GX-4) |
 | Advanced Tool Swapper filter with TAGS mode (SC FilterLogicControl.Advanced) | Exact (GX-4) | `client/ui/tabs/toolswapper`, `toolswapper/Upgrades.cpp` | Slot count from `config/toolswapper.json` `toolSwapperUpgrade` |
 | Anvil, Smithing | Exact | `upgrade/anvil`, `upgrade/smithing` | |
-| Mob Catcher / Advanced Mob Catcher | Exact | `upgrade/mobcatcher` | Config list defaults are empty, as in SB (GX-4). Variants, shrink animation: GX-1 |
+| Mob Catcher / Advanced Mob Catcher | Exact | `upgrade/mobcatcher` | Config list defaults are empty, as in SB (GX-4). Captured mobs keep their actor properties (climate variants, ...) in the preview, and SB's 5-tick shrink-into-the-backpack capture animation plays before the poof / pop (GX-1) |
 | Upgrade limits per backpack: SB only limits through `maxUpgradesPerStorage` (stack 3, furnace 1, jukebox 1) and its conflict rules | Exact (GX-5) | `admin::maxUpgradesHit`, `NativeScreens.cpp` `installError` | Upgrades SB doesn't limit have `kUnlimitedPerBackpack`; the three groups follow the config (item entries before group entries, `\|0` = not allowed), and a refusal highlights the upgrades of that item / group (SC `checkUpgradePerStorageTypeLimit`). `StackConfig::maxPerBackpack` is gone |
 | Chipped / Sawmill compat upgrades | N/A | | Java-only mods |
 
@@ -131,11 +131,11 @@ that audit closed afterwards.
 | Jukebox playtime overlay updates smoothly | Exact (GX-3) | `tabs/jukebox` | The client advances the remaining time every frame between the server's whole-second updates (SC computes it from the game time) |
 | Crafting "Previous" tooltip on the left | Exact (GX-3) | `tabs/crafting`, `widgets/Tooltip.*` | SC LEFT_SIDE_TOOLTIP_POSITIONER |
 | LargeResultSelector, anvil name box, smithing help tooltips, stonecutter hit box details | Exact (GX-3) | `tabs/stonecutter`, `upgrade/anvil/AnvilTab.cpp`, `upgrade/smithing` | Scrollbar moves on drag only, centred "Search" hint (0xBBBBBB); anvil box padding 1 / 86 wide, right click doesn't clear; onboarding tooltips with an item carried; recipe tooltip hit box from x (clicks from x + 1). Alchemy disabled condition button: no background already (SC DISABLED_CONDITION blit only); left as audited |
-| Settings screens (main, memory, no sort, item display, templates) | Exact | `client/ui/settings`, `feature/gui` | Item Display 3D preview: GX-1. GX-3: the open tab id is kept on the storage (server side, removed when Keep Tab Open is off, like SC removeOpenTabIfKeepOff); Match-NBT memory slots take only the exact stack when sorting, in filter-by-storage and in the stash overlay |
+| Settings screens (main, memory, no sort, item display, templates) | Exact | `client/ui/settings`, `feature/gui` | Item Display preview draws the real 3D model (display entity with the backpack attachable and its display item) with SB's rotation and drag (GX-1). GX-3: the open tab id is kept on the storage (server side, removed when Keep Tab Open is off, like SC removeOpenTabIfKeepOff); Match-NBT memory slots take only the exact stack when sorting, in filter-by-storage and in the stash overlay |
 | Key bindings (names, defaults, categories, open/inventory interaction/tool swap/toggles, sort, transfer) | Exact | `client/input` | |
 | Right-click stashing | Exact | `client/input/Stash.cpp`, `feature/stash` | GX-3: any vanilla container slot (crafting grids, furnace / blast furnace / smoker incl. result with XP, brewing stand, stations, crafter, horse); main inventory slot indices fixed |
 | Backpack tooltip and Shift contents tooltip | Exact | `client/tooltip` | GX-3: long upgrade tooltip lines wrap by NeoForge's rule (only when the tooltip fits on neither side; default font widths) |
-| Worn backpack model, upgrade particles, item colours | Exact | `client/render` | Dropped/item-frame model, two-colour slot icons, armour-stand base plate: GX-1 |
+| Worn backpack model, upgrade particles, item colours | Exact | `client/render` | Dropped backpacks and item frames show the 3D model with SB's ground / fixed transforms; vanilla slots (inventory, hotbar, containers) draw the two-colour layered icon; the smithing armour stand has no base plate (GX-1) |
 | Sort / transfer keys play the button click (`playButtonSound`) | Exact (GX-3) | `BackpackScreen.cpp` | |
 | Crafting / smithing output preview: dyed colours, the source backpack (contents tooltip) | Exact (GX-3) | `feature/tiers/CraftPreview.cpp` | |
 | Clicking a backpack back into its slot places it (not equipped) | Exact (GX-3) | `client/input/Stash.cpp`, `Hotkeys.cpp`, `SlotHover.cpp` | The main inventory grid's indices start at 0 (= slot 9); they collided with the hotbar |

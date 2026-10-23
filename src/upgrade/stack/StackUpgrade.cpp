@@ -189,6 +189,15 @@ int minimumMultiplierRequired(std::shared_ptr<game::Backpack> const& backpack, i
     return need;
 }
 
+/// The error sets of the last refused `fits` on this thread (StackUpgrade::refusal*Slots are asked
+/// right after the refusing check).
+struct Refusal {
+    game::Backpack const* backpack = nullptr; ///< the refused backpack (nullptr = no refusal recorded)
+    std::vector<int>      upgrades;
+    std::vector<int>      storage;
+};
+thread_local Refusal tLastRefusal;
+
 bool fits(
     std::shared_ptr<game::Backpack> const& backpack,
     double                                 multiplier,
@@ -206,7 +215,24 @@ bool fits(
         if (i == ignoreUpgradeSlot || slots[static_cast<std::size_t>(i)].empty()) continue;
         if (minimumMultiplierRequired(backpack, i) > effective) upgradesOver.push_back(i);
     }
-    if (!slotsOver && upgradesOver.empty()) return true;
+    // SC isMultiplierHighEnough's error sets, for the native screen's red overlay (GX-1):
+    // slotsOverMultiplier (storage slots) and the stackable-contents upgrades (their slots and
+    // inventory parts, e.g. the tank and battery bars).
+    tLastRefusal          = {};
+    tLastRefusal.backpack = backpack.get();
+    if (slotsOver) {
+        auto const& inv = backpack->inventory();
+        for (int i = 0; i < inv.size(); ++i) {
+            auto const& st = inv.at(i);
+            if (st.count <= 1 || st.maxStack <= 0) continue;
+            if (static_cast<double>(st.count) / static_cast<double>(st.maxStack) > effective) tLastRefusal.storage.push_back(i);
+        }
+    }
+    tLastRefusal.upgrades = upgradesOver;
+    if (!slotsOver && upgradesOver.empty()) {
+        tLastRefusal = {};
+        return true;
+    }
     reason = msg(
         player,
         "abp.stack.error.low_multiplier",
@@ -266,6 +292,18 @@ public:
         if (next >= multiplier()) return true; // same or higher tier never lowers the limit
         double whenRemoved = static_cast<double>(slotLimit(ctx.backpack(), ctx.slot())) / 64.0;
         return fits(ctx.backpackPtr(), whenRemoved * next, -1, ctx.player(), reason);
+    }
+
+    // SC UpgradeSlotChangeResult.fail(..., errorUpgradeSlots, slotsOverMultiplier, errorInventoryParts)
+    // of the check that just refused.
+    // (Only when that check was for this backpack: a refusal from elsewhere, e.g. another
+    // upgrade's allowsInstallOf, keeps the default overlay.)
+    [[nodiscard]] std::vector<int> refusalStorageSlots(UpgradeContext const& ctx) const override {
+        return tLastRefusal.backpack == &ctx.backpack() ? tLastRefusal.storage : std::vector<int>{};
+    }
+    [[nodiscard]] std::optional<std::vector<int>> refusalUpgradeSlots(UpgradeContext const& ctx) const override {
+        if (tLastRefusal.backpack != &ctx.backpack()) return std::nullopt;
+        return tLastRefusal.upgrades;
     }
 
     void attach(UpgradeContext const& ctx, core::BackpackInventory& inventory) override {

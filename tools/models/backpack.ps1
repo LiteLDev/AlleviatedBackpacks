@@ -201,7 +201,36 @@ function Save-Buf($b, [string]$path, [int]$w = $W, [int]$h = $H) {
         $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     } finally { $bmp.Dispose() }
 }
-foreach ($k in $buf.Keys) { Save-Buf $buf[$k] (Join-Path $texDir "$k.png") }
+foreach ($k in $buf.Keys) { if ($k -notlike 'fluid_*') { Save-Buf $buf[$k] (Join-Path $texDir "$k.png") } }
+foreach ($k in $fluidLooks.Keys) { Remove-Item -ErrorAction SilentlyContinue (Join-Path $texDir "fluid_$k.png") }
+
+# Tank fluids (GX-1): SB textures the tank fluid with the fluid's own still sprite (animated, tinted
+# like the fluid type), so the fluid parts have their own geometry in 16x16 sprite UV space
+# (geometry.alleviatedbackpacks.backpack_fluid) and their render controllers pick the texture:
+# water, milk and potions the game's textures/blocks/water_still_grey (32 frames), lava
+# textures/blocks/lava_still (20 frames) - flipbook frames chosen with uv_anim, tinted through the
+# controller's colour - and for fluids without a vanilla still texture our own 16x16 sprites.
+$fluidSprites = [ordered]@{
+    water       = @{ path = 'textures/blocks/water_still'; frames = 32; ticks = 2 }
+    lava        = @{ path = 'textures/blocks/lava_still'; frames = 20; ticks = 16 }
+    milk        = @{ path = 'textures/blocks/water_still_grey'; frames = 32; ticks = 2 }
+    powder_snow = @{ path = 'textures/entity/alleviatedbackpacks/backpack/fluid_powder_snow'; frames = 1; ticks = 1 }
+    honey       = @{ path = 'textures/entity/alleviatedbackpacks/backpack/fluid_honey'; frames = 1; ticks = 1 }
+    experience  = @{ path = 'textures/entity/alleviatedbackpacks/backpack/fluid_experience'; frames = 1; ticks = 1 }
+    potion      = @{ path = 'textures/blocks/water_still_grey'; frames = 32; ticks = 2 }
+}
+foreach ($k in 'powder_snow', 'honey', 'experience') {
+    $look = $fluidLooks[$k]
+    $sb   = New-Object 'uint32[]' (16 * 16)
+    for ($py = 0; $py -lt 16; $py++) {
+        for ($px = 0; $px -lt 16; $px++) {
+            $n  = Noise $px $py 1
+            $tw = 0.86 + 0.08 * [Math]::Sin(($px * 0.9 + $py * 1.7)) + 0.06 * ($n - 0.5)
+            $sb[$py * 16 + $px] = if ($tw -gt 0.92) { FromColor $look.hi } else { Shade $look.base $tw }
+        }
+    }
+    Save-Buf $sb (Join-Path $texDir "fluid_$k.png") 16 16
+}
 
 # ---- geometry ------------------------------------------------------------------------------------
 # Model frame "P" (placed backpack): x = 8 - sbX (SB "left" = high x = the backpack's own right
@@ -223,6 +252,7 @@ $geoBones = [System.Collections.Generic.List[object]]::new()
 $geoBones.Add([ordered]@{ name = 'root'; binding = 'q.item_slot_to_bone_name(c.item_slot)'; pivot = @(0, 24, 0) })
 $geoBones.Add([ordered]@{ name = 'xf'; parent = 'root'; pivot = @(0, 0, 0) })
 foreach ($name in $bones.Keys) {
+    if ($name -like 'fluid_*') { continue }
     $geoBones.Add([ordered]@{ name = $name; parent = 'xf'; pivot = @(0, 0, 0); cubes = $bones[$name] })
 }
 # Display item anchor: a locator at the centre of SB's anchor quad.
@@ -239,6 +269,29 @@ $geo = [ordered]@{
 }
 $geoPath = Join-Path $rp 'models/entity/alleviatedbackpacks_backpack.geo.json'
 $geo | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding utf8 $geoPath
+# Fluid geometry: the same root / xf bones (bound and animated like the main geometry) and the
+# fluid boxes, every face mapped onto the top-left of one 16x16 sprite frame.
+$fluidBones = [System.Collections.Generic.List[object]]::new()
+$fluidBones.Add([ordered]@{ name = 'root'; binding = 'q.item_slot_to_bone_name(c.item_slot)'; pivot = @(0, 24, 0) })
+$fluidBones.Add([ordered]@{ name = 'xf'; parent = 'root'; pivot = @(0, 0, 0) })
+foreach ($b in ($boxes | Where-Object { $_.mat -eq 'fluid' })) {
+    $uv = [ordered]@{}
+    foreach ($f in ($faces | Where-Object { $_.box -eq $b })) {
+        $uv[$dirName["$($f.dir)"]] = [ordered]@{ uv = @(0, 0); uv_size = @([Math]::Round([Math]::Min(16.0, [double]$f.w), 4), [Math]::Round([Math]::Min(16.0, [double]$f.h), 4)) }
+    }
+    $size   = @(($b.to[0] - $b.from[0]), ($b.to[1] - $b.from[1]), ($b.to[2] - $b.from[2]))
+    $origin = @((8 - $b.to[0]), $b.from[1], ($b.from[2] - 8))
+    $fluidBones.Add([ordered]@{ name = $b.bone; parent = 'xf'; pivot = @(0, 0, 0); cubes = @([ordered]@{ origin = @($origin | ForEach-Object { [Math]::Round($_, 4) }); size = @($size | ForEach-Object { [Math]::Round($_, 4) }); uv = $uv }) })
+}
+[ordered]@{
+    format_version       = '1.16.0'
+    'minecraft:geometry' = @(
+        [ordered]@{
+            description = [ordered]@{ identifier = 'geometry.alleviatedbackpacks.backpack_fluid'; texture_width = 16; texture_height = 16; visible_bounds_width = 3; visible_bounds_height = 3; visible_bounds_offset = @(0, 1.5, 0) }
+            bones       = $fluidBones
+        }
+    )
+} | ConvertTo-Json -Depth 20 -Compress | Set-Content -NoNewline -Encoding utf8 (Join-Path $rp 'models/entity/alleviatedbackpacks_backpack_fluid.geo.json')
 New-Item -ItemType Directory -Force "$PSScriptRoot/out" | Out-Null
 $bones.Keys | ConvertTo-Json | Set-Content -Encoding utf8 "$PSScriptRoot/out/bones.json"
 Write-Host "geometry: $($bones.Count) bones -> $geoPath"
@@ -416,11 +469,38 @@ function Visibility([scriptblock]$select) {
 }
 $prefix = 'controller.render.alleviatedbackpacks.backpack'
 $looks = @($fluidLooks.Keys)
+# A tank side's fluid controller: the look's texture (q.abp_model(lookField)) and its flipbook frame
+# (uv_anim: frame = floor(ticks / ticksPerFrame) mod frames over a strip of square frames; the
+# client's animation ticks are q.abp_model(15)). Attachables get their shader constants (change
+# colours) once per attachable, not per render controller, so the sprites are drawn as they are:
+# water with the game's blue water_still, lava, milk / potions on the grey water_still_grey.
+function FluidController([int]$lookField, [string]$bonePattern) {
+    $L      = "q.abp_model($lookField)"
+    $frames = ''; $ticks = ''
+    for ($i = 0; $i -lt $looks.Count; $i++) {
+        $frames += "$L == $i ? $($fluidSprites[$looks[$i]].frames) : "
+        $ticks  += "$L == $i ? $($fluidSprites[$looks[$i]].ticks) : "
+    }
+    $nf = "($($frames)1)"
+    $tf = "($($ticks)1)"
+    [ordered]@{
+        arrays                     = @{ textures = @{ 'Array.fluid' = @($looks | ForEach-Object { "Texture.fluid_$_" }) } }
+        geometry                   = 'Geometry.fluid'
+        materials                  = @(@{ '*' = 'Material.fluid' })
+        textures                   = @("Array.fluid[$L]")
+        rebuild_animation_matrices = $true
+        uv_anim                    = [ordered]@{
+            offset = @(0, "math.mod(math.floor(q.abp_model(15) / $tf), $nf) / $nf")
+            scale  = @(1, "1 / $nf")
+        }
+        part_visibility            = (Visibility { param($b) $b -match $bonePattern })
+    }
+}
 $rcs = [ordered]@{
     "$prefix.tint"    = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.tint' }); textures = @('Texture.tint'); part_visibility = (Visibility { param($b) $b -match '_(cloth|border)$' }) }
     "$prefix.fixed"   = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Texture.fixed'); part_visibility = (Visibility { param($b) $b -match '(_fixed$|^charge_)' }) }
-    "$prefix.fluid_l" = [ordered]@{ arrays = @{ textures = @{ 'Array.fluid' = @($looks | ForEach-Object { "Texture.fluid_$_" }) } }; geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Array.fluid[q.abp_model(10)]'); part_visibility = (Visibility { param($b) $b -match '^fluid_l_' }) }
-    "$prefix.fluid_r" = [ordered]@{ arrays = @{ textures = @{ 'Array.fluid' = @($looks | ForEach-Object { "Texture.fluid_$_" }) } }; geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.default' }); textures = @('Array.fluid[q.abp_model(11)]'); part_visibility = (Visibility { param($b) $b -match '^fluid_r_' }) }
+    "$prefix.fluid_l" = (FluidController 10 '^fluid_l_')
+    "$prefix.fluid_r" = (FluidController 11 '^fluid_r_')
     "$prefix.glass"   = [ordered]@{ geometry = 'Geometry.default'; materials = @(@{ '*' = 'Material.glass' }); textures = @('Texture.glass'); part_visibility = (Visibility { param($b) $b -match '_glass$' }) }
 }
 [ordered]@{ format_version = '1.8.0'; render_controllers = $rcs } | ConvertTo-Json -Depth 20 -Compress |
@@ -439,11 +519,22 @@ function Pose([int]$ctx, $pos, $rot, $scale) {
         scale    = (& $o 7 $scale)
     }
 }
+# GX-1: client-only display entities (dropped backpacks, item frames) set their own xf transform
+# (SB's "ground" / "fixed" display transforms), read through q.abp_model(80 + k): k 0 = on,
+# 1..3 position (px), 4..6 rotation (degrees), 7 scale.
+function EntityPose($pose) {
+    $o = { param($k, $v) "q.abp_model(80) ? q.abp_model($(80 + $k)) : ($v)" }
+    [ordered]@{
+        position = @((& $o 1 $pose.position[0]), (& $o 2 $pose.position[1]), (& $o 3 $pose.position[2]))
+        rotation = @((& $o 4 $pose.rotation[0]), (& $o 5 $pose.rotation[1]), (& $o 6 $pose.rotation[2]))
+        scale    = (& $o 7 $pose.scale)
+    }
+}
 $anim = [ordered]@{
     'animation.alleviatedbackpacks.backpack.worn'    = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 1 @(0, 12, 4.8) @(0, 180, 0) 1) } }
     'animation.alleviatedbackpacks.backpack.held_tp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 2 @(2, 12, -0.9) @(0, -90, 0) 0.75) } }
     'animation.alleviatedbackpacks.backpack.held_fp' = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 3 @(0, 12, -8) @(0, 0, 0) 0.5) } }
-    'animation.alleviatedbackpacks.backpack.placed'  = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (Pose 4 @(0, 0, 0) @(0, 0, 0) 1) } }
+    'animation.alleviatedbackpacks.backpack.placed'  = [ordered]@{ loop = $true; bones = [ordered]@{ xf = (EntityPose (Pose 4 @(0, 0, 0) @(0, 0, 0) 1)) } }
 }
 [ordered]@{ format_version = '1.10.0'; animations = $anim } | ConvertTo-Json -Depth 20 -Compress |
     Set-Content -NoNewline -Encoding utf8 (Join-Path $rp 'animations/alleviatedbackpacks_backpack.animation.json')
@@ -457,15 +548,15 @@ foreach ($t in $tiers) {
         fixed = "textures/entity/alleviatedbackpacks/backpack/fixed_$t"
         glass = 'textures/entity/alleviatedbackpacks/backpack/glass'
     }
-    foreach ($k in $looks) { $textures["fluid_$k"] = "textures/entity/alleviatedbackpacks/backpack/fluid_$k" }
+    foreach ($k in $looks) { $textures["fluid_$k"] = $fluidSprites[$k].path }
     $att = [ordered]@{
         format_version        = '1.10.0'
         'minecraft:attachable' = [ordered]@{
             description = [ordered]@{
                 identifier         = "alleviatedbackpacks:$($t)_backpack"
-                materials          = [ordered]@{ default = 'entity_alphatest'; tint = 'entity_alphatest_multicolor_tint'; glass = 'entity_alphablend' }
+                materials          = [ordered]@{ default = 'entity_alphatest'; tint = 'entity_alphatest_multicolor_tint'; glass = 'entity_alphablend'; fluid = 'entity_alphatest' }
                 textures           = $textures
-                geometry           = [ordered]@{ default = 'geometry.alleviatedbackpacks.backpack' }
+                geometry           = [ordered]@{ default = 'geometry.alleviatedbackpacks.backpack'; fluid = 'geometry.alleviatedbackpacks.backpack_fluid' }
                 animations         = [ordered]@{
                     worn    = 'animation.alleviatedbackpacks.backpack.worn'
                     held_tp = 'animation.alleviatedbackpacks.backpack.held_tp'

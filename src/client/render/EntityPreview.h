@@ -43,6 +43,10 @@ public:
 /// no level or the type can't be created.
 [[nodiscard]] std::unique_ptr<DisplayEntity> createDisplayEntity(std::string const& type, nlohmann::json const& syncedData = nlohmann::json::array());
 
+/// Applies actor properties (e.g. `minecraft:climate_variant`) to a display entity: `propertiesNbt` is
+/// the base64 binary NBT of an entity's saved "properties" compound. False when it can't be applied.
+bool applyProperties(Actor& actor, std::string const& propertiesNbt);
+
 struct EntityPose {
     float bodyYaw = 0; ///< degrees; 0 faces the viewer
     float headYaw = 0; ///< degrees, same reference as bodyYaw
@@ -50,6 +54,10 @@ struct EntityPose {
     /// Degrees the whole model is tilted towards the viewer about the screen's horizontal axis,
     /// i.e. seen from above (SB SmithingScreen.ARMOR_STAND_ANGLE: 25 degrees). 0 = side view.
     float viewPitch = 0;
+    /// Height (blocks above the feet) of the point the model turns about; that point is drawn at
+    /// (x, bottomY). 0 = the feet (SB's entity previews); 0.5 = a block model's centre (GX-1, SC's
+    /// item display preview turns the backpack about its centre).
+    float pivotY = 0;
 };
 
 /// Draws `actor` with its feet centred at (x, bottomY) (GUI units), `scale` GUI units per block,
