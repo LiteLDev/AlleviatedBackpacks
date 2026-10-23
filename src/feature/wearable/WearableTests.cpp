@@ -123,6 +123,49 @@ ll::coro::CoroTask<> groundPlayer(Context& ctx) {
     co_await ctx.ticks(2);
 }
 
+/// Moves the test player 40 blocks east when a real player stands within 24 blocks (on the client the
+/// test player spawns next to the local player at the world spawn): mobs that pick the nearest
+/// player would otherwise choose the real one.
+ll::coro::CoroTask<> stepAwayFromRealPlayers(Context& ctx) {
+    auto& p    = ctx.player();
+    bool  near = false;
+    p.getLevel().forEachPlayer([&](Player& other) {
+        if (&other != &p && !other.isSimulatedPlayer() && other.getDimensionId() == p.getDimensionId()
+            && other.getPosition().distanceTo(p.getPosition()) < 24.0f) {
+            near = true;
+        }
+        return !near;
+    });
+    if (!near) co_return;
+    auto&    bs  = p.getDimensionBlockSource();
+    auto     pos = p.getPosition();
+    BlockPos column{static_cast<int>(std::floor(pos.x)) + 40, 0, static_cast<int>(std::floor(pos.z))};
+    for (int i = 0; i < 100 && !bs.hasChunksAt(column, 2, false); ++i) co_await ctx.ticks(2);
+    ctx.require(bs.hasChunksAt(column, 2, false), "chunks 40 blocks east of the test player did not load");
+    auto y = bs.getAboveTopSolidBlock(column.x, column.z, false, false);
+    ctx.info("a real player is near: test player moved 40 blocks east");
+    p.teleport(Vec3{pos.x + 40.0f, static_cast<float>(y), pos.z}, p.getDimensionId());
+    co_await ctx.ticks(2);
+}
+
+/// Removes the dropped items within 16 blocks of the test player. The test area is shared by every
+/// selftest; piglins go for leftover gold items (admiring them) instead of looking for targets.
+void clearDropsNear(Context& ctx) {
+    auto& p   = ctx.player();
+    auto  pos = p.getPosition();
+    int   n   = 0;
+    for (auto* a : p.getDimensionBlockSource().getEntities(
+             AABB{Vec3{pos.x - 16, pos.y - 8, pos.z - 16}, Vec3{pos.x + 16, pos.y + 8, pos.z + 16}},
+             0.f
+         )) {
+        if (a && a->isType(ActorType::ItemEntity)) {
+            a->remove();
+            ++n;
+        }
+    }
+    if (n > 0) ctx.info("removed " + std::to_string(n) + " leftover dropped items");
+}
+
 /// A position on the ground next to the player.
 Vec3 near(Player& player, float dx) {
     auto  p  = player.getPosition();
@@ -718,6 +761,8 @@ ABP_REGISTER_SELFTEST("wearable.chest_loot", [](Context& ctx) -> ll::coro::CoroT
 // SB BackpackItem.makesPiglinsNeutral: a worn Gold Backpack counts as gold armour for piglins.
 ABP_REGISTER_SELFTEST("wearable.piglin_neutral", [](Context& ctx) -> ll::coro::CoroTask<> {
     co_await groundPlayer(ctx);
+    co_await stepAwayFromRealPlayers(ctx);
+    clearDropsNear(ctx);
     DifficultyGuard difficulty(ctx.player().getLevel());
     SbGuard         guard;
     guard.add().chance = 0.0; // the piglin itself gets no backpack
@@ -756,11 +801,28 @@ ABP_REGISTER_SELFTEST("wearable.piglin_neutral", [](Context& ctx) -> ll::coro::C
         targeted = targetsMe();
     }
     ctx.check(!targeted, "the piglin leaves a Gold Backpack wearer alone");
+    if (piglinTargetsSkipped() == skippedBefore) {
+        // Diagnostics: what is around (the test area is shared with every other selftest).
+        auto&       bs  = player.getDimensionBlockSource();
+        auto        pos = player.getPosition();
+        std::string around;
+        for (auto* a : bs.getEntities(AABB{Vec3{pos.x - 16, pos.y - 8, pos.z - 16}, Vec3{pos.x + 16, pos.y + 8, pos.z + 16}}, 0.f)) {
+            if (!a) continue;
+            around += " " + a->getTypeName();
+            if (a->isType(ActorType::ItemEntity)) around += "(" + static_cast<ItemActor*>(a)->item().getTypeName() + ")";
+        }
+        auto* m = player.getLevel().fetchEntity(pid, false);
+        ctx.info(
+            "no skip: piglin " + std::string(m ? "present" : "gone") + " target="
+            + (m ? std::to_string(m->mTargetId->rawID) : std::string("-")) + " around:" + around
+        );
+    }
     ctx.check(piglinTargetsSkipped() > skippedBefore, "the gold-armour target entry was skipped for the wearer");
     // Iron backpack: a fresh piglin attacks (the setup can target the player at all). Fresh: an
     // overworld piglin zombifies after 15 s.
     if (auto* m = player.getLevel().fetchEntity(pid, false)) m->despawn();
     player.setArmor(ArmorSlot::Torso, ctx.backpackItem(*iron));
+    clearDropsNear(ctx);
     Mob* control = nullptr;
     for (int attempt = 0; attempt < 8 && !control; ++attempt) {
         auto* m = spawnMob(ctx, "minecraft:piglin", 4);

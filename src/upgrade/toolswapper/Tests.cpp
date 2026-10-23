@@ -318,6 +318,11 @@ ABP_REGISTER_SELFTEST("toolswapper.hook_attack", [](Context& ctx) -> ll::coro::C
 ABP_REGISTER_SELFTEST("toolswapper.key_block", [](Context& ctx) -> ll::coro::CoroTask<> {
     auto& p      = ctx.player();
     auto  ground = co_await waitGround(ctx, p);
+    // On the client the test player spawns where the real player stands (the world spawn); the key's
+    // ray would hit the real player instead of the ground. Step aside (the ground check below skips
+    // the test if the terrain there differs).
+    ground.x += 3;
+    ground.z += 3;
     auto  name   = p.getDimensionBlockSourceConst().getBlock(ground).getTypeName();
     lookDown(p, ground);
     co_await ctx.ticks(2);
