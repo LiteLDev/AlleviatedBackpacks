@@ -50,7 +50,7 @@ public:
         p.fillRect({bg.x + 1, bg.y + 1, bg.w - 2, bg.h - 2}, Color::rgb(on ? 0x9C8C70 : 0x4D4537));
         p.fillRect({bg.x + 1, bg.bottom() - 1, bg.w - 1, 1}, Color::rgb(on ? 0xC7B898 : 0x5E5544));
         p.fillRect({bg.right() - 1, bg.y + 1, 1, bg.h - 1}, Color::rgb(on ? 0xC7B898 : 0x5E5544));
-        box.rect = rect;
+        box.rect = {rect.x, rect.y, rect.w - 4, rect.h}; // the text area (GX-4 audit: 86 wide, padding 1)
         box.render(p, time);
     }
     bool mouseDown(ui::MouseButton button, float x, float y) override {
@@ -59,7 +59,8 @@ public:
             box.setFocused(false);
             return rect.contains(x, y);
         }
-        return box.onMouseButton(button == ui::MouseButton::Right, true, x, y);
+        // SC TextBox.mouseClicked -> EditBox: any button focuses, a right click does not clear.
+        return box.onMouseButton(false, true, x, y);
     }
     bool key(int vk, bool down) override { return box.onKey(vk, down); }
     bool chr(std::string const& utf8) override { return box.onChar(utf8); }
@@ -111,7 +112,7 @@ public:
         mField              = &field;
         field.rect          = {area.x + 5, area.y + 25, 90, 14};
         field.box.bordered  = false;
-        field.box.padding   = 0;
+        field.box.padding   = 1;
         field.box.backgroundArgb = 0x00000000;
         field.box.maxLength = 50;
         field.box.textColor = 0xFFFFFF;

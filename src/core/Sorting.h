@@ -46,11 +46,17 @@ struct SortLayout {
     /// Memory slots: a non-empty entry means only items matching it (`memoryMatches`) may be
     /// placed there; sorting fills them with their item first.
     std::vector<ItemStackData> memory;
+    /// SC MemorySettingsCategory with `ignoreNbt` off ("Match NBT"): a memory slot only takes the
+    /// exact remembered stack (id, aux and NBT; SC `ItemStackKey.matches`), not every variant.
+    bool                       memoryMatchNbt = false;
 };
 
 /// True if `item` may go into a memory slot remembering `remembered` (same id and aux; NBT is
 /// ignored so damaged / enchanted variants still match).
 [[nodiscard]] bool memoryMatches(ItemStackData const& remembered, ItemStackData const& item);
+/// SC `MemorySettingsCategory.matchesFilter` in the layout's mode: `memoryMatches` when NBT is
+/// ignored, the exact item (`sameItem`) when it is matched.
+[[nodiscard]] bool memorySlotAccepts(SortLayout const& layout, ItemStackData const& remembered, ItemStackData const& item);
 
 /// Sorts `inv` like `BackpackInventory::sort`, honouring `layout`: locked slots are untouched,
 /// memory slots receive their remembered item first (and nothing else), the remaining kinds are

@@ -324,6 +324,8 @@ bool TextBox::onKey(int vk, bool down) {
         break;
 
     case VK_RETURN:
+        submit(); // SC TextBox.keyPressed -> onEnterPressed: the box keeps its focus
+        break;
     case VK_ESCAPE:
         setFocused(false); // submits non-blank text
         break;

@@ -26,7 +26,7 @@ Statuses:
 | Backpacks never stack; every upgrade, conversion and downgrade item stacks to 64; upgrade base 16 | Exact (GX-4) | `assets/pack/bp/items/*.json` | Before: 1 or 16 for most upgrades |
 | Netherite backpack is fire resistant as an item | Exact (GX-4) | `netherite_backpack.json` (`minecraft:fire_resistant`) | |
 | Backpacks can't go into bundles or shulker boxes (`canBePlacedInContainerItems` = false) | Exact (GX-4 for bundles) | item JSON `minecraft:storage_weight_modifier`, `feature/admin/SbConfig.cpp` | The bundle rule is static: it ignores `canBePlacedInContainerItems = true` |
-| Backpack recipe, tier upgrade recipes keeping contents, netherite smithing | Exact | `assets/pack/bp/recipes/`, `feature/tiers/TierCrafting.cpp` | |
+| Backpack recipe, tier upgrade recipes keeping contents, netherite smithing | Exact | `assets/pack/bp/recipes/`, `feature/tiers/TierCrafting.cpp`, `feature/tiers/SmithingBase.cpp` | GX-3: the Diamond backpack has no durability (like SB); Bedrock's recipe-load check "base item is not a piece of armor or equipment" is answered by a hook (`Recipes::_loadRecipe` + `ComponentItem::isDamageable`). Selftest `tiers.smithing_without_durability`, client e2e `gx3` (smithing table) |
 | Tier upgrade refused for a linked non-primary endpoint | Exact (GX-4) | `TierCrafting.cpp` (`Storage::tierGrowthGate`) | |
 | `backpack_dye` (1-8 dyes, main/accent by column) | Exact | `recipes/dye/`, `feature/tiers/DyeTag.cpp` | |
 | Cauldron wash resets main and accent colour | Exact (GX-4) | `feature/tiers/TierLore.cpp` | Before: only the main colour |
@@ -56,7 +56,7 @@ Statuses:
 | `BackpackBlockEntity`: placed ticks, hopper/automation I/O, `noConnectionBlocks`, loot on first access | Exact | `feature/placed`, `feature/admin/Connections.cpp` | |
 | `BackpackStorage` drops empty, never-accessed storages on load | Gap | `game/Storage.cpp` | `removeNonPlayer` is exact |
 | `BackpackAccessLogger`, `/sbp list/give/removeNonPlayer` | Exact | `feature/admin` | Bedrock chat has no click/hover events |
-| Backpack templates (`/sbp template ...`) | Exact | `feature/templates` | SNBT export: GX-2 |
+| Backpack templates (`/sbp template ...`) | Exact | `feature/templates` | GX-3: settings and backpack templates are exported as SNBT (`.snbt`, like SB); older `.json` exports still load |
 | Opening another player's worn backpack | Exact | `feature/access` | |
 | Mob backpacks (spawn chances, weights, loot, potions, armour, jukebox, drops) | Exact | `feature/wearable/MobBackpacks.cpp` | Mob jukebox disc count follows `advancedJukeboxUpgrade` size (GX-4). Converted-mob health, creeper buff strip, jukebox follow: GX-2 |
 | Too-many-backpacks slowness, `onlyWornBackpackTriggersUpgrades` | Exact | `feature/nerf` | |
@@ -114,28 +114,31 @@ Statuses:
 
 | Feature (SB/SC class) | Status | Where | Notes |
 |---|---|---|---|
-| StorageScreenBase layout, upgrade column, switches, sort/transfer buttons, search box, scroll panel, counts, memory/no-sort overlays, error overlay | Exact | `client/ui/screen/BackpackScreen.cpp`, `core/screen` | Bar error overlay, cursor draw order: GX-3 |
+| StorageScreenBase layout, upgrade column, switches, sort/transfer buttons, search box, scroll panel, counts, memory/no-sort overlays, error overlay | Exact | `client/ui/screen/BackpackScreen.cpp`, `core/screen` | GX-3: the carried item is drawn below the sort buttons, upgrade switches and the error box (SC render order) |
 | Closed tabs drawn unless fully covered; tooltip only when the open tab doesn't cover its top | Exact (GX-4) | `BackpackScreen.cpp` | The two checks were swapped |
 | Storage settings tab opens on any mouse button | Exact (GX-4) | `BackpackScreen.cpp` | |
 | XP Pump action buttons work with any mouse button | Exact (GX-4) | `tabs/xppump/XpPumpTab.cpp` | |
-| Empty upgrade slot icon | Gap | `SbStyle.cpp` | |
-| Switching an upgrade on/off closes the open tab (SC RELOAD_NEEDED) | Gap | `BackpackScreen::rebuildTabs` | |
-| Enter in text boxes keeps focus | Gap | `widgets/TextBox.cpp` | |
-| Linked-storage role icon before the title | Gap | `BackpackScreen.cpp` | |
-| Truncated open-tab title tooltip | Gap | `BackpackScreen.cpp` | |
-| Clicking a tab border doesn't throw the cursor item | Gap | `BackpackScreen::onMouseButton` | |
-| Middle-click sort anywhere but the player inventory, before other handlers | Gap | `BackpackScreen::onMouseButton` | |
-| Drag distribution over upgrade slots | Gap | `BackpackScreen::canDragTo` | |
-| Q / 1-9 over upgrade slots; bound (not literal) keys | Gap | `BackpackScreen::onKey`, `NativeScreens.cpp` | |
-| Jukebox playtime overlay updates smoothly | Gap | `tabs/jukebox` | |
-| Crafting "Previous" tooltip on the left | Gap | `tabs/crafting` | |
-| LargeResultSelector, anvil name box, smithing help tooltips, stonecutter hit box details | Gap | `tabs/stonecutter`, `upgrade/anvil/AnvilTab.cpp`, `upgrade/smithing` | |
-| Settings screens (main, memory, no sort, item display, templates) | Exact | `client/ui/settings`, `feature/gui` | Item Display 3D preview: GX-1. Server-side Keep Tab Open, Match-NBT sort: GX-3 |
+| Empty upgrade slot icon | Gap | `SbStyle.cpp` | Not done by GX-3 (needs the outline icon art) |
+| Switching an upgrade on/off closes the open tab (SC RELOAD_NEEDED) | Exact (GX-3) | `BackpackScreen::rebuildTabs`, `NativeScreens.cpp` | The enabled flags are part of the tab signature; the server drops the open tab id |
+| Enter in text boxes keeps focus | Exact (GX-3) | `widgets/TextBox.cpp` | |
+| Linked-storage role icon before the title | Gap | `BackpackScreen.cpp` | Not done by GX-3 (needs the role in the screen model) |
+| Truncated open-tab title tooltip | Exact (GX-3) | `BackpackScreen.cpp` | |
+| Clicking a tab border doesn't throw the cursor item | Exact (GX-3) | `BackpackScreen::onMouseButton` | SC hasClickedOutside: upgrade slots rectangle and tab rectangles |
+| Middle-click sort anywhere but the player inventory, before other handlers | Exact (GX-3) | `BackpackScreen::onMouseButton` | |
+| Drag distribution over upgrade slots | Exact (GX-3) | `BackpackScreen::canDragTo`, `NativeScreens.cpp` | One upgrade per empty slot |
+| Q / 1-9 over upgrade slots; bound (not literal) keys | Gap | `BackpackScreen::onKey`, `NativeScreens.cpp` | Not done by GX-3 |
+| Jukebox playtime overlay updates smoothly | Gap | `tabs/jukebox` | Not done by GX-3 |
+| Crafting "Previous" tooltip on the left | Exact (GX-3) | `tabs/crafting`, `widgets/Tooltip.*` | SC LEFT_SIDE_TOOLTIP_POSITIONER |
+| LargeResultSelector, anvil name box, smithing help tooltips, stonecutter hit box details | Exact (GX-3) | `tabs/stonecutter`, `upgrade/anvil/AnvilTab.cpp`, `upgrade/smithing` | Scrollbar moves on drag only, centred "Search" hint (0xBBBBBB); anvil box padding 1 / 86 wide, right click doesn't clear; onboarding tooltips with an item carried; recipe tooltip hit box from x (clicks from x + 1). Alchemy disabled condition button: no background already (SC DISABLED_CONDITION blit only); left as audited |
+| Settings screens (main, memory, no sort, item display, templates) | Exact | `client/ui/settings`, `feature/gui` | Item Display 3D preview: GX-1. GX-3: the open tab id is kept on the storage (server side, removed when Keep Tab Open is off, like SC removeOpenTabIfKeepOff); Match-NBT memory slots take only the exact stack when sorting, in filter-by-storage and in the stash overlay |
 | Key bindings (names, defaults, categories, open/inventory interaction/tool swap/toggles, sort, transfer) | Exact | `client/input` | |
-| Right-click stashing | Exact | `client/input/Stash.cpp`, `feature/stash` | Stashing in all slots: GX-3 |
-| Backpack tooltip and Shift contents tooltip | Exact | `client/tooltip` | Tooltip wrapping: GX-3 |
+| Right-click stashing | Exact | `client/input/Stash.cpp`, `feature/stash` | GX-3: any vanilla container slot (crafting grids, furnace / blast furnace / smoker incl. result with XP, brewing stand, stations, crafter, horse); main inventory slot indices fixed |
+| Backpack tooltip and Shift contents tooltip | Exact | `client/tooltip` | GX-3: long upgrade tooltip lines wrap by NeoForge's rule (only when the tooltip fits on neither side; default font widths) |
 | Worn backpack model, upgrade particles, item colours | Exact | `client/render` | Dropped/item-frame model, two-colour slot icons, armour-stand base plate: GX-1 |
-| Button sounds, crafting result preview colours, click-equip bug, diamond durability workaround | GX-3 / GX-1 | | |
+| Sort / transfer keys play the button click (`playButtonSound`) | Exact (GX-3) | `BackpackScreen.cpp` | |
+| Crafting / smithing output preview: dyed colours, the source backpack (contents tooltip) | Exact (GX-3) | `feature/tiers/CraftPreview.cpp` | |
+| Clicking a backpack back into its slot places it (not equipped) | Exact (GX-3) | `client/input/Stash.cpp`, `Hotkeys.cpp`, `SlotHover.cpp` | The main inventory grid's indices start at 0 (= slot 9); they collided with the hotbar |
+| Diamond backpack durability workaround | Exact (GX-3) | `feature/tiers/SmithingBase.cpp` | Removed: no durability |
 
 ## Strings
 
