@@ -10,8 +10,8 @@
 // cloth and border in grey (tinted here with the main / accent colour), the untinted parts per
 // tier, the tank fluid per level (tinted with the fluid colour), the battery charge per step and
 // the glass. The companion UI (Painter::item) draws backpacks with these layers instead of the item
-// sprite. Vanilla slots keep the item sprite: the default model view (the same render), tinted
-// with the main colour through the item colour.
+// sprite, and so do vanilla slots (inventory, hotbar, containers): a hook on the vanilla
+// InventoryItemRenderer draws the same layers in place of the one-colour item sprite (GX-1).
 
 class ItemStack;
 

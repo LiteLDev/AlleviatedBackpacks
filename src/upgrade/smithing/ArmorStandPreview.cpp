@@ -11,6 +11,7 @@
 
 #include "mc/client/game/ClientInstance.h"
 #include "mc/client/multiplayer/ClientLevel.h"
+#include "mc/deps/core/string/HashedString.h"
 #include "mc/deps/shared_types/legacy/actor/ArmorSlot.h"
 #include "mc/world/actor/Actor.h"
 #include "mc/world/item/ItemStack.h"
@@ -31,6 +32,9 @@ namespace render = ::abp::client::render;
 /// SB SmithingUpgradeTab: the stand's body at 210 degrees, i.e. turned 30 degrees from facing the
 /// viewer, and SmithingScreen.ARMOR_STAND_ANGLE: seen 25 degrees from above.
 constexpr render::EntityPose kPose{.bodyYaw = 30.f, .headYaw = 30.f, .pitch = 0.f, .viewPitch = 25.f};
+
+/// Client entity (resource pack only) that draws the stand without its base plate.
+constexpr char const* kPreviewStandRenderer = "alleviatedbackpacks:smithing_preview_stand";
 
 /// The display armor stand (client thread): created on first use, released when the world is left.
 struct Stand {
@@ -64,6 +68,11 @@ Actor* standActor() {
             log().warn("smithing preview: could not create the armor stand");
             return nullptr;
         }
+        // SB sets `setNoBasePlate(true)`. Bedrock armor stands have no such flag (their client
+        // entity always draws the geometry's "baseplate" bone), so the preview stand is drawn by
+        // our client entity `alleviatedbackpacks:smithing_preview_stand`: the vanilla armor stand
+        // geometry, texture and pose animations with a render controller that hides "baseplate".
+        gStand.entity->actor().setActorRendererId(HashedString(kPreviewStandRenderer));
         log().info("smithing preview: armor stand display entity ready");
     }
     return &gStand.entity->actor();

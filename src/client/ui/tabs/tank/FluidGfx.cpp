@@ -4,14 +4,20 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <optional>
 
 #include "mc/world/item/ItemStack.h"
 
+#include "api/abp/Fluid.h"
 #include "client/input/InputRouter.h"
 #include "client/ui/widgets/SbStyle.h"
 #include "client/ui/widgets/Tooltip.h"
+#include "core/Fluid.h"
+#include "core/FluidRegistry.h"
 #include "core/ItemStackData.h"
+#include "feature/model/RenderModel.h"
 #include "core/screen/ScreenModel.h"
 #include "game/ItemConv.h"
 
@@ -212,6 +218,75 @@ void fluid(Painter& p, float x, float y, float w, float h, std::uint32_t argb) {
                 if (rx >= w) break;
                 float rw = std::min(static_cast<float>(r.w), w - rx);
                 p.fillRect({x + rx, y + static_cast<float>(row), rw, 1}, shades[r.shade]);
+            }
+        }
+    }
+}
+
+namespace {
+
+/// A block atlas flipbook of the vanilla resource pack (textures/flipbook_textures.json): a vertical
+/// strip of square frames.
+struct Flipbook {
+    char const* path;
+    int         frames;        ///< strip height / width of the vanilla texture
+    int         ticksPerFrame;
+};
+constexpr Flipbook kWaterStill{"textures/blocks/water_still_grey", 32, 2};
+constexpr Flipbook kLavaStill{"textures/blocks/lava_still", 20, 16};
+
+struct RealFluid {
+    Flipbook      texture;
+    std::uint32_t tint;
+};
+
+/// NeoForge's fluid types: water = minecraft:block/water_still tinted 0x3F76E4, lava =
+/// lava_still untinted, milk = a white still texture (Bedrock: the grey water still, untinted),
+/// potion fluids = the water still tinted with the potion's colour (the IClientFluidTypeExtensions
+/// tint SB reads).
+std::optional<RealFluid> realFluid(nlohmann::json const& f) {
+    auto id = f.value("id", std::string{});
+    if (id == api::fluids::Water) return RealFluid{kWaterStill, model::fluidColor(core::fluid::kWater)};
+    if (id == api::fluids::Lava) return RealFluid{kLavaStill, 0xFFFFFFFF};
+    if (id == api::fluids::Milk) return RealFluid{kWaterStill, 0xFFFFFFFF};
+    if (id == api::fluids::Potion || id == api::fluids::SplashPotion || id == api::fluids::LingeringPotion) {
+        auto legacy = core::legacyIdOf(api::FluidStack{id, 1, f.value("nbt", std::string{})});
+        return RealFluid{kWaterStill, model::fluidColor(legacy)};
+    }
+    return std::nullopt;
+}
+
+double animationTicks() {
+    using namespace std::chrono;
+    static auto const start = steady_clock::now();
+    return duration<double>(steady_clock::now() - start).count() * 20.0;
+}
+
+} // namespace
+
+void fluid(Painter& p, float x, float y, float w, float h, nlohmann::json const& f) {
+    if (w <= 0 || h <= 0 || !f.is_object()) return;
+    auto real = realFluid(f);
+    if (!real) {
+        fluid(p, x, y, w, h, f.value("color", 0xFFFFFFFFu));
+        return;
+    }
+    auto const& tex    = real->texture;
+    double      frameF = animationTicks() / tex.ticksPerFrame;
+    int         frame  = static_cast<int>(std::floor(frameF)) % tex.frames;
+    int         next   = (frame + 1) % tex.frames;
+    float       blend  = static_cast<float>(frameF - std::floor(frameF)); // flipbooks blend frames by default
+    Color       tint   = Color::rgb(real->tint & 0xFFFFFF);
+    float       fh     = 1.f / static_cast<float>(tex.frames);
+    // Tiled from the top of the column: whole 16x16 sprites, the last one cut (its top part).
+    for (float ty = 0; ty < h; ty += 16) {
+        float th = std::min(16.f, h - ty);
+        for (float tx = 0; tx < w; tx += 16) {
+            float tw = std::min(16.f, w - tx);
+            Rect  r{x + tx, y + ty, tw, th};
+            p.textureUV(tex.path, r, {0, fh * static_cast<float>(frame), tw / 16.f, fh * th / 16.f}, 1, Painter::Layer::Background, tint);
+            if (blend > 0.01f) {
+                p.textureUV(tex.path, r, {0, fh * static_cast<float>(next), tw / 16.f, fh * th / 16.f}, blend, Painter::Layer::Background, tint);
             }
         }
     }

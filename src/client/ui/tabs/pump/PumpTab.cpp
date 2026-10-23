@@ -53,7 +53,7 @@ public:
             float x = rect.x + 1 + static_cast<float>(i) * 18, y = rect.y + 1;
             sb::slotFrame(p, x, y);
             auto const& f = (*filter)[static_cast<std::size_t>(i)];
-            if (f.is_object()) fg::fluid(p, x, y, 16, 16, f.value("color", 0xFFFFFFFFu));
+            if (f.is_object()) fg::fluid(p, x, y, 16, 16, f);
             if (slotAt(mx, my) == i) p.fillRect({x, y, 16, 16}, sb::color::HOVER, Painter::Layer::Foreground);
         }
     }

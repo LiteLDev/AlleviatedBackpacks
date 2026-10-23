@@ -20,6 +20,11 @@ namespace abp::client::ui::fluidgfx {
 /// A fluid column `w` x `h` (SC renderTiledFluidTextureAtlas: a "still" pattern tinted with the
 /// fluid colour, ARGB).
 void fluid(Painter& p, float x, float y, float w, float h, std::uint32_t argb);
+/// SC renderTiledFluidTextureAtlas for a fluid of the server's tab data (`{"id", "nbt", "color"}`):
+/// water, lava, milk and potions use the game's real still textures (the block atlas flipbooks,
+/// animated and frame-blended like the atlas), tinted like their NeoForge fluid types (water's
+/// tint, potion colour); other fluids fall back to the tinted pattern above.
+void fluid(Painter& p, float x, float y, float w, float h, nlohmann::json const& fluid);
 
 /// SC BAR_BACKGROUND_TOP / MIDDLE / BOTTOM: an 18 wide recessed column of height `h`.
 void barBackground(Painter& p, float x, float y, float h);

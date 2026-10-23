@@ -151,6 +151,11 @@ public:
     /// `canReplaceWith` refuses (SC `UpgradeSlotChangeResult` error slots), e.g. the slots covered
     /// by captured mobs. Default: none (only the upgrade slot is highlighted).
     [[nodiscard]] virtual std::vector<int> refusalStorageSlots(UpgradeContext const& /*ctx*/) const { return {}; }
+    /// Upgrade slots (and with them their inventory parts, e.g. tank / battery bars) the native
+    /// screen marks with SC's red error overlay when `canInstall` / `canRemove` /
+    /// `canReplaceWith` refuses, asked right after the refusal (SC `UpgradeSlotChangeResult`
+    /// errorUpgradeSlots / errorInventoryParts). Default nullopt: the upgrade's own slot.
+    [[nodiscard]] virtual std::optional<std::vector<int>> refusalUpgradeSlots(UpgradeContext const& /*ctx*/) const { return std::nullopt; }
     /// The player clicks this installed upgrade's slot in the GUI while holding `item` on the
     /// cursor (e.g. a Stack upgrade conversion item). Return nullopt to let the normal swap happen,
     /// or how many of `item` were used up (the cursor loses that many; 0 = refused) — then

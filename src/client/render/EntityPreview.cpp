@@ -1,6 +1,7 @@
 #ifdef ABP_CLIENT
 
 #include "client/render/EntityPreview.h"
+#include "client/render/WorldRender.h"
 
 #include <cstddef>
 #include <excpt.h>
@@ -45,12 +46,17 @@
 #include "mc/world/actor/DataItem.h"
 #include "mc/world/actor/Mob.h"
 #include "mc/world/actor/SynchedActorDataEntityWrapper.h"
+#include "mc/world/actor/state/PropertyComponent.h"
+#include "mc/legacy/ActorRuntimeID.h"
+#include "mc/legacy/ActorUniqueID.h"
+#include "mc/deps/nbt/CompoundTag.h"
 #include "mc/world/level/ActorGarbageCollector.h"
 #include "mc/world/level/BlockPos.h"
 #include "mc/world/level/dimension/Dimension.h"
 
 #include "client/Client.h"
 #include "client/ui/gfx/Painter.h"
+#include "core/Codec.h"
 #include "mod/Log.h"
 
 namespace abp::client::render {
@@ -105,6 +111,17 @@ std::unordered_map<Actor const*, EntityState>& states() {
     return m;
 }
 
+
+/// World pass state per display entity (WorldRender.h).
+struct WorldState {
+    bool failed = false;
+    bool logged = false;
+};
+std::unordered_map<Actor const*, WorldState>& worldStates() {
+    static std::unordered_map<Actor const*, WorldState> m;
+    return m;
+}
+
 struct Fault {
     unsigned long code    = 0;
     std::uintptr_t address = 0; ///< faulting instruction (RVA when inside the game)
@@ -148,6 +165,7 @@ public:
     DisplayEntityImpl(OwnerPtr<EntityContext> owner, Actor* actor) : mOwner(std::move(owner)), mActor(actor) {}
     ~DisplayEntityImpl() override {
         states().erase(mActor);
+        worldStates().erase(mActor);
         // Hand the entity to the level's garbage collector (the game's way to drop an entity that
         // is not in the world); without a level the registry is gone with it anyway.
         try {
@@ -243,6 +261,55 @@ std::unique_ptr<DisplayEntity> createDisplayEntity(std::string const& type, nloh
     return entity;
 }
 
+Actor* addLevelDisplayEntity(std::string const& type, Vec3 const& at) {
+    auto* client = currentClient();
+    auto* level  = client ? client->getLevel() : nullptr;
+    auto* player = currentPlayer();
+    if (!level || !player || type.empty()) return nullptr;
+    OwnerPtr<EntityContext> owner = level->getActorFactory().clientCreateDisplayActor(ActorDefinitionIdentifier(type), player, at, Vec2{0.f, 0.f});
+    auto                    ref   = owner.tryUnwrap();
+    if (!ref) return nullptr;
+    Actor* actor = ref.as_ptr();
+    actor->setDimension(player->getDimension().weak_from_this());
+    if (actor->getActorRendererId().getString().empty()) {
+        auto const& query = actor->queryEntityRenderer();
+        actor->setActorRendererId(query.getString().empty() ? HashedString(type) : query);
+    }
+    // A client-only entity of the level (rendered with the others, attachables included), with ids
+    // far above anything a server hands out.
+    static std::int64_t next = 0;
+    ++next;
+    ActorUniqueID  unique{-(0x4142500000000000ll + next)};
+    ActorRuntimeID runtime;
+    runtime.rawID = 0x4142500000000000ull + static_cast<std::uint64_t>(next);
+    return level->putEntity(player->getDimensionBlockSource(), unique, runtime, std::move(owner));
+}
+
+void removeLevelDisplayEntity(Actor& actor) {
+    auto* client = currentClient();
+    auto* level  = client ? client->getLevel() : nullptr;
+    if (!level) return;
+    actor.remove();
+}
+
+bool applyProperties(Actor& actor, std::string const& propertiesNbt) {
+    if (propertiesNbt.empty()) return false;
+    auto bytes = core::base64Decode(propertiesNbt);
+    if (!bytes) return false;
+    auto tag = CompoundTag::fromBinaryNbt(*bytes);
+    if (!tag) return false;
+    // The display copy got the type's property group (synced by the server at join) with default
+    // values; the saved values replace them as when the entity is loaded from disk.
+    auto props = actor.getEntityContext().tryGetComponent<PropertyComponent>();
+    if (!props) return false;
+    try {
+        props->readLoadedProperties(*tag);
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
+
 bool renderEntity(ui::Painter& painter, Actor& actor, float x, float bottomY, float scale, EntityPose const& pose, ui::Rect const* clip) {
     auto& state = states()[&actor];
     if (state.stage >= static_cast<int>(Stage::None)) return false;
@@ -289,6 +356,8 @@ bool renderEntity(ui::Painter& painter, Actor& actor, float x, float bottomY, fl
     // Seen from above: tilt the top of the model towards the viewer (calibrated in the client:
     // a negative angle about X in this flipped frame).
     if (pose.viewPitch != 0.f) local = glm::rotate(local, -glm::radians(pose.viewPitch), glm::vec3(1, 0, 0));
+    // The pivot lies on the yaw axis, so the renderer's own yaw keeps it in place.
+    if (pose.pivotY != 0.f) local = glm::translate(local, glm::vec3(0.f, -pose.pivotY, 0.f));
     *m._m               = *m._m * local;
     camera.worldMatrixStack->_isDirty = true;
     if (clip) {
@@ -345,6 +414,90 @@ bool renderEntity(ui::Painter& painter, Actor& actor, float x, float bottomY, fl
     if (!state.logged) {
         state.logged = true;
         log().info("entity preview: {} renders via {} (renderer '{}')", actor.getTypeName(), stageName(stage), actor.getActorRendererId().getString());
+    }
+    return true;
+}
+
+// ---- world pass (WorldRender.h) ------------------------------------------------------------------
+
+namespace {
+/// The actor renderer's world path (ActorRenderer::render with "not in UI" render data).
+bool sehRender(ActorRenderer* renderer, BaseActorRenderContext* rc, ActorRenderData* data, Fault* fault) {
+    __try {
+        renderer->render(*rc, *data);
+        return true;
+    } __except (captureFault(GetExceptionInformation(), fault)) {
+        return false;
+    }
+}
+
+} // namespace
+
+Vec3 toCameraSpace(BaseActorRenderContext const& rc, Vec3 const& p) {
+    BaseActorRenderContext::Impl const& impl = *rc.mImpl.get();
+    Vec3 const&                         cam  = *impl.mCameraTargetPosition;
+    return Vec3{p.x - cam.x, p.y - cam.y, p.z - cam.z};
+}
+
+bool renderEntityInWorld(BaseActorRenderContext& rc, Actor& actor, glm::mat4 const& local, float yaw, Vec3 const* lightAt) {
+    auto& ws = worldStates()[&actor];
+    if (ws.failed) return false;
+    ActorRenderDispatcher* dispatcher = rc.mEntityRenderDispatcher.get();
+    if (!dispatcher) return false;
+    std::shared_ptr<ActorRenderer> keep;
+    ActorRenderer*                 renderer = rendererFor(*dispatcher, actor, keep);
+    if (!renderer) {
+        ws.failed = true;
+        log().warn("world render: no renderer for {}", actor.getTypeName());
+        return false;
+    }
+    // Pose and position: lighting is sampled at the actor's position (it is never added to the
+    // level, so nothing else reads it).
+    if (lightAt) actor.moveTo(*lightAt, Vec2{0.f, yaw});
+    auto& rot      = actor.mBuiltInComponents->mActorRotationComponent;
+    *rot->mRot     = Vec2{0.f, yaw};
+    *rot->mRotPrev = Vec2{0.f, yaw};
+    actor.setYHeadRotations(yaw, yaw);
+    if (auto* mob = Mob::tryGetFromEntity(actor.getEntityContext(), false)) mob->setYBodyRotations(yaw, yaw);
+
+    auto&        screen = static_cast<ScreenContext&>(rc.mScreenContext);
+    mce::Camera& camera = screen.camera;
+    auto         ref    = camera.worldMatrixStack->push(false);
+    Matrix&      m      = *ref.mat;
+    *m._m               = *m._m * local;
+    camera.worldMatrixStack->_isDirty = true;
+
+    // Own continuous data per display entity (see renderEntity).
+    std::optional<int64> previousId = *rc.mRenderUniqueIdOverride;
+    rc.mRenderUniqueIdOverride      = static_cast<int64>(0x7B00000000000000ll | (reinterpret_cast<std::uintptr_t>(&actor) >> 4));
+    RenderDataLayout data{};
+    data.actor              = &actor;
+    data.position           = Vec3{0.f, 0.f, 0.f};
+    data.rotation           = Vec2{yaw, 0.f};
+    data.headRot            = Vec2{yaw, 0.f};
+    data.ignoreLighting     = false;
+    data.isInUI             = false;
+    data.deltaTime          = 0.05f;
+    data.animationComponent = &actor.getAnimationComponent();
+    data.variables          = &*actor.mMolangVariables;
+    Fault fault;
+    bool  ok = sehRender(renderer, &rc, reinterpret_cast<ActorRenderData*>(&data), &fault);
+    rc.mRenderUniqueIdOverride = previousId;
+    if (!ok) {
+        ws.failed = true;
+        log().warn(
+            "world render: {} faulted (renderer '{}'): exception 0x{:08X} at Minecraft.Windows.exe+0x{:X}, address 0x{:X}",
+            actor.getTypeName(),
+            actor.getActorRendererId().getString(),
+            fault.code,
+            fault.address,
+            fault.target
+        );
+        return false;
+    }
+    if (!ws.logged) {
+        ws.logged = true;
+        log().info("world render: {} renders in the world pass (renderer '{}')", actor.getTypeName(), actor.getActorRendererId().getString());
     }
     return true;
 }

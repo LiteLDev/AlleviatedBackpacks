@@ -65,6 +65,7 @@ struct TextureCmd {
     Rect        r;
     float       alpha = 1;
     Color       tint;
+    Rect        uv{0, 0, 1, 1};
 };
 
 mce::Color toMce(Color c) { return mce::Color{c.r, c.g, c.b, c.a}; }
@@ -224,6 +225,10 @@ void Painter::texture(std::string const& path, Rect const& r, float alpha, Layer
     mCmds->push_back({layer, TextureCmd{path, r, alpha, tint}});
 }
 
+void Painter::textureUV(std::string const& path, Rect const& r, Rect const& uv, float alpha, Layer layer, Color tint) {
+    mCmds->push_back({layer, TextureCmd{path, r, alpha, tint, uv}});
+}
+
 Rect Painter::screen() const {
     auto gui = mCtx.mClient.getGuiData();
     auto sz  = gui->mScreenSizeData->clientUIScreenSize;
@@ -271,7 +276,7 @@ void Painter::flush() {
                 runAlpha = tc->alpha;
                 runTint  = tc->tint;
             }
-            mCtx.drawImage(data->mClientTexture, {tc->r.x, tc->r.y}, {tc->r.w, tc->r.h}, {0, 0}, {1, 1}, false);
+            mCtx.drawImage(data->mClientTexture, {tc->r.x, tc->r.y}, {tc->r.w, tc->r.h}, {tc->uv.x, tc->uv.y}, {tc->uv.w, tc->uv.h}, false);
         }
         endRun();
     };
