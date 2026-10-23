@@ -639,6 +639,7 @@ std::unordered_map<std::int64_t, std::int64_t>   gLastUse; ///< player -> tick o
 /// Capture effect endings (SB finishEffect) due once the clients' shrink animation is over.
 struct EndEffect {
     std::int64_t player;
+    int          dimension;
     Vec3         at;
     std::int64_t due;
 };
@@ -753,7 +754,8 @@ void serve(Level& level) {
             return true;
         });
         for (auto const& e : due) {
-            if (auto* player = level.getPlayer(ActorUniqueID{e.player})) captureEffect(*player, e.at);
+            auto* player = level.getPlayer(ActorUniqueID{e.player});
+            if (player && static_cast<int>(player->getDimensionId()) == e.dimension) captureEffect(*player, e.at);
         }
     }
     if (gTick % 20 == 0) refreshProjections(level);
@@ -949,7 +951,7 @@ CaptureResult capture(Player& player, std::shared_ptr<game::Backpack> const& bac
     // the effect's poof / pop follow when the animation is over.
     int animationTicks = sendCaptureEffect(player, target, m.look, effectAt);
     target.despawn();
-    gEndEffects.push_back({player.getOrCreateUniqueID().rawID, effectAt, gTick + animationTicks});
+    gEndEffects.push_back({player.getOrCreateUniqueID().rawID, static_cast<int>(player.getDimensionId()), effectAt, gTick + animationTicks});
     pushRenderInfo(player, *backpack);
     log().info("mob catcher: {} captured {} into {} at slot {} ({}x{}, cost {})", player.getRealName(), m.entityType, backpack->uuid(), m.slot, m.width, m.height, cost);
     return {true, trFor(player, "abp.mobcatcher.status.captured", "Captured {}", mobName(m))};

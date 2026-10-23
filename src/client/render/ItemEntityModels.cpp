@@ -106,14 +106,28 @@ std::string identity(ItemStack const& item) {
     return d.id + "|" + std::to_string(d.aux) + "|" + std::to_string(d.nbtHash());
 }
 
+/// Display entities wanted while rendering: the level's entity list can't change during its
+/// render loop, so they are added on the next client tick.
+struct Request {
+    ItemStack stack;
+    Vec3      at;
+};
+std::unordered_map<void const*, Request> gRequests;
+
 /// The display entity for `owner` at `at` (world), wearing `stack` and holding its display item.
-Actor* entityFor(void const* owner, ItemStack const& stack, Vec3 const& at) {
+/// Without `create` a missing one is requested for the next tick (nullptr until then).
+Actor* entityFor(void const* owner, ItemStack const& stack, Vec3 const& at, bool create) {
     auto* c     = currentClient();
     auto* level = c ? c->getLevel() : nullptr;
     if (!level) return nullptr;
     if (gCache.level && gCache.level != level) gCache = Cache{}; // another world: its entities are gone
     gCache.level = level;
     if (gCache.failed) return nullptr;
+    auto found = gCache.entries.find(owner);
+    if (found == gCache.entries.end() && !create) {
+        gRequests.insert_or_assign(owner, Request{stack, at});
+        return nullptr;
+    }
     auto& e = gCache.entries[owner];
     if (!e.actor) {
         e.actor = addLevelDisplayEntity(std::string(kDisplayEntityId), at);
@@ -155,10 +169,10 @@ void place(Actor& actor, Vec3 const& at, float yaw, EntityXf const& xf) {
 bool gLoggedGround = false;
 
 /// SB ItemEntityRenderer with the "ground" transform. `at` is the item's interpolated position.
-void ground(ItemActor& item, float frameAlpha, Vec3 const& at) {
+bool ground(ItemActor& item, float frameAlpha, Vec3 const& at) {
     ItemStack const& stack = *item.mItem;
-    auto*            actor = entityFor(&item, stack, at);
-    if (!actor) return;
+    auto*            actor = entityFor(&item, stack, at, false);
+    if (!actor) return false;
     float age  = static_cast<float>(item.mAge) + frameAlpha;
     float bob  = std::sin(age / 10.f + item.mBobOffs) * 0.1f + 0.1f;
     float spin = (age / 20.f + item.mBobOffs) * 180.f / kPi;
@@ -172,6 +186,7 @@ void ground(ItemActor& item, float frameAlpha, Vec3 const& at) {
         gLoggedGround = true;
         log().info("item entity models: a dropped backpack draws its 3D model");
     }
+    return true;
 }
 
 // ---- item frames ------------------------------------------------------------------------------------
@@ -185,6 +200,9 @@ struct FramedBackpack {
     ItemStack         stack;
 };
 std::vector<FramedBackpack> gFrames;
+/// Frames are scanned within this many blocks (beyond it a framed backpack keeps its sprite only
+/// while no nearer framed backpack is shown: see AbpRenderObjectHook).
+constexpr float kFrameRange = 96.f;
 bool                        gLoggedFrame = false;
 
 Vec3 facingVector(int facing) {
@@ -212,7 +230,7 @@ void framed(FramedBackpack const& f) {
     Vec3 d = facingVector(f.facing);
     Vec3 at{static_cast<float>(f.pos.x) + 0.5f - d.x * 0.4375f, static_cast<float>(f.pos.y) + 0.5f - d.y * 0.4375f,
             static_cast<float>(f.pos.z) + 0.5f - d.z * 0.4375f};
-    auto* actor = entityFor(f.key, f.stack, at);
+    auto* actor = entityFor(f.key, f.stack, at, true);
     if (!actor) return;
     EntityXf xf;
     xf.scale  = 0.375f;
@@ -249,7 +267,7 @@ void scanFrames() {
     if (!player) return;
     auto& region = player->getDimensionBlockSource();
     auto  p      = player->getPosition();
-    AABB  box{Vec3{p.x - 48.f, p.y - 48.f, p.z - 48.f}, Vec3{p.x + 48.f, p.y + 48.f, p.z + 48.f}};
+    AABB  box{Vec3{p.x - kFrameRange, p.y - kFrameRange, p.z - kFrameRange}, Vec3{p.x + kFrameRange, p.y + kFrameRange, p.z + kFrameRange}};
     for (auto type : {BlockActorType::ItemFrame, BlockActorType::GlowItemFrame}) {
         for (auto* be : region.fetchBlockEntities(type, box)) {
             if (!be) continue;
@@ -290,8 +308,7 @@ LL_TYPE_INSTANCE_HOOK(
                 // The render position is camera relative: back to world space.
                 Vec3 const& rel = renderData.position;
                 Vec3        cam = toCameraSpace(renderContext, Vec3{0.f, 0.f, 0.f});
-                ground(*item, renderContext.getFrameAlpha(*item), Vec3{rel.x - cam.x, rel.y - cam.y, rel.z - cam.z});
-                return;
+                if (ground(*item, renderContext.getFrameAlpha(*item), Vec3{rel.x - cam.x, rel.y - cam.y, rel.z - cam.z})) return;
             }
         }
     }
@@ -347,16 +364,24 @@ public:
         mExit     = bus.emplaceListener<ll::event::ClientExitLevelEvent>([](auto&) {
             releaseAll();
             gFrames.clear();
+            gRequests.clear();
         });
         mTick = bus.emplaceListener<ll::event::ClientLevelTickEvent>([](auto&) {
             ++gCache.tick;
-            if (gCache.tick % 5 == 0) scanFrames();
+            // Display entities requested while rendering.
+            auto requests = std::move(gRequests);
+            gRequests.clear();
+            for (auto const& [owner, r] : requests) {
+                if (auto* actor = entityFor(owner, r.stack, r.at, true)) place(*actor, r.at, 180.f, EntityXf{.scale = 0.5f});
+            }
+            if (gCache.tick % 2 == 0) scanFrames();
             for (auto const& f : gFrames) {
                 if (auto it = gCache.entries.find(f.key); it != gCache.entries.end()) it->second.lastTick = gCache.tick;
             }
-            // Item entities / frames not shown for 2 seconds: their display entities go.
+            // Item entities no longer drawn (picked up, gone, out of view) and emptied frames: their
+            // display entities go within a few ticks.
             std::erase_if(gCache.entries, [](auto& kv) {
-                if (gCache.tick - kv.second.lastTick <= 40) return false;
+                if (gCache.tick - kv.second.lastTick <= 3) return false;
                 drop(kv.second);
                 return true;
             });
@@ -371,6 +396,7 @@ public:
         bus.removeListener(mTick);
         releaseAll();
         gFrames.clear();
+        gRequests.clear();
     }
 
 private:

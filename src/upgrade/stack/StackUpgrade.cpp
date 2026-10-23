@@ -192,8 +192,9 @@ int minimumMultiplierRequired(std::shared_ptr<game::Backpack> const& backpack, i
 /// The error sets of the last refused `fits` on this thread (StackUpgrade::refusal*Slots are asked
 /// right after the refusing check).
 struct Refusal {
-    std::vector<int> upgrades;
-    std::vector<int> storage;
+    game::Backpack const* backpack = nullptr; ///< the refused backpack (nullptr = no refusal recorded)
+    std::vector<int>      upgrades;
+    std::vector<int>      storage;
 };
 thread_local Refusal tLastRefusal;
 
@@ -217,7 +218,8 @@ bool fits(
     // SC isMultiplierHighEnough's error sets, for the native screen's red overlay (GX-1):
     // slotsOverMultiplier (storage slots) and the stackable-contents upgrades (their slots and
     // inventory parts, e.g. the tank and battery bars).
-    tLastRefusal = {};
+    tLastRefusal          = {};
+    tLastRefusal.backpack = backpack.get();
     if (slotsOver) {
         auto const& inv = backpack->inventory();
         for (int i = 0; i < inv.size(); ++i) {
@@ -227,7 +229,10 @@ bool fits(
         }
     }
     tLastRefusal.upgrades = upgradesOver;
-    if (!slotsOver && upgradesOver.empty()) return true;
+    if (!slotsOver && upgradesOver.empty()) {
+        tLastRefusal = {};
+        return true;
+    }
     reason = msg(
         player,
         "abp.stack.error.low_multiplier",
@@ -289,8 +294,15 @@ public:
 
     // SC UpgradeSlotChangeResult.fail(..., errorUpgradeSlots, slotsOverMultiplier, errorInventoryParts)
     // of the check that just refused.
-    [[nodiscard]] std::vector<int> refusalStorageSlots(UpgradeContext const&) const override { return tLastRefusal.storage; }
-    [[nodiscard]] std::optional<std::vector<int>> refusalUpgradeSlots(UpgradeContext const&) const override { return tLastRefusal.upgrades; }
+    // (Only when that check was for this backpack: a refusal from elsewhere, e.g. another
+    // upgrade's allowsInstallOf, keeps the default overlay.)
+    [[nodiscard]] std::vector<int> refusalStorageSlots(UpgradeContext const& ctx) const override {
+        return tLastRefusal.backpack == &ctx.backpack() ? tLastRefusal.storage : std::vector<int>{};
+    }
+    [[nodiscard]] std::optional<std::vector<int>> refusalUpgradeSlots(UpgradeContext const& ctx) const override {
+        if (tLastRefusal.backpack != &ctx.backpack()) return std::nullopt;
+        return tLastRefusal.upgrades;
+    }
 
     void attach(UpgradeContext const& ctx, core::BackpackInventory& inventory) override {
         // All stack upgrades together make one modifier (the product), registered by the first one.

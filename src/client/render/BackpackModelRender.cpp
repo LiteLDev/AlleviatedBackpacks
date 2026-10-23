@@ -228,6 +228,11 @@ struct TintScope {
 
 } // namespace
 
+bool hasEntityXf(Actor const* displayEntity) {
+    std::shared_lock lock(gXfMutex);
+    return gXf.contains(displayEntity);
+}
+
 void setEntityXf(Actor const* displayEntity, std::optional<EntityXf> xf) {
     std::unique_lock lock(gXfMutex);
     if (xf) gXf[displayEntity] = *xf;

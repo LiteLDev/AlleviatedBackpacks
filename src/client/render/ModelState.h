@@ -68,6 +68,8 @@ struct EntityXf {
 };
 /// Sets (or with nullopt clears) the transform of `displayEntity`. Thread safe.
 void setEntityXf(Actor const* displayEntity, std::optional<EntityXf> xf);
+/// True if `displayEntity` has a transform set (a dropped / framed backpack's display entity).
+[[nodiscard]] bool hasEntityXf(Actor const* displayEntity);
 
 
 /// Entity id of the placed-backpack display entity.

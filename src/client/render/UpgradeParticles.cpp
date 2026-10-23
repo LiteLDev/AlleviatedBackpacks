@@ -121,6 +121,8 @@ void tick() {
         auto snap = modelFor(chest);
         if (!snap || snap->model.activity.empty()) continue;
         bool placed = actor->getTypeName() == kDisplayEntityId;
+        // Dropped / framed backpacks (ItemEntityModels): SB shows no activity for item entities.
+        if (placed && hasEntityXf(actor)) continue;
         if (placed) {
             auto fl = [](float v) { return static_cast<int>(std::floor(v)); };
             if (rnd() >= animateTickChance(fl(pos.x) - fl(me.x), fl(pos.y) - fl(me.y), fl(pos.z) - fl(me.z))) continue;
