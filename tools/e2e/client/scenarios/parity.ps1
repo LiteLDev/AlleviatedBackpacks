@@ -98,19 +98,23 @@ if ($info -notmatch 'upgrades=\[crafting, jukebox, crafting\]') { throw "expecte
 Invoke-Chat '/clear @s'
 Invoke-Chat '/gamemode survival'
 Invoke-Chat '/difficulty easy'
+Invoke-Chat '/effect @s resistance 60 4 true' # hits do no damage: the target tells
 Invoke-Chat '/replaceitem entity @s slot.armor.chest 0 alleviatedbackpacks:gold_backpack'
 Invoke-Chat '/tp @s ~ ~ ~ 0 15'
 Invoke-Chat '/summon piglin ~ ~ ~4 0 0 spawn_adult_melee'
-Start-Sleep -Seconds 6
+Start-Sleep -Seconds 5
 $s = Get-Status
 Save-Screenshot 'piglin-gold-backpack' | Out-Null
 Write-Step "gold backpack: $($s.Line)"
 if ($s.Piglins -lt 1) { throw "no piglin near the player: $($s.Line)" }
 if ($s.Targeting -ne 0 -or $s.Health -lt 20) { throw "the piglin attacked a Gold Backpack wearer: $($s.Line)" }
+# Overworld piglins turn into zombified piglins after 15 s: a fresh one for the control.
+Invoke-Chat '/kill @e[type=piglin]'
 Invoke-Chat '/replaceitem entity @s slot.armor.chest 0 alleviatedbackpacks:iron_backpack'
+Invoke-Chat '/summon piglin ~ ~ ~4 0 0 spawn_adult_melee'
 $attacked = $false
-for ($i = 0; $i -lt 6 -and -not $attacked; $i++) {
-    Start-Sleep -Seconds 2
+for ($i = 0; $i -lt 10 -and -not $attacked; $i++) {
+    Start-Sleep -Seconds 1
     $s = Get-Status
     $attacked = $s.Targeting -gt 0 -or $s.Health -lt 20
 }
@@ -118,7 +122,9 @@ Save-Screenshot 'piglin-iron-backpack' | Out-Null
 Write-Step "iron backpack: $($s.Line)"
 if (-not $attacked) { throw "the piglin ignored a player without gold (setup broken?): $($s.Line)" }
 Invoke-Chat '/kill @e[type=piglin]'
+Invoke-Chat '/kill @e[type=zombie_pigman]'
 Invoke-Chat '/difficulty peaceful'
+Invoke-Chat '/effect @s clear'
 Invoke-Chat '/effect @s instant_health 1 10 true'
 Invoke-Chat '/replaceitem entity @s slot.armor.chest 0 air'
 
@@ -137,13 +143,14 @@ if ($after -ne $before + 1) { throw "the dispenser did not place the backpack ($
 Invoke-Chat '/tp @s ~5 ~1 ~3 135 25'
 Start-Sleep -Seconds 1
 Save-Screenshot 'dispenser-placed-side' | Out-Null
-Invoke-Chat '/tp @s ~-5 ~-1 ~-3 -90 25'
+Invoke-Chat '/tp @s ~-5 ~1 ~-3 -90 25' # it fell back to the ground meanwhile: land on it again
+Start-Sleep -Seconds 1
 
 # ---- 4. placing by hand, opening, picking up --------------------------------------------------------
 Invoke-Chat '/clear @s'
 Invoke-Chat '/gamemode survival'
 Invoke-Chat '/replaceitem entity @s slot.hotbar 0 alleviatedbackpacks:iron_backpack'
-Invoke-Chat '/tp @s ~ ~ ~ 0 55'
+Invoke-Chat '/tp @s ~ ~ ~ 0 40' # the ground two blocks ahead (not the player's own block)
 Press-Key '1'
 Start-Sleep -Seconds 1
 $before = Get-PlacedCount
@@ -157,7 +164,7 @@ $after = Get-PlacedCount
 if ($after -ne $before + 1) { throw "sneak + right-click did not place the backpack ($before -> $after)" }
 $mark = Get-LogMark
 Click 0.5 0.5 -Relative -Right
-Wait-LogLine 'companion: drawing the native backpack screen' 15 -Since $mark | Out-Null
+Wait-LogLine 'companion: native screen [0-9]+ for|companion: drawing the native backpack screen' 15 -Since $mark | Out-Null
 Start-Sleep -Milliseconds 800
 Save-Screenshot 'hand-placed-open' | Out-Null
 if ((Get-LeviLog -Since $mark) -match 'menu shown: ') { throw 'a fake chest was opened for a companion player' }
