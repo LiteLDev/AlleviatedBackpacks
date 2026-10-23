@@ -387,9 +387,11 @@ PendingIcon gPendingIcon; // client (render) thread
 ContainerScreenController const* gFrameController = nullptr;
 } // namespace
 
+// High priority: it must run before the vanilla-slot backpack icon hook (client/render/BackpackIcons),
+// which draws backpacks itself and does not call the original `_render`.
 LL_TYPE_INSTANCE_HOOK(
     AbpStashItemRenderInnerHook,
-    ll::memory::HookPriority::Normal,
+    ll::memory::HookPriority::High,
     InventoryItemRenderer,
     &InventoryItemRenderer::_render,
     void,

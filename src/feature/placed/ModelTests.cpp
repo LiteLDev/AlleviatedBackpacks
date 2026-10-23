@@ -17,6 +17,8 @@
 #include "feature/model/RenderModel.h"
 #include "feature/placed/DisplayEntity.h"
 #include "feature/placed/TestSite.h"
+#include "game/BackpackItem.h"
+#include "game/ItemConv.h"
 #include "game/Storage.h"
 #include "net/NativeScreens.h"
 #include "selftest/SelfTest.h"
@@ -210,6 +212,10 @@ ABP_REGISTER_SELFTEST("placed.creative_clone", [](Context& ctx) -> ll::coro::Cor
     site.set(target, "minecraft:air");
     auto bp = ctx.createBackpack(Tier::Gold);
     bp->inventory().insert(core::ItemStackData::of("minecraft:diamond", 4), kInternal);
+    // SB cloneSubbackpacks: a backpack inside the clone gets its own storage (one level).
+    auto inner = ctx.createBackpack(Tier::Leather);
+    inner->inventory().insert(core::ItemStackData::of("minecraft:emerald", 3), kInternal);
+    bp->inventory().set(5, game::ItemConv::toData(ctx.backpackItem(*inner)));
     sp.setPlayerGameType(GameType::Creative);
     ctx.require(sp.simulateSetItem(ctx.backpackItem(*bp), true, 0), "hold the backpack");
     sp.simulateSneaking();
@@ -225,8 +231,18 @@ ABP_REGISTER_SELFTEST("placed.creative_clone", [](Context& ctx) -> ll::coro::Cor
     auto clone = game::Storage::get().find(e->uuid);
     ctx.require(clone != nullptr, "clone stored");
     ctx.check(countIn(*clone, "minecraft:diamond") == 4, "clone has the contents");
+    auto nestedStack = game::ItemConv::toStack(clone->inventory().at(5), 1);
+    auto nestedUuid  = game::backpackUuid(nestedStack);
+    ctx.require(nestedUuid.has_value(), "the clone still holds the nested backpack");
+    ctx.check(*nestedUuid != inner->uuid(), "the nested backpack of the clone has its own storage");
+    ctx.check(game::backpackUuid(game::ItemConv::toStack(bp->inventory().at(5), 1)) == inner->uuid(),
+              "the original keeps its nested backpack");
+    auto nestedClone = game::Storage::get().find(*nestedUuid);
+    ctx.require(nestedClone != nullptr, "nested clone stored");
+    ctx.check(countIn(*nestedClone, "minecraft:emerald") == 3, "nested clone has the contents");
     (void)PlacedBackpacks::get().take(site.region(), target);
     game::Storage::get().erase(e->uuid);
+    game::Storage::get().erase(*nestedUuid);
 });
 
 } // namespace
