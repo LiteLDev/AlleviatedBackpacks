@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-24
+
 ### Added
 
-- A logo (`docs/logo.png`), shown on [LeviMC Mods](https://levimc.org/mods/) through `avatar_url` in `tooth.json`.
-- Screenshots and a video for the README and the LeviMC Mods gallery (`docs/showcase/`), captured
-  by the client e2e scenario `showcase`.
+- A logo, and screenshots and a video of the backpacks and upgrades in the [LeviMC Mods gallery](https://levimc.org/mods/github.com/LiteLDev/AlleviatedBackpacks/?tab=gallery).
+- [docs/ADMIN.md](docs/ADMIN.md): every command and config key, for server operators.
 
 ### Changed
 
-- The README is written for players; building, tests and the API moved to `CONTRIBUTING.md`, and
-  the full command and config reference for server operators to `docs/ADMIN.md`.
+- A shorter README written for players. Notes for developers (building, the energy and fluid API) moved to [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [0.1.0] - 2026-10-24
 
@@ -55,5 +55,6 @@ build, in single player and on a server.
 - **Commands**: `/backpack` (alias `/abp`) and `/sbp` (alias `/sophisticatedbackpacks`).
 - English and Simplified Chinese; the GUI follows each player's language.
 
-[Unreleased]: https://github.com/LiteLDev/AlleviatedBackpacks/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/LiteLDev/AlleviatedBackpacks/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LiteLDev/AlleviatedBackpacks/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/LiteLDev/AlleviatedBackpacks/releases/tag/v0.1.0
