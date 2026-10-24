@@ -114,7 +114,6 @@ function Key-Combo([int]$mod, [string]$key) {
     [AbpE2E.Native]::Key([uint16]$mod, $true); Start-Sleep -Milliseconds 300
 }
 function Sneak([bool]$down) { Focus-Game; [AbpE2E.Native]::Key(0x10, -not $down); Start-Sleep -Milliseconds 300 }
-function View([string]$preset) { Chat "/camera @s set minecraft:$preset" 800 }
 
 # A backpack filled like a player's: SB's dynamic templates (/sbp template dynamic ...).
 function New-Backpack([string]$name, [string]$tier, [string[]]$items, [string[]]$upgrades) {
@@ -149,11 +148,11 @@ for ($i = 0; $i -lt 6; $i++) {
 }
 Chat '/replaceitem entity @s slot.weapon.mainhand 0 air'
 Chat '/gamemode spectator'
-Chat '/tp @s ~-2.5 ~0.2 ~2.6 180 18'
+Chat '/tp @s ~-2.5 ~-0.6 ~0.4 180 12'   # close and low: the row fills the width
 Shot 'placed-lineup' 4000
-Chat '/tp @s ~ ~1.2 ~0.6 180 32'
+Chat '/tp @s ~ ~1.2 ~1.6 180 30'
 Shot 'placed-lineup-high' 3000
-Chat '/tp @s ~2.5 ~-1.4 ~-3.2 180 0' 1500   # back where the last backpack was placed from
+Chat '/tp @s ~2.5 ~-0.6 ~-2 180 0' 1500   # back where the last backpack was placed from
 Chat '/gamemode creative'
 
 # ---- 2. the backpack screen, full, with upgrades -------------------------------------------------
@@ -222,19 +221,20 @@ Wait-LogLine 'key action: .* switched upgrade 1 \(advanced_magnet\) off' 10 -Sin
 # Two blocks away or more, so that the player doesn't pick them up the vanilla way first.
 Chat '/fill ~-3 ~ ~2 ~-1 ~ ~3 pumpkin'
 Chat '/fill ~1 ~ ~2 ~3 ~ ~3 melon_block'
-Chat '/fill ~-1 ~ ~-3 ~1 ~ ~-2 oak_log'
-Chat '/fill ~-3 ~ ~-3 ~3 ~ ~3 air destroy' 300
+Chat '/fill ~-1 ~ ~4 ~1 ~ ~4 oak_log'
+Chat '/fill ~-3 ~ ~-3 ~3 ~ ~4 air destroy' 300
 Chat '/fill ~-5 ~-1 ~-5 ~5 ~-1 ~5 grass_block replace dirt'   # grass under the blocks turned to dirt
 foreach ($it in 'pumpkin', 'melon_slice', 'oak_log') { Chat "/clear @s $it" 100 }
-View 'third_person'
-Chat '/tp @s ~ ~ ~ -45 22' 6000   # let the chat fade
+# A free camera behind the player's left shoulder (three-quarter back view, the sea beyond). A
+# straight back view shows only the default skin's dark hair, which reads as a black square.
+Chat '/tp @s ~ ~ ~ 0 10'
+Chat '/camera @s set minecraft:free pos ~2.2 ~2.4 ~-3.4 facing ~ ~1.2 ~1' 6000   # let the chat fade
 Shot 'worn-back' 500
 Hud $true
 Start-Sleep -Seconds 2
 # Advanced Magnet (range 5) on (Alt+Z) after 1.5 s: everything in range flies into the backpack; B opens it at 4.5 s.
 Save-Frames 'magnet' 8 @{ 1.5 = { Key-Combo 0x12 'Z' }; 4.5 = { Press-Key 'B' } }
 Close-Backpack
-View 'first_person'
 Chat '/camera @s clear'
 
 # ---- 4. crafting a backpack (crafting table, recipe book) -----------------------------------------

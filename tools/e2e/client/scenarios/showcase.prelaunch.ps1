@@ -11,3 +11,4 @@ Set-NbtValue $ld.Root 'showcoordinates' 1 ([byte]0)
 Set-NbtValue $ld.Root 'Time' 4 6000L
 Write-LevelDat $ld $level
 Write-Step "showcase world: normal terrain, seed $seed"
+
