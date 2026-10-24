@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A logo (`docs/logo.png`), shown on [LeviMC Mods](https://levimc.org/mods/) through `avatar_url` in `tooth.json`.
+- Screenshots and a video for the README and the LeviMC Mods gallery (`docs/showcase/`), captured
+  by the client e2e scenario `showcase`.
+
+### Changed
+
+- The README is written for players; building, tests and the API moved to `CONTRIBUTING.md`, and
+  the full command and config reference for server operators to `docs/ADMIN.md`.
 
 ## [0.1.0] - 2026-10-24
 

@@ -2,183 +2,122 @@
 
 <img src="docs/logo.png" alt="" width="128" align="right">
 
-[![Build](https://github.com/LiteLDev/AlleviatedBackpacks/actions/workflows/build.yml/badge.svg)](https://github.com/LiteLDev/AlleviatedBackpacks/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/LiteLDev/AlleviatedBackpacks)](https://github.com/LiteLDev/AlleviatedBackpacks/releases)
 [![License](https://img.shields.io/github/license/LiteLDev/AlleviatedBackpacks)](COPYING.LESSER)
 
-Backpacks with upgrades for **Minecraft Bedrock Edition**, as a [LeviLamina](https://github.com/LiteLDev/LeviLamina)
-mod. It brings the gameplay of the Java mod *Sophisticated Backpacks* to Bedrock and works on
-dedicated servers (BDS) and in single-player / local worlds on the client.
+Backpacks with upgrades for **Minecraft Bedrock Edition**: the gameplay of the Java mod
+[Sophisticated Backpacks](https://www.curseforge.com/minecraft/mc-mods/sophisticated-backpacks),
+in single player and on servers. Wear them, place them, fill them, and slot in upgrades that pick
+up, feed, craft and sort for you.
 
-- Minecraft **1.26.51**, LeviLamina **26.51.7**, Windows x64.
-- Players need the **client mod** (the `client` build, [download](https://github.com/LiteLDev/AlleviatedBackpacks/releases/latest)):
-  it draws Sophisticated Backpacks' own screens (storage with scroll bar and search, upgrade column
-  with switches, upgrade tabs, settings screen), adds the key bindings and the Shift contents
-  tooltip. Every item move is still done by the server. A player without the client mod can join
-  and carry backpacks (upgrades keep working), but opening a backpack screen shows
-  "AlleviatedBackpacks needs its client mod" with the download link.
+![Six backpack tiers placed on the grass: leather, copper, iron, gold, diamond and netherite](docs/showcase/tiers-placed.webp)
 
 ## Features
 
-- **Six backpack tiers** (backpacks never stack):
+- **Six tiers**, from Leather to Netherite. Bigger tiers hold more items and more upgrades.
 
-  | Tier | Storage slots | Upgrade slots |
-  | ---- | ------------- | ------------- |
-  | Leather | 27 | 1 |
-  | Copper | 45 | 1 |
-  | Iron | 54 | 2 |
-  | Gold | 81 | 3 |
-  | Diamond | 108 | 5 |
-  | Netherite | 120 | 7 |
+  | Tier | Leather | Copper | Iron | Gold | Diamond | Netherite |
+  | ---- | :-----: | :----: | :--: | :--: | :-----: | :-------: |
+  | Storage slots | 27 | 45 | 54 | 81 | 108 | 120 |
+  | Upgrade slots | 1 | 1 | 2 | 3 | 5 | 7 |
 
-- **Right-click a backpack (or press B) to open it**: Sophisticated Backpacks' screen — 9 or 12
-  columns, a scroll bar when the rows don't fit, the upgrade column with on/off switches, upgrade
-  tabs on the right, the search box (`@mod`, `#tooltip`, name), sort / sort-by and transfer buttons,
-  abbreviated counts for large stacks, memory and no-sort slots. The settings tab opens the
-  backpack settings screen (memory, no-sort, context and main options).
-- **Key bindings** (Settings > Keyboard & Mouse): Open Backpack `B` (also over a backpack in any
-  inventory, and over a nested backpack), Inventory Interaction `C` (Deposit / Restock on the
-  container you look at), Tool Swap (unbound), Toggle Upgrade 1/2 `Alt+Z` / `Alt+X` (3-5 unbound),
-  Sort (middle mouse), Transfer to Storage / Inventory `[` / `]` (Shift: everything).
-- **Shift over a backpack item** shows its contents: stack multiplier, tanks, upgrades with their
-  on/off state and the items, most first.
-- **Contents belong to the backpack, not to the player**: drop it, give it away, put it in a chest —
-  the items stay inside. Data is stored in the world itself, so it moves with the world folder.
-- **Upgrades** go into the backpack's upgrade slots and can be switched on and off individually;
-  most have their own settings tab with item filters (allow/block list, match by item, namespace
-  or tag, NBT and durability options). Every Sophisticated Backpacks upgrade is there, basic and
-  advanced: Pickup, Filter, Magnet, Feeding, Compacting, Void, Restock, Deposit, Refill, Tool
-  Swapper, Jukebox, Pump, Alchemy, Mob Catcher; Stack (Starter, Tier 1-4, Omega, downgrades and
-  conversion items); Crafting, Stonecutter, Anvil, Smithing; Smelting, Smoking, Blasting and
-  their Auto versions; Inception, Everlasting, Infinity, Survival Infinity; Tank, Battery, XP Pump.
-  Only the Chipped and Sawmill compat upgrades are missing, because those mods are Java-only.
-  - Bedrock has no Forge Energy or fluid handlers, so AlleviatedBackpacks provides both as a small
-    public API (FE and mB) that the Tank, Battery, Pump and XP Pump upgrades use. Other mods can
-    use it too: see [docs/API.md](docs/API.md).
-- Feature-by-feature comparison with Sophisticated Backpacks: [docs/FEATURES.md](docs/FEATURES.md).
-- Backpacks can't be put into themselves, and by default not into other backpacks
-  (an Inception upgrade allows it). Like Sophisticated Backpacks, shulker boxes fit in backpacks
-  (`containerItemsDisallowed` refuses them) and backpacks don't fit in shulker boxes or bundles
-  (`canBePlacedInContainerItems`).
-- World systems as in Sophisticated Backpacks: the **Ender Linker** links backpacks into a linked
-  storage group with shared contents; duplicated backpacks (same storage) are sorted out; right-click
-  another player's back to open their worn backpack; mobs sometimes spawn wearing filled backpacks;
-  dungeon and other loot chests sometimes hold backpacks and upgrades.
-- English and Simplified Chinese; the GUI follows each player's language.
+- **Sophisticated Backpacks' own screen**: a scroll bar, search, sorting, quick transfer buttons,
+  and an upgrade column with on/off switches and a settings tab for every upgrade.
 
-Commands (alias `/abp`):
+  ![The Diamond Backpack screen, full of items, with crafting, magnet, feeding, pickup and smelting upgrades](docs/showcase/backpack-screen.webp)
 
-| Command | Who | What |
-| ------- | --- | ---- |
-| `/backpack open` | everyone | open the backpack in your main hand |
-| `/backpack info` | everyone | uuid, tier and upgrades of the held backpack |
-| `/backpack give <tier>` | operators | get a backpack |
-| `/backpack reload` | operators / console | reload config files and translations |
-| `/backpack selftest [pattern]` | operators / console | run the built-in self tests |
-| `/sbp list [playerName]` | operators / console | opened backpacks, newest first (alias `/sophisticatedbackpacks`) |
-| `/sbp give <targets> <backpackUuid>` | operators / console | give a backpack bound to a logged backpack |
-| `/sbp removeNonPlayer <onlyWithEmptyInventory>` | operators / console | delete backpacks no player ever opened |
-| `/backpack info <uuid>`, `stats`, `remove <uuid>`, `cleanup`, `openfor <uuid>` | operators / console | admin extras |
+- **Every upgrade from the Java mod**: Pickup, Magnet, Feeding, Filter, Compacting, Void, Restock,
+  Deposit, Refill, Tool Swapper, Crafting, Stonecutter, Anvil, Smithing, Smelting / Smoking /
+  Blasting (and auto versions), Stack, Jukebox, Tank, Battery, Pump, XP Pump, Alchemy,
+  Mob Catcher, Inception, Everlasting and Infinity. Most come in a basic and an advanced version
+  with item filters. The Ender Linker links backpacks so they share their contents.
+
+  ![The Advanced Magnet upgrade switched on with Alt+Z: the drops around the player fly into the worn backpack](docs/showcase/magnet-anim.webp)
+
+- **Contents belong to the backpack**: drop it, hand it to a friend, put it in a chest, place it on
+  the ground. The items stay inside. Shift over a backpack to peek at what it holds.
+- **Worn on your back, held, or placed** as a block, with a 3D model. Mobs sometimes spawn wearing
+  backpacks, and dungeon chests can hold backpacks and upgrades.
+- English and Simplified Chinese; each player sees their own game language.
 
 ## Install
 
-There are two builds from the same source: `server` (for BDS) and `client` (for the game). Every
-player needs the **client** build, both on a server and in single player. Use the same version on
-the server and on the clients.
+Every player needs the **client** mod, in single player and on a server. A server needs the
+**server** mod. Use the same version on both.
 
 With [lip](https://github.com/futrime/lip):
 
 ```sh
-lip install github.com/LiteLDev/AlleviatedBackpacks          # in the BDS folder (server build)
-lip install github.com/LiteLDev/AlleviatedBackpacks#client   # in the game folder (client build)
+lip install github.com/LiteLDev/AlleviatedBackpacks#client   # players: in the game folder
+lip install github.com/LiteLDev/AlleviatedBackpacks          # servers: in the BDS folder
 ```
 
-Manually: download `alleviatedbackpacks-server-windows-x64.zip` or
-`alleviatedbackpacks-client-windows-x64.zip` from the
-[latest release](https://github.com/LiteLDev/AlleviatedBackpacks/releases/latest) and follow the
-steps below.
+Or download from the [latest release](https://github.com/LiteLDev/AlleviatedBackpacks/releases/latest):
 
-### Dedicated server (BDS + LeviLamina)
+- **Players:** `alleviatedbackpacks-client-windows-x64.zip`. In LeviLauncher, extract it so that the
+  `AlleviatedBackpacks` folder lands in the game version's `mods` folder. Every local world gets the
+  backpacks; nothing to switch on.
+- **Servers:** `alleviatedbackpacks-server-windows-x64.zip`, extracted into the server's `plugins`
+  folder. The server hands its resource pack to joining players.
 
-1. Install LeviLamina 26.51.7 for the server (`lip install github.com/LiteLDev/LeviLamina@26.51.7`).
-2. Download the `server` build (or build it, see below) and extract it so that the folder
-   `AlleviatedBackpacks/` ends up in the server's `plugins/` folder.
-3. Start the server. On first start the mod adds its resource pack to
-   `worlds/<level-name>/world_resource_packs.json` and asks clients to download it. The behavior pack
-   (items and recipes) is loaded automatically.
-4. Tell your players to install the client mod (next section), then join the server as usual.
-   Players without it can still join and carry backpacks, but can't open backpack screens.
+Requires Minecraft **1.26.51** with LeviLamina **26.51.7** (Windows x64). Players without the
+client mod can still join and carry backpacks, but get a download link instead of the backpack
+screen.
 
-### Players: the client mod (LeviLauncher), for servers and single player
+## How to use
 
-1. In LeviLauncher, install the 1.26.51 game version with LeviLamina 26.51.7.
-2. Download the `client` build and extract it so that its `AlleviatedBackpacks/` folder ends up in
-   `%APPDATA%\levilauncher.exe\versions\<version>\mods\` (for example `versions\1.26.51.01\mods\`).
-3. Start the game.
-   - **Single player:** every local world gets the backpacks, recipes and upgrades. No world
-     settings need changing; the mod brings its own behavior and resource packs.
-   - **Multiplayer:** join a BDS running the `server` build. Use the same mod version on both.
-4. The key bindings are under Settings > Keyboard & Mouse (see Features).
+**Crafting.** Every recipe is in the recipe book; search for "backpack" or "upgrade".
 
-### Configuration
+![The Leather Backpack recipe in a crafting table](docs/showcase/recipe.webp)
 
-`AlleviatedBackpacks/config/general.json` (created on first start):
+- **Leather Backpack**: chest in the middle, leather and string around it.
+- **Next tier**: surround a backpack with copper / iron / gold ingots or diamonds; a Netherite
+  Backpack is made at the smithing table. The contents and upgrades come along.
+- **Upgrades** start from an **Upgrade Base** (string, iron, leather). Dye backpacks in a crafting
+  table.
 
-| Key | Default | Meaning |
-| --- | ------- | ------- |
-| `language` | `en_US` | default language for messages |
-| `usePlayerLocale` | `true` | use each player's game language when available |
-| `upgradeTickInterval` | `10` | ticks between upgrade updates (20 = 1 second) |
-| `requireResourcePack` | `true` | BDS: players must accept the resource pack |
-| `allowNesting` | `false` | allow backpacks in backpacks without an Inception upgrade |
-| `allowShulkerBoxes` | `true` | allow shulker boxes in backpacks |
+**Opening.** Right-click with a backpack in hand, press **B** to open the one you carry or wear, or
+right-click a placed backpack. Sneak + right-click places a backpack; sneak + right-click with an
+empty hand picks it up again. Put an upgrade into one of the slots on the left of the screen and
+click its tab on the right to set it up.
 
-Sophisticated Backpacks' own settings, with SB's names, defaults and ranges:
-`config/sophisticatedbackpacks-server.json` (disallowed items, slot counts per tier, entity backpack
-additions, nerfs, max upgrades per storage, other-player opening, dedup, ...),
-`config/sophisticatedbackpacks-common.json` (`chestLootEnabled`) and
-`config/sophisticatedcore-common.json` (`enabledItems`). Upgrades add their own
-`config/<upgrade>.json` files with SB's sections for that upgrade (for example `refill.json`:
-`refillUpgrade.filterSlots`); `config/admin.json` and `config/wearable.json` hold
-AlleviatedBackpacks extras that are off by default.
+| Key (Settings > Keyboard & Mouse) | Default | What it does |
+| --------------------------------- | ------- | ------------ |
+| Open Backpack | `B` | open the backpack you carry or wear (also over a backpack in any inventory) |
+| Inventory Interaction | `C` | deposit into / restock from the container you look at |
+| Toggle Upgrade 1 / 2 | `Alt+Z` / `Alt+X` | switch the first / second upgrade on or off (3–5 unbound) |
+| Tool Swap | unbound | swap to the right tool (Tool Swapper upgrade) |
+| Sort | middle mouse | sort the backpack |
+| Transfer to Storage / Inventory | `[` / `]` | move items into / out of the backpack (Shift: everything) |
 
-## Building
+Commands: `/backpack open` opens the backpack in your hand; `/backpack info` shows its tier and
+upgrades.
 
-Requirements: Windows x64, [xmake](https://xmake.io), Visual Studio 2022+ build tools, LLVM (clang-cl),
-git with `core.longpaths` enabled.
+## Settings
 
-```powershell
-pwsh tools/build.ps1 -Target all -Tests
-```
+The config files are in the mod's `config` folder (`mods/AlleviatedBackpacks/config/` in the game,
+`plugins/AlleviatedBackpacks/config/` on a server), created on first start. `/backpack reload`
+applies changes.
 
-Outputs: `bin/server/AlleviatedBackpacks/` and `bin/client/AlleviatedBackpacks/`.
+- `general.json`: `allowNesting` (backpacks in backpacks without the Inception upgrade),
+  `allowShulkerBoxes`, `usePlayerLocale` (messages in each player's language).
+- `sophisticatedbackpacks-server.json`: the Java mod's own settings with the same names, such as
+  slot counts per tier, disallowed items and whether players may open other players' backpacks.
+- `<upgrade>.json`: each upgrade's ranges, filter slots and speeds (for example `magnet.json`).
+- `client_gui.json` (game only): `sortButtonsPosition`, `playButtonSound`.
 
-[AGENTS.md](AGENTS.md) describes the architecture, the conventions and the rules for working with
-Bedrock internals. [tools/e2e](tools/e2e/README.md) holds the end-to-end test harnesses that drive
-the real server and game.
+Running a server? Every command and config key is listed in [docs/ADMIN.md](docs/ADMIN.md).
 
-## Maintainers
+## More
 
-[@futrime (Zijian Zhang)](https://github.com/futrime)
+More screenshots and videos: https://levimc.org/mods/github.com/LiteLDev/AlleviatedBackpacks/?tab=gallery
 
-## Contributing
-
-PRs and issues are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the
-[Code of Conduct](CODE_OF_CONDUCT.md). Report security issues as described in
-[SECURITY.md](SECURITY.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
-
-## Credits
+Building it yourself, or writing a mod against its energy and fluid API? See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Inspired by Sophisticated Backpacks by P3pp3rF1y. This is an independent implementation for
-Bedrock; no code or assets are taken from the original mod.
+Bedrock, not affiliated with Mojang Studios, Microsoft or the Sophisticated Backpacks project.
 
 ## License
 
-LGPL-3.0 © 2026 Zijian Zhang
-
-AlleviatedBackpacks is free software: you can redistribute it and/or modify it under the terms of
-the GNU Lesser General Public License version 3, the same license as LeviLamina. See
-[COPYING.LESSER](COPYING.LESSER) and [COPYING](COPYING).
-
-AlleviatedBackpacks is not affiliated with Mojang Studios, Microsoft, or the Sophisticated
-Backpacks project.
+[LGPL-3.0](COPYING.LESSER) © 2026 Zijian Zhang

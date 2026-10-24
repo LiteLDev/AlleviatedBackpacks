@@ -1,0 +1,61 @@
+{
+  "items": [
+    {
+      "kind": "image",
+      "src": "tiers-placed.webp",
+      "width": 1280, "height": 720,
+      "title": { "en": "Six tiers, from Leather to Netherite", "zh-CN": "六种背包，从皮革到下界合金" },
+      "caption": { "en": "Sneak and right-click to set a backpack down anywhere; it keeps everything inside.", "zh-CN": "潜行右键就能把背包放在地上，里面的东西一样不少。" }
+    },
+    {
+      "kind": "video",
+      "src": "magnet.mp4",
+      "poster": "magnet.webp",
+      "width": 1280, "height": 720,
+      "title": { "en": "The Magnet Upgrade", "zh-CN": "磁铁升级" },
+      "caption": { "en": "Switch it on with Alt+Z and every drop nearby flies straight into the backpack on your back.", "zh-CN": "按 Alt+Z 打开，周围掉落的物品会直接飞进你背上的背包。" }
+    },
+    {
+      "kind": "image",
+      "src": "backpack-screen.webp",
+      "width": 1280, "height": 720,
+      "title": { "en": "The backpack screen", "zh-CN": "背包界面" },
+      "caption": { "en": "A Diamond Backpack: 108 slots, five upgrades on the left, their tabs on the right, search and sort at the top.", "zh-CN": "钻石背包：108 格，左边五个升级，右边是它们的标签页，顶部有搜索和整理。" }
+    },
+    {
+      "kind": "image",
+      "src": "crafting-tab.webp",
+      "width": 1280, "height": 720,
+      "title": { "en": "A crafting table in your backpack", "zh-CN": "背包里的工作台" },
+      "caption": { "en": "The Crafting Upgrade opens a 3×3 grid right next to your items.", "zh-CN": "合成升级在物品旁边打开一个 3×3 合成格。" }
+    },
+    {
+      "kind": "image",
+      "src": "feeding-tab.webp",
+      "width": 1280, "height": 720,
+      "title": { "en": "The Feeding Upgrade", "zh-CN": "喂食升级" },
+      "caption": { "en": "Eats from the backpack when you get hungry; choose which food it may use.", "zh-CN": "饿了会自动吃背包里的食物，还能指定吃哪些。" }
+    },
+    {
+      "kind": "image",
+      "src": "contents-tooltip.webp",
+      "width": 1280, "height": 720,
+      "title": { "en": "Peek inside with Shift", "zh-CN": "按住 Shift 看看里面有什么" },
+      "caption": { "en": "Hold Shift over a backpack to see its upgrades and contents without opening it.", "zh-CN": "鼠标指着背包按住 Shift，不用打开也能看到升级和内容。" }
+    },
+    {
+      "kind": "image",
+      "src": "worn.webp",
+      "width": 1280, "height": 720,
+      "title": { "en": "Worn on your back", "zh-CN": "背在身上" },
+      "caption": { "en": "Wear a backpack in the chest slot and press B to open it wherever you are.", "zh-CN": "把背包穿在胸甲栏，随时按 B 打开。" }
+    },
+    {
+      "kind": "image",
+      "src": "recipe.webp",
+      "width": 1280, "height": 720,
+      "title": { "en": "Crafting a backpack", "zh-CN": "合成背包" },
+      "caption": { "en": "Leather, string and a chest make your first backpack; every recipe is in the recipe book.", "zh-CN": "皮革、线和一个箱子就能做出第一个背包，所有配方都在配方书里。" }
+    }
+  ]
+}

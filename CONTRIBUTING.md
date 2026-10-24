@@ -15,7 +15,7 @@ Use the [issue templates](https://github.com/LiteLDev/AlleviatedBackpacks/issues
 
 ## Development setup
 
-See [Building](README.md#building) in the README. [AGENTS.md](AGENTS.md) is the developer guide. It covers the layout of the code, the feature-unit rules, the contracts between modules, the client companion and the Bedrock / LeviLamina rules. Please read it before changing anything under `src/`.
+See [Development](#development) below. [AGENTS.md](AGENTS.md) is the developer guide. It covers the layout of the code, the feature-unit rules, the contracts between modules, the client companion and the Bedrock / LeviLamina rules. Please read it before changing anything under `src/`.
 
 ## Pull requests
 
@@ -32,6 +32,49 @@ See [Building](README.md#building) in the README. [AGENTS.md](AGENTS.md) is the 
 Commit messages use the imperative mood ("Add jukebox tab", not "Added …"). Update [CHANGELOG.md](CHANGELOG.md) under *Unreleased* for user-visible changes.
 
 Never copy code or assets from the Java Sophisticated Backpacks repository: it is a behaviour reference only.
+
+## Development
+
+### Building
+
+Requirements: Windows x64, [xmake](https://xmake.io), Visual Studio 2022+ build tools, LLVM (clang-cl),
+git with `core.longpaths` enabled.
+
+```powershell
+pwsh tools/build.ps1 -Target all -Tests     # or -Target server / -Target client
+```
+
+Outputs: `bin/server/AlleviatedBackpacks/` (copy to `<BDS>/plugins/`) and
+`bin/client/AlleviatedBackpacks/` (copy to `%APPDATA%\levilauncher.exe\versions\<version>\mods\`).
+There are two builds from one source: `server` for BDS and `client` for the game. The client
+build is the only backpack UI: it draws Sophisticated Backpacks' screens, adds the key bindings and
+the Shift contents tooltip, while every item move is still done by the server.
+
+### Tests
+
+- Unit tests for `src/core`: `xmake build -y abp-tests; xmake run abp-tests`.
+- In-game selftests: `/backpack selftest ["glob"]` (operators / console).
+- End-to-end tests that drive the real server and game: [tools/e2e/README.md](tools/e2e/README.md).
+
+### Showcase media
+
+The screenshots and videos in `docs/showcase/` (README and the
+[LeviMC Mods gallery](https://levimc.org/mods/github.com/LiteLDev/AlleviatedBackpacks/?tab=gallery),
+listed in `docs/showcase/showcase.json`) come from the client scenario `showcase`:
+
+```powershell
+pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario showcase
+pwsh tools/e2e/client/showcase-encode.ps1      # client/out/showcase -> docs/showcase (needs ffmpeg)
+```
+
+### Architecture and API
+
+- [AGENTS.md](AGENTS.md): code layout, feature units, contracts between modules, the client
+  companion and the Bedrock / LeviLamina rules.
+- [docs/API.md](docs/API.md): the energy (FE) and fluid (mB) API that the Tank, Battery, Pump and
+  XP Pump upgrades use, public for other mods.
+- [docs/FEATURES.md](docs/FEATURES.md): feature-by-feature comparison with Sophisticated Backpacks.
+- [docs/ADMIN.md](docs/ADMIN.md): every command and config file, for server operators.
 
 ## License
 
