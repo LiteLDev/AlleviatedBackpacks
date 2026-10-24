@@ -6,7 +6,8 @@
   "info": {
     "name": "AlleviatedBackpacks",
     "description": "Backpacks with upgrades for Minecraft Bedrock Edition: the gameplay of Sophisticated Backpacks",
-    "tags": ["platform:levilamina", "type:mod"]
+    "tags": ["platform:levilamina", "type:mod"],
+    "avatar_url": "https://raw.githubusercontent.com/LiteLDev/AlleviatedBackpacks/main/docs/logo.png"
   },
   "variants": [
     {

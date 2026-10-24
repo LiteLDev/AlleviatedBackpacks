@@ -1,5 +1,7 @@
 # AlleviatedBackpacks
 
+<img src="docs/logo.png" alt="" width="128" align="right">
+
 [![Build](https://github.com/LiteLDev/AlleviatedBackpacks/actions/workflows/build.yml/badge.svg)](https://github.com/LiteLDev/AlleviatedBackpacks/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/LiteLDev/AlleviatedBackpacks)](https://github.com/LiteLDev/AlleviatedBackpacks/releases)
 [![License](https://img.shields.io/github/license/LiteLDev/AlleviatedBackpacks)](COPYING.LESSER)
