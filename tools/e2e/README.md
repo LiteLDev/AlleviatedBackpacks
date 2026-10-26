@@ -103,7 +103,7 @@ and an Everlasting backpack in an explosion (`/backpack parity ...` sets the sce
 
 ## Prerequisites
 
-- **Server:** [lip](https://github.com/futrime/lip) on `PATH`. The first `run.ps1` calls `server/install.ps1`. It runs `lip install github.com/LiteLDev/LeviLamina@26.51.7` in an empty folder, which brings in BDS 1.26.51, CrashLogger, PreLoader and PeEditor, and installs everything into `%LOCALAPPDATA%\abp-e2e\bds-base`. This takes about 1–3 minutes, once per machine. `install.ps1 -Force` reinstalls. Set `$env:ABP_E2E_HOME` to use a different folder.
+- **Server:** [lip](https://github.com/LiteLDev/lip) on `PATH`. The first `run.ps1` calls `server/install.ps1`. It runs `lip install github.com/LiteLDev/LeviLamina@26.51.7` in an empty folder, which brings in BDS 1.26.51, CrashLogger, PreLoader and PeEditor, and installs everything into `%LOCALAPPDATA%\abp-e2e\bds-base`. This takes about 1–3 minutes, once per machine. `install.ps1 -Force` reinstalls. Set `$env:ABP_E2E_HOME` to use a different folder.
 - **Client:** LeviLauncher at `%USERPROFILE%\Desktop\LeviLauncher.exe` (or `$env:ABP_E2E_LAUNCHER`). The instance `%APPDATA%\levilauncher.exe\versions\1.26.51.01` must have been started and signed in by hand once. The screen must stay unlocked. In headless mode (the default) you can keep using the PC during a run; with `-Foreground` no one should use the mouse.
 
 ## What a run does

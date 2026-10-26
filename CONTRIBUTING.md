@@ -37,10 +37,10 @@ Never copy code or assets from the Java Sophisticated Backpacks repository: it i
 
 ### Building
 
-Requirements: Windows x64, [xmake](https://xmake.io), Visual Studio 2022+ build tools, LLVM (clang-cl),
-git with `core.longpaths` enabled.
+You need Windows x64, [xmake](https://xmake.io), Visual Studio Build Tools with MSVC 14.4x or newer, and LLVM (`clang-cl`).
 
 ```powershell
+git config --global core.longpaths true
 pwsh tools/build.ps1 -Target all -Tests     # or -Target server / -Target client
 ```
 
@@ -67,7 +67,7 @@ pwsh -NoProfile -File tools/e2e/client/run.ps1 -Scenario showcase
 pwsh tools/e2e/client/showcase-encode.ps1      # client/out/showcase -> docs/showcase (needs ffmpeg)
 ```
 
-### Architecture and API
+### How it works
 
 - [AGENTS.md](AGENTS.md): code layout, feature units, contracts between modules, the client
   companion and the Bedrock / LeviLamina rules.
@@ -78,4 +78,4 @@ pwsh tools/e2e/client/showcase-encode.ps1      # client/out/showcase -> docs/sho
 
 ## License
 
-By contributing you agree that your contributions are licensed under the [LGPL-3.0](COPYING.LESSER), the license of this project.
+By contributing you agree that your contributions are licensed under the [LGPL-3.0-or-later](COPYING.LESSER), the license of this project.

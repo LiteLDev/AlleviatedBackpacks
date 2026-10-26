@@ -14,7 +14,7 @@ Everything a server operator (or a single-player world with cheats) can use. Pla
 | `/backpack give <tier>` | operators | get a backpack |
 | `/backpack reload` | operators / console | reload config files and translations |
 | `/backpack info <uuid>`, `stats`, `remove <uuid>`, `cleanup`, `openfor <uuid>` | operators / console | inspect, delete and open stored backpacks |
-| `/backpack selftest [pattern]` | operators / console | run the built-in self tests |
+| `/backpack selftest [glob]` | operators / console | run the built-in self tests |
 | `/sbp list [playerName]` | operators / console | opened backpacks, newest first |
 | `/sbp give <targets> <backpackUuid>` | operators / console | give a backpack bound to a logged backpack |
 | `/sbp removeNonPlayer <onlyWithEmptyInventory>` | operators / console | delete backpacks no player ever opened |

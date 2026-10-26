@@ -38,18 +38,18 @@ up, feed, craft and sort for you.
   the ground. The items stay inside. Shift over a backpack to peek at what it holds.
 - **Worn on your back, held, or placed** as a block, with a 3D model. Mobs sometimes spawn wearing
   backpacks, and dungeon chests can hold backpacks and upgrades.
-- English and Simplified Chinese; each player sees their own game language.
+- In-game text in English and Simplified Chinese; each player sees their own game language.
 
 ## Install
 
-Every player needs the **client** mod, in single player and on a server. A server needs the
-**server** mod. Use the same version on both.
+Players need the **client** mod to open backpacks, in single player and on a server. A server
+needs the **server** mod. Use the same version on both.
 
-With [lip](https://github.com/futrime/lip):
+With [lip](https://github.com/LiteLDev/lip):
 
 ```sh
 lip install github.com/LiteLDev/AlleviatedBackpacks#client   # players: in the game folder
-lip install github.com/LiteLDev/AlleviatedBackpacks          # servers: in the BDS folder
+lip install github.com/LiteLDev/AlleviatedBackpacks          # servers: in the server folder
 ```
 
 Or download from the [latest release](https://github.com/LiteLDev/AlleviatedBackpacks/releases/latest):
@@ -60,9 +60,9 @@ Or download from the [latest release](https://github.com/LiteLDev/AlleviatedBack
 - **Servers:** `alleviatedbackpacks-server-windows-x64.zip`, extracted into the server's `plugins`
   folder. The server hands its resource pack to joining players.
 
-Requires Minecraft **1.26.51** with LeviLamina **26.51.7** (Windows x64). Players without the
-client mod can still join and carry backpacks, but get a download link instead of the backpack
-screen.
+Requires Minecraft Bedrock Edition **1.26.51** with LeviLamina **26.51.x** (Windows x64). Players
+without the client mod can still join a server and carry backpacks, but cannot open them:
+they get a download link instead of the backpack screen.
 
 ## How to use
 
@@ -120,4 +120,4 @@ Bedrock, not affiliated with Mojang Studios, Microsoft or the Sophisticated Back
 
 ## License
 
-[LGPL-3.0](COPYING.LESSER) © 2026 Zijian Zhang
+[LGPL-3.0-or-later](COPYING.LESSER) © LeviMC
